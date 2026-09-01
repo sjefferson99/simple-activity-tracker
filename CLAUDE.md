@@ -6,8 +6,17 @@ Cross-platform (Android-first, iOS later) running app in **Flutter**: live GPS m
 
 ## Current status
 
-- **Phase 0 (MVP: live GPS speed on Android) — NOT STARTED.** Repo contains only planning docs; Flutter is not yet installed on this machine.
+- **Phase 0 (MVP: live GPS speed on Android) — DONE (2026-09-02).** Verified on the Pixel8_API36 emulator (stationary fix correctly showed 0.0 km/h) and on a physical Samsung S10 over USB (real walking speed tracked correctly). `flutter analyze` and `flutter test` clean (13 tests), Snyk code scan clean.
+- **Phase 1 (metrics, splits, controls, GPX logging) — NOT STARTED.**
 - Update this section as work progresses (phase started/done, deviations from PLAN.md).
+
+### Toolchain notes learned during Phase 0 (beyond PLAN.md §1)
+
+- Flutter has no `winget` package — installed via `git clone -b stable` to `C:\git\flutter` (added to user PATH), not `C:\flutter`.
+- `sdkmanager` requires `JAVA_HOME` pointed at the Android Studio JBR (`C:\Program Files\Android\Android Studio\jbr`) or it fails with "Java version 17 or higher is required" (it was picking up the stale Java 8 on PATH).
+- The Gradle-driven NDK auto-download can silently produce a **corrupt/incomplete install** (missing `source.properties` and several top-level dirs) if interrupted — if a build fails with "did not install NDK ... into ...\Sdk", delete `%LOCALAPPDATA%\Android\Sdk\ndk\<version>\` entirely and let it redownload rather than trying to repair it.
+- Switching `flutter run` target device (e.g. emulator x86_64 → phone arm64) can leave stale locked artifacts under `build\app\...\x86_64\` — if Gradle errors with `AccessDeniedException` or "Unable to delete directory" under `build\`, a previous `flutter run` process is usually still attached to the old device and holding files open. Find and stop it (check for orphaned `dart`/`dartvm`/`java` processes older than the current session) before `flutter clean`.
+- A physical phone can drop to adb "offline" over USB; `adb kill-server && adb start-server` alone doesn't always fix it — a cable reseat usually does.
 
 ## Quick facts (details in PLAN.md §1)
 
