@@ -34,7 +34,14 @@ class LiveRunController extends Notifier<LiveRunState> {
 
   @override
   LiveRunState build() {
-    ref.onDispose(_disposeRun);
+    // onDispose cannot await, so the final flush here is best-effort: the
+    // synchronous part (stopping the stream and timer) always completes,
+    // but the last few seconds of track may be lost if the provider is torn
+    // down mid-run. Stopping via the UI goes through stop(), which awaits
+    // properly — this path only covers app teardown.
+    ref.onDispose(() {
+      unawaited(_disposeRun());
+    });
     return const LiveRunIdle();
   }
 
@@ -42,9 +49,6 @@ class LiveRunController extends Notifier<LiveRunState> {
         LiveRunActive(:final phase) => phase,
         _ => null,
       };
-
-  bool get isTrackingOrPaused =>
-      _phase == RunPhase.tracking || _phase == RunPhase.paused;
 
   Future<void> start() async {
     final service = ref.read(locationServiceProvider);
@@ -67,7 +71,13 @@ class LiveRunController extends Notifier<LiveRunState> {
     _previousPoint = null;
     _metricsEngine = MetricsEngine();
     _gpxLog = RunGpxLog(await newRunGpxFile(DateTime.now()));
-    _flushTimer = Timer.periodic(_gpxFlushInterval, (_) => _gpxLog?.flush());
+    // A periodic flush that fails is not fatal: every flush rewrites the
+    // whole track, so the next one recovers whatever this one missed.
+    // Swallow it here rather than letting it surface as an unhandled error.
+    _flushTimer = Timer.periodic(
+      _gpxFlushInterval,
+      (_) => _gpxLog?.flush().catchError((_) {}),
+    );
 
     await WakelockPlus.enable();
 
@@ -101,13 +111,21 @@ class LiveRunController extends Notifier<LiveRunState> {
   }
 
   Future<void> _disposeRun() async {
-    await _subscription?.cancel();
-    _subscription = null;
+    // Cancel the timer first and synchronously, so no new flush can start
+    // after teardown begins (matters on the un-awaited onDispose path).
     _flushTimer?.cancel();
     _flushTimer = null;
-    await _gpxLog?.finalizeAndFlush();
-    _gpxLog = null;
-    await WakelockPlus.disable();
+    await _subscription?.cancel();
+    _subscription = null;
+
+    // The wakelock must be released even if the final write fails, or the
+    // screen stays forced on for the rest of the app's life.
+    try {
+      await _gpxLog?.finalizeAndFlush();
+    } finally {
+      _gpxLog = null;
+      await WakelockPlus.disable();
+    }
   }
 
   void _onSample(LocationSample sample) {
@@ -117,6 +135,9 @@ class LiveRunController extends Notifier<LiveRunState> {
     final speed = sample.speedMps ?? _fallbackSpeed(point);
     _previousPoint = point;
 
+    // The engine discards low-accuracy fixes so they can't inflate distance,
+    // but the GPX deliberately keeps every fix — the file is the raw track,
+    // and filtering is a display/metrics concern a viewer can redo itself.
     _metricsEngine?.addPoint(point);
     _gpxLog?.addPoint(point);
 

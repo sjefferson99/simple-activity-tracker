@@ -73,12 +73,15 @@ class MetricsEngine {
       final crossingDuration = segmentDuration * fraction;
       final crossingElapsed = elapsedBefore + crossingDuration;
 
+      final splitDuration = crossingElapsed - _splitStartElapsed;
       _completedSplits.add(Split(
         index: _completedSplits.length + 1,
-        duration: crossingElapsed - _splitStartElapsed,
-        avgSpeedMps: _splitDistanceMeters /
-            (crossingElapsed - _splitStartElapsed).inMilliseconds *
-            1000,
+        duration: splitDuration,
+        // A split covering measurable distance in no measurable time would
+        // divide by zero; report 0 rather than an infinite pace.
+        avgSpeedMps: splitDuration.inMilliseconds > 0
+            ? _splitDistanceMeters / splitDuration.inMilliseconds * 1000
+            : 0,
       ));
 
       _totalDistanceMeters += distanceIntoSplit;
@@ -94,9 +97,17 @@ class MetricsEngine {
     _movingElapsed = elapsedBefore + segmentDuration;
   }
 
+  /// Trims the smoothing window to [_currentSpeedWindow], but always keeps
+  /// the last two fixes. When fixes arrive slower than the window (weak GPS,
+  /// doze), a strict cutoff would leave a single point and make current
+  /// speed permanently null; falling back to the last pair still gives a
+  /// usable — if less smoothed — reading.
   void _pruneRecentPoints(DateTime latestTimestamp) {
     final cutoff = latestTimestamp.subtract(_currentSpeedWindow);
-    _recentPoints.removeWhere((p) => p.timestamp.isBefore(cutoff));
+    while (_recentPoints.length > 2 &&
+        _recentPoints.first.timestamp.isBefore(cutoff)) {
+      _recentPoints.removeAt(0);
+    }
   }
 
   double? _currentSpeedMps() {

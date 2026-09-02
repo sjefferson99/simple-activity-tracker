@@ -147,6 +147,37 @@ void main() {
     });
   });
 
+  group('degenerate inputs', () {
+    test('a split covering distance in ~no time reports a finite speed', () {
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      engine.addPoint(_pointAtMeters(0, start));
+      // 2500m in 2ms — physically nonsense, but a GPS timestamp glitch can
+      // produce it and it must not yield Infinity.
+      engine.addPoint(
+        _pointAtMeters(2500, start.add(const Duration(milliseconds: 2))),
+      );
+
+      for (final split in engine.metrics.completedSplits) {
+        expect(split.avgSpeedMps.isFinite, isTrue);
+      }
+    });
+  });
+
+  group('current speed window', () {
+    test('still reports a speed when fixes arrive slower than the window', () {
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      // 4s apart, wider than the 3s smoothing window.
+      engine.addPoint(_pointAtMeters(0, start));
+      engine.addPoint(_pointAtMeters(20, start.add(const Duration(seconds: 4))));
+      engine.addPoint(_pointAtMeters(40, start.add(const Duration(seconds: 8))));
+
+      expect(engine.metrics.currentSpeedMps, isNotNull);
+      expect(engine.metrics.currentSpeedMps, closeTo(5, 0.5));
+    });
+  });
+
   group('resetSegmentAnchor', () {
     test('prevents a pause gap from being counted as movement', () {
       final engine = MetricsEngine();

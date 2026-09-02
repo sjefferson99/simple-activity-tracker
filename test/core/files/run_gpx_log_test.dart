@@ -71,6 +71,26 @@ void main() {
     expect(gpx.trks.first.trksegs, hasLength(1));
   });
 
+  test('concurrent flushes do not clobber each other and keep every point', () async {
+    final file = File('${tempDir.path}/run.gpx');
+    final log = RunGpxLog(file);
+    final start = DateTime(2026, 1, 1, 9, 0, 0);
+
+    log.addPoint(_point(51.5, -0.1, start));
+    // Kick off a periodic-style flush and immediately finalize, the exact
+    // overlap that previously raced on the shared .tmp path.
+    final periodic = log.flush();
+    log.addPoint(_point(51.51, -0.11, start.add(const Duration(seconds: 10))));
+    final finalFlush = log.finalizeAndFlush();
+
+    await Future.wait([periodic, finalFlush]);
+
+    final gpx = GpxReader().fromString(await file.readAsString());
+    final points =
+        gpx.trks.expand((t) => t.trksegs).expand((s) => s.trkpts).toList();
+    expect(points, hasLength(2));
+  });
+
   test('flush is crash-safe: an interrupted temp write leaves the prior file intact', () async {
     final file = File('${tempDir.path}/run.gpx');
     final log = RunGpxLog(file);

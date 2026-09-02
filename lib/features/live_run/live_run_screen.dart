@@ -189,9 +189,22 @@ class _Controls extends StatelessWidget {
           style: FilledButton.styleFrom(minimumSize: const Size(160, 56)),
           child: const Text('New run'),
         ),
-      LiveRunAcquiring() => const FilledButton(
-          onPressed: null,
-          child: Text('Acquiring…'),
+      // GPS may never get a fix (indoors, hardware issue). Offer a way out —
+      // the wakelock and flush timer are already running by this point.
+      LiveRunAcquiring() => Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const FilledButton(
+              onPressed: null,
+              child: Text('Acquiring…'),
+            ),
+            const SizedBox(width: 16),
+            OutlinedButton(
+              onPressed: controller.stop,
+              style: OutlinedButton.styleFrom(minimumSize: const Size(120, 56)),
+              child: const Text('Cancel'),
+            ),
+          ],
         ),
       LiveRunActive(:final phase) => Row(
           mainAxisAlignment: MainAxisAlignment.center,

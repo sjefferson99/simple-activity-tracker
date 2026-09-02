@@ -16,6 +16,10 @@ class RunGpxLog {
   final Trk _track = Trk();
   Trkseg? _currentSegment;
 
+  /// Chains flushes so a periodic flush and the final one can never write
+  /// the same temp file concurrently and clobber each other's rename.
+  Future<void> _pendingFlush = Future.value();
+
   RunGpxLog(this._targetFile) {
     _startNewSegment();
   }
@@ -40,8 +44,17 @@ class RunGpxLog {
   }
 
   /// Serializes the current track to a temp file and atomically renames it
-  /// over the target file.
-  Future<void> flush() async {
+  /// over the target file. Concurrent calls are queued rather than run in
+  /// parallel, so they cannot race on the shared temp path.
+  Future<void> flush() {
+    final result = _pendingFlush.then((_) => _writeSnapshot());
+    // The chain itself must stay un-failed, otherwise one bad write would
+    // make every later flush inherit that error. Callers still see it.
+    _pendingFlush = result.catchError((_) {});
+    return result;
+  }
+
+  Future<void> _writeSnapshot() async {
     final gpx = Gpx()
       ..creator = 'Simple Runner'
       ..trks = [_track];
