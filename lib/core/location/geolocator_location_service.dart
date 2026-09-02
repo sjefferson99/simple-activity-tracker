@@ -41,9 +41,17 @@ class GeolocatorLocationService implements LocationService {
 
   @override
   Stream<LocationSample> get stream => Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
+        locationSettings: AndroidSettings(
           accuracy: LocationAccuracy.bestForNavigation,
           distanceFilter: 0,
+          intervalDuration: const Duration(seconds: 1),
+          // enableWakeLock defaults to false; wakelock_plus already keeps
+          // the screen on during tracking (see LiveRunController), and
+          // enabling it here would need the WAKE_LOCK manifest permission.
+          foregroundNotificationConfig: const ForegroundNotificationConfig(
+            notificationTitle: 'Simple Runner',
+            notificationText: 'Tracking your run',
+          ),
         ),
       ).map(_toSample);
 

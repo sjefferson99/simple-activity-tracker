@@ -7,7 +7,8 @@ Cross-platform (Android-first, iOS later) running app in **Flutter**: live GPS m
 ## Current status
 
 - **Phase 0 (MVP: live GPS speed on Android) — DONE (2026-09-02).** Verified on the Pixel8_API36 emulator (stationary fix correctly showed 0.0 km/h) and on a physical Samsung S10 over USB (real walking speed tracked correctly). `flutter analyze` and `flutter test` clean (13 tests), Snyk code scan clean.
-- **Phase 1 (metrics, splits, controls, GPX logging) — NOT STARTED.**
+- **Phase 1 (metrics, splits, controls, GPX logging) — DONE (2026-09-02).** MetricsEngine (elapsed/distance/speed/splits with interpolated crossing times), TrackingController state machine (idle/tracking/paused/finished), MetricSpec-driven tile grid, km/h ⇄ min/km toggle, RunGpxLog (crash-safe atomic-rename flush, pause → new `<trkseg>`). Verified on a physical Samsung S10: pause/resume correctly produced 2 track segments in the written GPX file, 34 real GPS points logged. `flutter analyze` and `flutter test` clean (26 tests), Snyk clean.
+- **Phase 2 and beyond — NOT STARTED** (see PLAN.md §6).
 - Update this section as work progresses (phase started/done, deviations from PLAN.md).
 
 ### Toolchain notes learned during Phase 0 (beyond PLAN.md §1)
@@ -17,6 +18,11 @@ Cross-platform (Android-first, iOS later) running app in **Flutter**: live GPS m
 - The Gradle-driven NDK auto-download can silently produce a **corrupt/incomplete install** (missing `source.properties` and several top-level dirs) if interrupted — if a build fails with "did not install NDK ... into ...\Sdk", delete `%LOCALAPPDATA%\Android\Sdk\ndk\<version>\` entirely and let it redownload rather than trying to repair it.
 - Switching `flutter run` target device (e.g. emulator x86_64 → phone arm64) can leave stale locked artifacts under `build\app\...\x86_64\` — if Gradle errors with `AccessDeniedException` or "Unable to delete directory" under `build\`, a previous `flutter run` process is usually still attached to the old device and holding files open. Find and stop it (check for orphaned `dart`/`dartvm`/`java` processes older than the current session) before `flutter clean`.
 - A physical phone can drop to adb "offline" over USB; `adb kill-server && adb start-server` alone doesn't always fix it — a cable reseat usually does.
+
+### Toolchain notes learned during Phase 1
+
+- **`geolocator`'s `ForegroundNotificationConfig.enableWakeLock: true` requires the `android.permission.WAKE_LOCK` manifest permission.** Without it, the whole geolocator event channel throws a `SecurityException` and silently delivers zero location samples (no crash, no error surfaced to the app — just "stuck acquiring GPS forever"). We don't need it: `wakelock_plus` already keeps the screen on during tracking, so `enableWakeLock` is left at its default `false` rather than adding the permission for a redundant lock. If GPS acquisition mysteriously stops working after touching `AndroidSettings`/`ForegroundNotificationConfig`, check `adb logcat` for `EventChannel...geolocator_updates_android` — that's where this exception surfaces, not anywhere Dart-side.
+- **This machine has a recurring `AccessDeniedException`/"Unable to delete directory" issue on `--release` Android builds specifically in `extractReleaseNativeSymbolTables`** (and occasionally other `build\app\intermediates\...\<abi>\` paths) — something (likely AV) transiently locks a freshly-written per-ABI directory. Each retry gets further (clears one ABI's lock, hits the next), suggesting it's not a real Gradle/project bug. **Workaround: use `flutter run -d <device>` (debug mode, no `--release`) for day-to-day device testing** — debug builds skip R8/symbol-table extraction entirely and haven't hit this. Save `--release` builds for verifying release-config specifics only, and expect to need a manual `Remove-Item -Recurse -Force` retry loop on the specific locked path if you do use it.
 
 ## Quick facts (details in PLAN.md §1)
 

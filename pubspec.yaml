@@ -36,6 +36,9 @@ dependencies:
   cupertino_icons: ^1.0.8
   geolocator: ^14.0.3
   flutter_riverpod: ^3.4.2
+  path_provider: ^2.1.6
+  gpx: ^2.5.0
+  wakelock_plus: ^1.8.0
 
 dev_dependencies:
   flutter_test:

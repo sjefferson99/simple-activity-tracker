@@ -7,11 +7,13 @@ class TrackPoint {
   final double longitude;
   final double? elevationMeters;
   final DateTime timestamp;
+  final double accuracyMeters;
 
   const TrackPoint({
     required this.latitude,
     required this.longitude,
     required this.timestamp,
+    required this.accuracyMeters,
     this.elevationMeters,
   });
 
@@ -20,5 +22,6 @@ class TrackPoint {
         longitude: sample.longitude,
         elevationMeters: sample.elevationMeters,
         timestamp: sample.timestamp,
+        accuracyMeters: sample.accuracyMeters,
       );
 }
