@@ -51,6 +51,7 @@ jobs:
       - name: Smoke test /healthz
         run: |
           mkdir -p /tmp/sr-smoke-data
+          chmod 777 /tmp/sr-smoke-data
           docker run -d --name smoke -p 8000:8000 \
             -e SR_SECRET_KEY=ci-smoke-test-key \
             -v /tmp/sr-smoke-data:/data \
