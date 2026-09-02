@@ -93,7 +93,15 @@ Check you're in the right place by typing:
 ls
 ```
 
-You should see files like `pubspec.yaml`, `lib`, and `CLAUDE.md` listed.
+You should see folders like `mobile`, `docs`, and a file called `CLAUDE.md` listed.
+
+The app itself lives in the `mobile` folder, so move into it:
+
+```
+cd mobile
+```
+
+Check again with `ls` — this time you should see `pubspec.yaml` and `lib`.
 
 ### Step 6: Fetch the app's dependencies
 
@@ -223,6 +231,12 @@ find, like your Desktop.
   unzipped folder into the window and press Return.
 - **On Windows:** open the unzipped folder in File Explorer, click the
   address bar, type `powershell`, and press Return.
+
+The app itself lives in a `mobile` subfolder, so move into it:
+
+```
+cd mobile
+```
 
 Check you're in the right place:
 
