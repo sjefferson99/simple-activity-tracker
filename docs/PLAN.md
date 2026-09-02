@@ -2,7 +2,7 @@
 
 A cross-platform (Android first, iOS later) running app using the phone's GPS to track runs and display live metrics. Modular architecture so the MVP (current speed display) ships quickly while scaling to splits, GPX logging, customizable display, history, etc.
 
-This document is the implementation handoff. Status of each phase is tracked in [CLAUDE.md](CLAUDE.md).
+This document is the implementation handoff. Status of each phase is tracked in [CLAUDE.md](../CLAUDE.md).
 
 ---
 

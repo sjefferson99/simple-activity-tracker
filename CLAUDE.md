@@ -2,7 +2,12 @@
 
 Cross-platform (Android-first, iOS later) running app in **Flutter**: live GPS metrics (speed, pace, splits), GPX track logging, eventually a customizable live display.
 
-**Read [PLAN.md](PLAN.md) before doing any work** — it holds the phased plan, the verified machine environment, Windows-specific setup gotchas, and per-phase acceptance criteria.
+**Read [docs/PLAN.md](docs/PLAN.md) before doing any work** — it holds the phased plan, the verified machine environment, Windows-specific setup gotchas, and per-phase acceptance criteria.
+
+For a non-technical walkthrough of the architecture and how the live metrics are calculated (polling rate, outlier filtering, split interpolation), see [docs/how-simple-runner-works.pdf](docs/how-simple-runner-works.pdf) — source at [docs/how-simple-runner-works.html](docs/how-simple-runner-works.html). Regenerate the PDF after editing the HTML with:
+```
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --disable-gpu --no-pdf-header-footer --print-to-pdf-no-header --print-to-pdf="docs/how-simple-runner-works.pdf" "file://$(pwd)/docs/how-simple-runner-works.html"
+```
 
 ## Current status
 
@@ -17,10 +22,10 @@ Cross-platform (Android-first, iOS later) running app in **Flutter**: live GPS m
   - **Rejecting a point must not pin the anchor.** The first fix kept `_lastAccepted` on the pre-jump point, so every subsequent *good* fix near the teleport's landing spot also looked impossible and was rejected too — a real run lost ~77s of clean data before the implied speed against the stale anchor decayed under the threshold. Two consecutive rejects that agree with each other now re-anchor. Re-anchoring credits **no** distance or elapsed time (the path between is unknowable, so it is a discontinuity like pause/resume), clears `_recentPoints` (or the speed tile reads the teleport's implied speed for seconds afterwards), and requires ≥2m of motion between the pair — a GPS stuck repeating one wrong position implies 0 m/s, which "agrees" trivially and would otherwise hand the anchor to the bad location.
   - **Speed alone is not a sufficient test.** A long enough gap makes any teleport look slow (65km in an hour is ~18 m/s), so there is also an absolute 20km per-segment cap and a 30s TTL on the re-anchor candidate. The cap has to stay generous: a legitimately sparse stretch of fixes (tunnel, backgrounded app) can cover kilometres between fixes, and an earlier 1km cap broke the multi-split test.
   - **Every GPS fix was logged twice.** `LiveRunController.start()` never tore down the previous run before allocating a new one, and `LocationService.stream` opens a *fresh* platform stream per access rather than sharing one — so a re-entrant `start()` (double-tapped Start, or `startNewRun()` without a `stop()`) stacked a second listener and double-counted every fix into both the metrics engine and the GPX file (442 trackpoints for 221 fixes). It also leaked the flush timer and dropped the previous `RunGpxLog` unfinalized. `start()` now calls `_disposeRun()` first.
-- **Phase 2 and beyond — NOT STARTED** (see PLAN.md §6).
-- Update this section as work progresses (phase started/done, deviations from PLAN.md).
+- **Phase 2 and beyond — NOT STARTED** (see docs/PLAN.md §6).
+- Update this section as work progresses (phase started/done, deviations from docs/PLAN.md).
 
-### Toolchain notes learned during Phase 0 (beyond PLAN.md §1)
+### Toolchain notes learned during Phase 0 (beyond docs/PLAN.md §1)
 
 - Flutter has no `winget` package — installed via `git clone -b stable` to `C:\git\flutter` (added to user PATH), not `C:\flutter`.
 - `sdkmanager` requires `JAVA_HOME` pointed at the Android Studio JBR (`C:\Program Files\Android\Android Studio\jbr`) or it fails with "Java version 17 or higher is required" (it was picking up the stale Java 8 on PATH).
@@ -35,7 +40,7 @@ Cross-platform (Android-first, iOS later) running app in **Flutter**: live GPS m
 - **`flutter install` does not rebuild.** It deploys whatever APK is already sitting in `build\app\outputs\`, so after a code change it will happily install the *previous* binary and the change appears not to have worked. Run `flutter build apk --debug` first, or just use `flutter run`. (This bit us on the debug-banner change — the fix looked broken until a screenshot showed the old APK had been installed.)
 - **Verify device-visible changes with a screenshot** (`adb exec-out screencap -p > file.png`, then read the image) rather than assuming a successful install means the change is live.
 
-## Quick facts (details in PLAN.md §1)
+## Quick facts (details in docs/PLAN.md §1)
 
 - Windows 11, PowerShell. Android SDK at `%LOCALAPPDATA%\Android\Sdk`; Android Studio at `C:\Program Files\Android\Android Studio` (use its `jbr` as the Gradle JDK — the Java 8 on PATH is too old).
 - Set up during Phase 0 and still in place: cmdline-tools installed, SDK licences accepted, Windows Developer Mode enabled (needed for Flutter plugin symlinks), and one AVD named `Pixel8_API36`.
@@ -51,7 +56,7 @@ flutter test             # must pass before finishing any task
 flutter run              # runs on the connected device/emulator
 ```
 
-## Architecture rules (from PLAN.md §3 — follow strictly)
+## Architecture rules (from docs/PLAN.md §3 — follow strictly)
 
 - Feature-first layout: `lib/app`, `lib/core/{location,units,files}`, `lib/domain/{models,tracking}`, `lib/features/live_run`.
 - `core/units` and `domain/` are **pure Dart** — no `flutter` imports; unit-test everything there.

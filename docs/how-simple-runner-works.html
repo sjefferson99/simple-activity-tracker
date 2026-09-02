@@ -1,0 +1,854 @@
+<title>Simple Runner, Explained</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --paper: #faf9f5;
+    --paper-raised: #ffffff;
+    --ink: #201c17;
+    --ink-soft: #5b5346;
+    --ink-faint: #948c7c;
+    --hairline: #e4ddcf;
+    --accent: #b5502e;
+    --accent-soft: #f0ddd2;
+    --accent-ink: #7a3419;
+    --route: #3d6b63;
+    --route-soft: #dfe9e6;
+    --warn: #9c6b12;
+    --warn-soft: #f3e6c8;
+    --code-bg: #f1ede2;
+    --shadow: 220 20% 15%;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #17140f;
+      --paper-raised: #1f1b14;
+      --ink: #f1ece0;
+      --ink-soft: #c3b9a5;
+      --ink-faint: #8a8171;
+      --hairline: #3a3327;
+      --accent: #e08052;
+      --accent-soft: #3a2419;
+      --accent-ink: #f0b493;
+      --route: #7cb3a6;
+      --route-soft: #1e2d29;
+      --warn: #d4a94a;
+      --warn-soft: #332b13;
+      --code-bg: #221e15;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper: #17140f;
+    --paper-raised: #1f1b14;
+    --ink: #f1ece0;
+    --ink-soft: #c3b9a5;
+    --ink-faint: #8a8171;
+    --hairline: #3a3327;
+    --accent: #e08052;
+    --accent-soft: #3a2419;
+    --accent-ink: #f0b493;
+    --route: #7cb3a6;
+    --route-soft: #1e2d29;
+    --warn: #d4a94a;
+    --warn-soft: #332b13;
+    --code-bg: #221e15;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: var(--accent-soft); color: var(--accent-ink); }
+
+  h1, h2, h3 {
+    font-family: 'Source Serif 4', Georgia, serif;
+    font-weight: 600;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+
+  code, .mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  a { color: var(--accent); }
+
+  .wrap {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 0 24px 96px;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    padding: 56px 0 40px;
+    border-bottom: 1px solid var(--hairline);
+    margin-bottom: 48px;
+  }
+
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 18px;
+  }
+
+  .eyebrow .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  h1.title {
+    font-size: clamp(32px, 5vw, 44px);
+    line-height: 1.12;
+    margin: 0 0 14px;
+    letter-spacing: -0.01em;
+  }
+
+  .subtitle {
+    font-size: 18px;
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0;
+  }
+
+  .meta-row {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-top: 28px;
+    font-size: 13px;
+    color: var(--ink-faint);
+  }
+
+  .meta-row span b { color: var(--ink-soft); font-weight: 600; }
+
+  /* ---------- gps trace divider ---------- */
+
+  .trace {
+    height: 34px;
+    margin: 56px 0;
+    position: relative;
+  }
+  .trace svg { width: 100%; height: 100%; display: block; }
+  .trace-line {
+    fill: none;
+    stroke: var(--hairline);
+    stroke-width: 1.5;
+    stroke-dasharray: 1 7;
+    stroke-linecap: round;
+  }
+  .trace-dot { fill: var(--route); }
+  .trace-dot.bad { fill: var(--warn); }
+
+  /* ---------- prose sections ---------- */
+
+  section { margin-bottom: 8px; }
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+
+  .section-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--ink-faint);
+    letter-spacing: 0.02em;
+  }
+
+  h2 {
+    font-size: 26px;
+    margin: 0;
+  }
+
+  .lede {
+    font-size: 17px;
+    max-width: 68ch;
+    color: var(--ink-soft);
+    margin-bottom: 28px;
+  }
+
+  .prose { max-width: 68ch; }
+  .prose p { margin: 0 0 16px; }
+  .prose p:last-child { margin-bottom: 0; }
+
+  .prose strong { color: var(--ink); font-weight: 600; }
+
+  /* ---------- exec summary callout ---------- */
+
+  .summary-box {
+    background: var(--paper-raised);
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 24px 28px;
+    margin-bottom: 12px;
+  }
+  .summary-box p { max-width: 66ch; }
+  .summary-box p:last-child { margin-bottom: 0; }
+
+  /* ---------- stack grid ---------- */
+
+  .stack-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 1px;
+    background: var(--hairline);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 28px 0 32px;
+  }
+
+  .stack-cell {
+    background: var(--paper-raised);
+    padding: 18px 20px;
+  }
+
+  .stack-cell .role {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 8px;
+  }
+
+  .stack-cell .what {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    color: var(--accent-ink);
+    margin-bottom: 6px;
+  }
+
+  .stack-cell .why {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    line-height: 1.5;
+  }
+
+  /* ---------- architecture flow ---------- */
+
+  .flow {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin: 32px 0;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .flow-step {
+    flex: 1 1 0;
+    min-width: 0;
+    background: var(--paper-raised);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 16px 16px;
+    position: relative;
+  }
+
+  .flow-step + .flow-step { margin-left: 28px; }
+
+  .flow-step::before {
+    content: "→";
+    position: absolute;
+    left: -24px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--ink-faint);
+    font-size: 16px;
+  }
+
+  .flow-step .tag {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--route);
+    margin-bottom: 6px;
+  }
+
+  .flow-step .name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink);
+    margin-bottom: 6px;
+    line-height: 1.35;
+    overflow-wrap: break-word;
+  }
+
+  .flow-step .desc {
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    line-height: 1.45;
+  }
+
+  /* ---------- layer diagram ---------- */
+
+  .layers {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 28px 0 32px;
+  }
+
+  .layer {
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: var(--paper-raised);
+  }
+
+  .layer .lbl {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+    padding: 3px 9px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
+  .layer .desc {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+  }
+
+  .layer .desc code { font-size: 12.5px; color: var(--ink); }
+
+  /* ---------- metric cards ---------- */
+
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+    margin: 28px 0 8px;
+  }
+
+  .metric-card {
+    background: var(--paper-raised);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 20px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .metric-card .mhead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .metric-card .mname {
+    font-family: 'Source Serif 4', serif;
+    font-weight: 600;
+    font-size: 17px;
+  }
+
+  .metric-card .munit {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+    background: var(--code-bg);
+    padding: 2px 7px;
+    border-radius: 10px;
+  }
+
+  .metric-card .mformula {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--route);
+    background: var(--route-soft);
+    border-radius: 5px;
+    padding: 8px 10px;
+    line-height: 1.5;
+  }
+
+  .metric-card .mnote {
+    font-size: 13px;
+    color: var(--ink-soft);
+    line-height: 1.55;
+  }
+
+  .metric-card .mnote code { font-size: 12px; }
+
+  /* ---------- polling spec strip ---------- */
+
+  .spec-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px;
+    background: var(--hairline);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 24px 0;
+  }
+
+  .spec-cell {
+    background: var(--paper-raised);
+    padding: 16px 18px;
+  }
+
+  .spec-cell .k {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 6px;
+  }
+
+  .spec-cell .v {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 20px;
+    color: var(--ink);
+  }
+
+  .spec-cell .v small {
+    font-size: 12px;
+    color: var(--ink-faint);
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* ---------- guard rail table ---------- */
+
+  .guard-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 24px 0 8px;
+    font-size: 14px;
+  }
+
+  .guard-table th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding: 0 14px 10px 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .guard-table td {
+    padding: 14px 14px 14px 0;
+    border-bottom: 1px solid var(--hairline);
+    vertical-align: top;
+    color: var(--ink-soft);
+    line-height: 1.5;
+  }
+
+  .guard-table tr:last-child td { border-bottom: none; }
+
+  .guard-table td.gname {
+    color: var(--ink);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .guard-table td .gval {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+    padding: 1px 7px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-top: 4px;
+  }
+
+  .table-scroll { overflow-x: auto; }
+
+  /* ---------- expectation callout ---------- */
+
+  .expect-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+    margin: 28px 0 8px;
+  }
+
+  .expect-card {
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 18px 20px;
+    background: var(--paper-raised);
+  }
+
+  .expect-card .econd {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--route);
+    margin-bottom: 8px;
+  }
+
+  .expect-card.warn .econd { color: var(--warn); }
+
+  .expect-card .eresult {
+    font-size: 14.5px;
+    color: var(--ink-soft);
+    line-height: 1.55;
+  }
+
+  .expect-card .eresult b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- footer ---------- */
+
+  .colophon {
+    margin-top: 72px;
+    padding-top: 24px;
+    border-top: 1px solid var(--hairline);
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  @media (max-width: 640px) {
+    .wrap { padding: 0 18px 72px; }
+    .masthead { padding: 40px 0 32px; }
+    .flow { flex-direction: column; }
+    .flow-step + .flow-step { margin-left: 0; margin-top: 28px; }
+    .flow-step::before { content: "↓"; left: 50%; top: -24px; transform: translateX(-50%); }
+  }
+</style>
+
+<div class="wrap">
+
+  <div class="masthead">
+    <div class="eyebrow"><span class="dot"></span>Technical brief · Simple Runner</div>
+    <h1 class="title">How the app turns satellite noise into a pace you can trust</h1>
+    <p class="subtitle">A plain-language tour of the app's construction and the arithmetic behind every number on screen — written so the "why" behind a jumpy split or a slow-to-appear speed is never a mystery.</p>
+    <div class="meta-row">
+      <span><b>Platform</b> Android &amp; iOS, one codebase</span>
+      <span><b>Phase</b> 1 of 3 — live tracking &amp; GPX logging</span>
+      <span><b>Reading time</b> ~9 min</span>
+    </div>
+  </div>
+
+  <!-- ============ EXEC SUMMARY ============ -->
+  <section>
+    <div class="section-head"><span class="section-num">01</span><h2>Executive summary</h2></div>
+    <div class="summary-box prose">
+      <p>Simple Runner is a <strong>Flutter</strong> app — one Dart codebase that compiles to a native Android and a native iOS app, rather than two separate projects kept in sync by hand. It reads your phone's GPS roughly once a second, turns that stream of coordinates into speed, distance, pace and kilometre splits, and writes the raw route to a GPX file you could open in any mapping tool.</p>
+      <p>The distinctive engineering problem here is not the arithmetic — distance and speed are two lines of trigonometry — it's that <strong>consumer GPS occasionally lies</strong>. A phone can report a location half a kilometre from where you actually are, for one sample, before correcting itself. Unfiltered, that single bad sample would spike your speed to over 1,000&nbsp;km/h and permanently inflate your total distance. Most of what follows is the app deciding, sample by sample, whether to believe what the GPS just told it.</p>
+    </div>
+  </section>
+
+  <div class="trace">
+    <svg viewBox="0 0 900 34" preserveAspectRatio="none">
+      <path class="trace-line" d="M0,17 L900,17"/>
+      <circle class="trace-dot" cx="40" cy="17" r="3"/>
+      <circle class="trace-dot" cx="140" cy="17" r="3"/>
+      <circle class="trace-dot" cx="240" cy="17" r="3"/>
+      <circle class="trace-dot bad" cx="340" cy="17" r="4"/>
+      <circle class="trace-dot" cx="440" cy="17" r="3"/>
+      <circle class="trace-dot" cx="540" cy="17" r="3"/>
+      <circle class="trace-dot" cx="640" cy="17" r="3"/>
+      <circle class="trace-dot" cx="740" cy="17" r="3"/>
+      <circle class="trace-dot" cx="840" cy="17" r="3"/>
+    </svg>
+  </div>
+
+  <!-- ============ TECHNOLOGY / STACK ============ -->
+  <section>
+    <div class="section-head"><span class="section-num">02</span><h2>Technology &amp; construction</h2></div>
+    <p class="lede">Four building blocks, each doing one job. None of them talk to the phone's GPS hardware directly except one — which is deliberate.</p>
+
+    <div class="stack-grid">
+      <div class="stack-cell">
+        <div class="role">Framework</div>
+        <div class="what">Flutter / Dart</div>
+        <div class="why">Google's UI toolkit. One source tree compiles to native ARM binaries for both Android and iOS — no shared web view, no separate Swift/Kotlin apps to maintain in parallel.</div>
+      </div>
+      <div class="stack-cell">
+        <div class="role">GPS access</div>
+        <div class="what">geolocator</div>
+        <div class="why">The one package allowed to talk to the OS location APIs directly. Tuned per-platform: <code>bestForNavigation</code> accuracy, background updates enabled on iOS via an Info.plist entry.</div>
+      </div>
+      <div class="stack-cell">
+        <div class="role">State management</div>
+        <div class="what">Riverpod</div>
+        <div class="why">A one-way data pipeline: the GPS stream feeds a controller, the controller emits an immutable state object, and every widget on screen just redraws from that. No component reaches backward to mutate another's data.</div>
+      </div>
+      <div class="stack-cell">
+        <div class="role">Track storage</div>
+        <div class="what">GPX 1.1 files</div>
+        <div class="why">The open standard used by Garmin, Strava, and most mapping software. Every run is written to disk as a standard <code>.gpx</code> track — portable, and readable outside this app.</div>
+      </div>
+    </div>
+
+    <h3 style="font-size:18px;margin:36px 0 16px;">The data path, GPS fix to screen</h3>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="tag">Hardware</div>
+        <div class="name">Phone GPS radio</div>
+        <div class="desc">Combines satellite, Wi-Fi and cell-tower signals into one position estimate, roughly once per second.</div>
+      </div>
+      <div class="flow-step">
+        <div class="tag">core/location</div>
+        <div class="name">GeolocatorLocationService</div>
+        <div class="desc">Wraps the OS location API. Nothing outside this file ever sees a raw platform type — the rest of the app only knows a simple lat/lon/speed/accuracy shape.</div>
+      </div>
+      <div class="flow-step">
+        <div class="tag">domain/tracking</div>
+        <div class="name">MetricsEngine</div>
+        <div class="desc">Pure calculation, no UI awareness. Accepts or rejects each fix, accumulates distance and time, detects kilometre crossings.</div>
+      </div>
+      <div class="flow-step">
+        <div class="tag">features/live_run</div>
+        <div class="name">LiveRunController</div>
+        <div class="desc">Riverpod controller. Also drives the GPX writer and the screen-stays-on lock in parallel with the metrics engine.</div>
+      </div>
+      <div class="flow-step">
+        <div class="tag">UI</div>
+        <div class="name">Metric tiles</div>
+        <div class="desc">Re-render automatically whenever the controller's state changes. No polling, no manual refresh calls.</div>
+      </div>
+    </div>
+
+    <h3 style="font-size:18px;margin:36px 0 16px;">Why the layers are separated</h3>
+    <div class="layers">
+      <div class="layer">
+        <span class="lbl">core/location</span>
+        <span class="desc">The <em>only</em> place that imports the GPS plugin. Swapping GPS providers, or feeding it recorded test routes, touches one file.</span>
+      </div>
+      <div class="layer">
+        <span class="lbl">domain/*</span>
+        <span class="desc">Plain Dart — no Flutter, no UI import allowed. This is what makes the maths in §3 unit-testable in isolation, run in milliseconds, with no phone or simulator needed.</span>
+      </div>
+      <div class="layer">
+        <span class="lbl">features/live_run</span>
+        <span class="desc">The screen and its controller. Reads from <code>domain</code>, never the reverse — the calculation layer has no idea a screen exists.</span>
+      </div>
+    </div>
+
+    <div class="prose" style="margin-top:20px;">
+      <p>This isn't architectural tidiness for its own sake — it's what let the outlier-rejection logic in §3 be tested against thousands of synthetic GPS traces with zero live GPS involved, and what let this session catch and fix three separate bugs before they were ever tested against your own runs.</p>
+    </div>
+  </section>
+
+  <div class="trace">
+    <svg viewBox="0 0 900 34" preserveAspectRatio="none">
+      <path class="trace-line" d="M0,17 L900,17"/>
+      <circle class="trace-dot" cx="60" cy="17" r="3"/>
+      <circle class="trace-dot" cx="160" cy="17" r="3"/>
+      <circle class="trace-dot" cx="260" cy="17" r="3"/>
+      <circle class="trace-dot" cx="360" cy="17" r="3"/>
+      <circle class="trace-dot" cx="460" cy="17" r="3"/>
+      <circle class="trace-dot" cx="560" cy="17" r="3"/>
+      <circle class="trace-dot" cx="660" cy="17" r="3"/>
+      <circle class="trace-dot" cx="760" cy="17" r="3"/>
+      <circle class="trace-dot" cx="860" cy="17" r="3"/>
+    </svg>
+  </div>
+
+  <!-- ============ METRICS DEEP DIVE ============ -->
+  <section>
+    <div class="section-head"><span class="section-num">03</span><h2>How each metric is actually calculated</h2></div>
+    <p class="lede">The phone hands the app a raw stream of <code>(latitude, longitude, timestamp, accuracy)</code> readings. Everything you see on the tracking screen is derived from that stream — nothing is estimated from your step count or phone motion sensors.</p>
+
+    <h3 style="font-size:18px;margin:32px 0 4px;">How often a fix arrives</h3>
+    <div class="spec-strip">
+      <div class="spec-cell">
+        <div class="k">Requested interval</div>
+        <div class="v">1<small> s (Android)</small></div>
+      </div>
+      <div class="spec-cell">
+        <div class="k">Requested precision</div>
+        <div class="v">best<small>-for-navigation</small></div>
+      </div>
+      <div class="spec-cell">
+        <div class="k">Distance filter</div>
+        <div class="v">0<small> m — no fix skipped</small></div>
+      </div>
+      <div class="spec-cell">
+        <div class="k">Typical real interval</div>
+        <div class="v">~1–3<small> s, terrain-dependent</small></div>
+      </div>
+    </div>
+    <p class="prose" style="font-size:14.5px;color:var(--ink-soft);max-width:68ch;">
+      One second is a <em>request</em>, not a guarantee — the OS and the GPS chipset decide the real cadence, and it varies with sky visibility. Open sky and a good lock: close to 1&nbsp;fix/second. Under tree cover, between tall buildings, or on a cold start: gaps of several seconds are normal, and the app is built to tolerate them without the display freezing or jumping.
+    </p>
+
+    <h3 style="font-size:18px;margin:40px 0 16px;">The core geometry</h3>
+    <div class="prose">
+      <p>Every distance calculation starts with the <strong>haversine formula</strong> — the standard way to find the straight-line distance between two latitude/longitude points on a sphere. Given any two consecutive fixes, it returns the distance between them in metres; dividing that by the time between their timestamps gives the implied speed for that segment.</p>
+    </div>
+
+    <div class="metric-grid">
+      <div class="metric-card">
+        <div class="mhead"><span class="mname">Current speed</span><span class="munit">km/h · min/km</span></div>
+        <div class="mformula">distance(oldest, newest) ÷ time<br>— over the last <b>3&nbsp;seconds</b> of fixes</div>
+        <div class="mnote">A short rolling window, not an instant reading — smooths out single-fix jitter. If fixes arrive slower than every 3&nbsp;s (weak signal), it falls back to just the last two points rather than freezing.</div>
+      </div>
+      <div class="metric-card">
+        <div class="mhead"><span class="mname">Average speed</span><span class="munit">km/h · min/km</span></div>
+        <div class="mformula">total distance ÷ total moving time<br>— since Start, excluding pauses</div>
+        <div class="mnote">Cumulative across the whole run. A discarded bad fix (see §4) contributes nothing here — the average only reflects distance the engine actually accepted.</div>
+      </div>
+      <div class="metric-card">
+        <div class="mhead"><span class="mname">Distance</span><span class="munit">km, 2 d.p.</span></div>
+        <div class="mformula">Σ haversine(fix<sub>n</sub>, fix<sub>n+1</sub>)<br>— summed segment by segment</div>
+        <div class="mnote">Built incrementally, one fix at a time — the app never needs to replay the whole run's history to update this number.</div>
+      </div>
+      <div class="metric-card">
+        <div class="mhead"><span class="mname">Split pace</span><span class="munit">current km in progress</span></div>
+        <div class="mformula">distance into this km ÷ time<br>into this km, live</div>
+        <div class="mnote">Resets each time you cross a whole kilometre. The crossing moment itself is <em>interpolated</em> — see below — so it doesn't wait for the next GPS fix to land exactly on the line.</div>
+      </div>
+      <div class="metric-card">
+        <div class="mhead"><span class="mname">Last split</span><span class="munit">m:ss for that km</span></div>
+        <div class="mformula">time at which the previous<br>km boundary was crossed</div>
+        <div class="mnote">Because the crossing time is interpolated between two real fixes, this is accurate to a fraction of a second — not rounded to whichever fix happened to land nearest the line.</div>
+      </div>
+      <div class="metric-card">
+        <div class="mhead"><span class="mname">Elapsed time</span><span class="munit">h:mm:ss</span></div>
+        <div class="mformula">Σ time between accepted<br>consecutive fixes</div>
+        <div class="mnote"><strong>Not</strong> a wall clock. Pausing genuinely stops this counter — the gap while paused is never added, however long you stand still.</div>
+      </div>
+    </div>
+
+    <div class="prose" style="margin-top:8px;">
+      <p><strong>On that interpolation:</strong> say you're at 970&nbsp;m at one fix and 1,050&nbsp;m at the next, one second later. The 1&nbsp;km mark falls 75% of the way through that segment, so the app estimates you crossed it 750&nbsp;ms into that one-second gap — rather than crediting the whole split to whichever fix happened to land on either side of the line. This is also why a split time can differ slightly from what a simpler tracker would show for the identical GPS data.</p>
+    </div>
+  </section>
+
+  <div class="trace">
+    <svg viewBox="0 0 900 34" preserveAspectRatio="none">
+      <path class="trace-line" d="M0,17 L900,17"/>
+      <circle class="trace-dot" cx="50" cy="17" r="3"/>
+      <circle class="trace-dot" cx="150" cy="17" r="3"/>
+      <circle class="trace-dot bad" cx="250" cy="10" r="4"/>
+      <circle class="trace-dot bad" cx="290" cy="24" r="3.5"/>
+      <circle class="trace-dot" cx="380" cy="17" r="3"/>
+      <circle class="trace-dot" cx="480" cy="17" r="3"/>
+      <circle class="trace-dot" cx="580" cy="17" r="3"/>
+      <circle class="trace-dot" cx="680" cy="17" r="3"/>
+      <circle class="trace-dot" cx="780" cy="17" r="3"/>
+    </svg>
+  </div>
+
+  <!-- ============ PRECAUTIONS ============ -->
+  <section>
+    <div class="section-head"><span class="section-num">04</span><h2>Precautions against bad GPS data</h2></div>
+    <p class="lede">GPS receivers occasionally hand back a wrong answer — most often right at the start of a run, before the chipset has a confident lock. Every fix passes through three checks before it's allowed to count.</p>
+
+    <div class="table-scroll">
+      <table class="guard-table">
+        <thead>
+          <tr><th style="width:22%">Guard</th><th style="width:38%">What it catches</th><th>Threshold</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="gname">Accuracy filter</td>
+            <td>The OS reports a confidence radius with every fix. A fix the phone itself isn't confident about is dropped before it reaches any calculation.</td>
+            <td>reject if <span class="gval">accuracy &gt; 25 m</span></td>
+          </tr>
+          <tr>
+            <td class="gname">Plausible-speed filter</td>
+            <td>No runner sustains this pace. A fix implying it is treated as a glitch — a stale or default location before the GPS gets a real lock — not real motion.</td>
+            <td>reject if <span class="gval">implied speed &gt; 12 m/s</span> <span style="color:var(--ink-faint)">(43 km/h)</span></td>
+          </tr>
+          <tr>
+            <td class="gname">Absolute-jump cap</td>
+            <td>Closes a loophole in the speed filter alone: given a long enough gap since the last fix, <em>any</em> distance starts to look like a slow, plausible pace. This catches a large teleport regardless of how much time has passed.</td>
+            <td>reject if <span class="gval">jump &gt; 20 km</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose" style="margin-top:28px;">
+      <p><strong>What happens to a rejected fix.</strong> It's discarded from the live metrics — distance and average speed act as though it never arrived. But it isn't simply forgotten: if the <em>next</em> fix agrees with the rejected one (i.e. two consecutive readings that are mutually consistent, showing at least a couple of metres of real movement between them), the app concludes the earlier "good" fix was actually the mistake, and quietly re-anchors its tracking onto the new, more plausible position — crediting no extra distance or time for the jump itself, the same way a pause and resume works.</p>
+      <p>That recovery step exists because the obvious alternative — always trusting the last accepted fix — has a sharp failure mode: if that fix turns out to have been the bad one, <em>every subsequent real fix</em> near your actual position also looks like an impossible jump and gets rejected too, until enough time passes for the maths to catch up. An early version of this logic quarantined 77 seconds of perfectly good running data this way before the fix below it.</p>
+      <p>The GPX file written to disk, by contrast, keeps <strong>every</strong> fix, filtered or not — filtering is a display decision the app makes for you live; the underlying recording stays complete, in case you ever want to re-process it differently.</p>
+    </div>
+  </section>
+
+  <div class="trace">
+    <svg viewBox="0 0 900 34" preserveAspectRatio="none">
+      <path class="trace-line" d="M0,17 L900,17"/>
+      <circle class="trace-dot" cx="70" cy="17" r="3"/>
+      <circle class="trace-dot" cx="170" cy="17" r="3"/>
+      <circle class="trace-dot" cx="270" cy="17" r="3"/>
+      <circle class="trace-dot" cx="370" cy="17" r="3"/>
+      <circle class="trace-dot" cx="470" cy="17" r="3"/>
+      <circle class="trace-dot" cx="570" cy="17" r="3"/>
+      <circle class="trace-dot" cx="670" cy="17" r="3"/>
+      <circle class="trace-dot" cx="770" cy="17" r="3"/>
+      <circle class="trace-dot" cx="870" cy="17" r="3"/>
+    </svg>
+  </div>
+
+  <!-- ============ WHAT TO EXPECT ============ -->
+  <section>
+    <div class="section-head"><span class="section-num">05</span><h2>What to expect in the real world</h2></div>
+    <p class="lede">GPS accuracy on a phone is a function of sky visibility, not the app. These are realistic bands for a modern smartphone, not lab conditions.</p>
+
+    <div class="expect-grid">
+      <div class="expect-card">
+        <div class="econd">Open sky · clear conditions</div>
+        <div class="eresult">Accuracy typically <b>±3–8 m</b>. Speed and pace settle within a few seconds of starting and track smoothly. This is the everyday case for most road and park running.</div>
+      </div>
+      <div class="expect-card warn">
+        <div class="econd">Urban canyon · tall buildings</div>
+        <div class="eresult">Signal reflects off buildings before reaching the phone ("multipath"), inflating accuracy to <b>±15–30 m</b>. Pace readings get noisier; more fixes sit near the 25&nbsp;m accuracy cutoff and get dropped.</div>
+      </div>
+      <div class="expect-card warn">
+        <div class="econd">Tree cover · narrow trails</div>
+        <div class="eresult">Fix interval stretches — expect gaps of <b>3–8 s</b> between updates rather than a steady 1&nbsp;s. Distance still accumulates correctly; the current-speed reading updates less often.</div>
+      </div>
+      <div class="expect-card">
+        <div class="econd">First 10–20 seconds of any run</div>
+        <div class="eresult">The GPS chipset is still narrowing its lock. This is precisely the window the outlier filters in §4 exist for — an early bad fix here is the most common real-world trigger.</div>
+      </div>
+    </div>
+
+    <div class="prose" style="margin-top:32px;">
+      <p><strong>A rule of thumb:</strong> if a single split or momentary speed reading looks implausible, distance and average speed are almost always still correct — the filters described in §4 exist specifically to protect those cumulative numbers, even when one input sample was briefly wrong. It's the instantaneous readings — current speed, in-progress split pace — that are most exposed to real-time GPS noise, by nature of updating every second rather than averaging over the whole run.</p>
+    </div>
+  </section>
+
+  <div class="colophon">
+    <span>Simple Runner — Phase 1 (live tracking, GPX logging)</span>
+    <span>Prepared 2026-09-02</span>
+  </div>
+
+</div>
