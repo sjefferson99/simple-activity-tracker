@@ -7,6 +7,29 @@ const double _splitDistanceMeters = 1000;
 const double _maxAcceptableAccuracyMeters = 25;
 const Duration _currentSpeedWindow = Duration(seconds: 3);
 
+/// No runner sustains this; a segment implying more is a bad fix (e.g. a
+/// stale/default location before the GPS gets a real lock), not real motion.
+const double _maxPlausibleSpeedMps = 12;
+
+/// Backstop for the "a long enough gap makes anything look slow" hole in a
+/// speed-only test: a 65km jump implies a plausible ~18 m/s once the previous
+/// fix is an hour old. Set well above any distance a sparse-but-real stretch
+/// of fixes could cover (a tunnel or a backgrounded app can easily leave
+/// kilometres between consecutive fixes), so this only catches teleports.
+const double _maxPlausibleSegmentMeters = 20000;
+
+/// How long a rejected fix stays eligible to be recognised as the real
+/// position (see the recovery path in [MetricsEngine.addPoint]). Beyond this
+/// the run is treated as having a genuine gap rather than a recoverable
+/// glitch, so a stale candidate can't be resurrected minutes later.
+const Duration _pendingCandidateTtl = Duration(seconds: 30);
+
+/// How far two rejected fixes must be apart before they count as evidence
+/// that the runner really is over there, rather than a GPS repeating one
+/// wrong position. Above plausible fix-to-fix noise, below a running stride's
+/// worth of travel between fixes.
+const double _minReanchorMotionMeters = 2;
+
 /// Accumulates accepted track points into live run metrics: elapsed time,
 /// distance, current/average speed, and interpolated 1km splits.
 ///
@@ -15,6 +38,11 @@ const Duration _currentSpeedWindow = Duration(seconds: 3);
 class MetricsEngine {
   final List<TrackPoint> _recentPoints = [];
   TrackPoint? _lastAccepted;
+
+  /// A point rejected as an implausible jump from [_lastAccepted], kept in
+  /// case it turns out [_lastAccepted] was the bad fix rather than this one —
+  /// see [addPoint].
+  TrackPoint? _pendingCandidate;
 
   Duration _movingElapsed = Duration.zero;
   double _totalDistanceMeters = 0;
@@ -33,11 +61,11 @@ class MetricsEngine {
     if (point.accuracyMeters > _maxAcceptableAccuracyMeters) return;
 
     final previous = _lastAccepted;
-    _lastAccepted = point;
-    _recentPoints.add(point);
-    _pruneRecentPoints(point.timestamp);
 
     if (previous == null) {
+      _lastAccepted = point;
+      _recentPoints.add(point);
+      _pruneRecentPoints(point.timestamp);
       _metrics = _buildMetrics();
       return;
     }
@@ -49,6 +77,81 @@ class MetricsEngine {
       return;
     }
 
+    // A jump implying an impossible running speed is a bad fix (GPS glitch,
+    // stale location before a real lock), not real motion — drop it like a
+    // low-accuracy point rather than let it poison cumulative distance/speed
+    // forever.
+    if (!_isPlausibleSegment(segmentDistance, segmentDuration)) {
+      // But keeping the anchor pinned on `previous` forever is just as wrong
+      // if `previous` was actually the bad fix (e.g. one stale point far from
+      // where the run really is) — every subsequent good point would then
+      // look like an impossible jump and be rejected too, quarantining the
+      // rest of the run. Two consecutive rejects that agree with *each other*
+      // say the anchor was the outlier, so re-anchor onto them.
+      final pending = _pendingCandidate;
+      final sincePending = pending == null
+          ? null
+          : point.timestamp.difference(pending.timestamp);
+      final pendingDistance =
+          pending == null ? null : haversineDistanceMeters(pending, point);
+      // Agreement has to be *evidence*, not merely an absence of
+      // contradiction. A GPS stuck on one wrong position repeats it exactly:
+      // those duplicates imply 0 m/s, trivially "agree", and would hand the
+      // anchor to the bad location. Requiring the pair to show real movement
+      // means only a fix that is genuinely tracking the runner can re-anchor.
+      final agreesWithPending = pending != null &&
+          sincePending! <= _pendingCandidateTtl &&
+          pendingDistance! >= _minReanchorMotionMeters &&
+          _isPlausibleSegment(pendingDistance, sincePending);
+
+      if (agreesWithPending) {
+        // How the runner got from `previous` to here is unknown — the jump
+        // between them is exactly the thing being rejected — so this is a
+        // discontinuity, not a segment. Re-anchor without crediting any
+        // distance or time, the same way a pause/resume does. Crediting the
+        // pending->point leg instead would bank a bad-fix cluster's own
+        // drift as real running.
+        _resetAnchorTo(point);
+      } else {
+        _pendingCandidate = point;
+      }
+      return;
+    }
+
+    _pendingCandidate = null;
+    _acceptSegment(segmentDistance, segmentDuration, point);
+  }
+
+  /// Whether a segment could have been covered by a runner rather than being
+  /// a GPS glitch. Distance and speed are both bounded: speed alone lets an
+  /// arbitrarily large jump through once the gap is long enough, and distance
+  /// alone would reject a legitimately sparse stretch of fixes.
+  bool _isPlausibleSegment(double distanceMeters, Duration duration) {
+    if (distanceMeters > _maxPlausibleSegmentMeters) return false;
+    if (duration <= Duration.zero) return distanceMeters == 0;
+    return distanceMeters / (duration.inMilliseconds / 1000) <=
+        _maxPlausibleSpeedMps;
+  }
+
+  /// Restarts measurement from [point] without crediting distance or elapsed
+  /// time, for when the run continues but the path in between is unknowable.
+  void _resetAnchorTo(TrackPoint point) {
+    _lastAccepted = point;
+    _pendingCandidate = null;
+    // The speed window must not straddle the discontinuity, or current speed
+    // reads as the teleport's implied speed for the next few seconds.
+    _recentPoints
+      ..clear()
+      ..add(point);
+    _metrics = _buildMetrics();
+  }
+
+  void _acceptSegment(
+      double segmentDistance, Duration segmentDuration, TrackPoint point) {
+    _lastAccepted = point;
+    _recentPoints.add(point);
+    _pruneRecentPoints(point.timestamp);
+
     _applySegment(segmentDistance, segmentDuration);
     _metrics = _buildMetrics();
   }
@@ -57,6 +160,7 @@ class MetricsEngine {
   /// don't bridge the gap as if it were continuous movement.
   void resetSegmentAnchor() {
     _lastAccepted = null;
+    _pendingCandidate = null;
     _recentPoints.clear();
   }
 

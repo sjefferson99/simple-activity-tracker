@@ -68,6 +68,16 @@ class LiveRunController extends Notifier<LiveRunState> {
         break;
     }
 
+    // Tear down any run still in flight before allocating a new one. start()
+    // is re-entrant — state stays LiveRunIdle across every await below, so a
+    // double-tapped Start (or startNewRun() without a stop()) gets this far
+    // twice. Each resource has to go, not just the subscription: a stacked
+    // listener double-counts every fix (service.stream opens a fresh platform
+    // stream per access rather than sharing one), an orphaned flush timer
+    // keeps firing into whatever run is current for the app's lifetime, and a
+    // dropped RunGpxLog loses its unflushed tail and never finalizes.
+    await _disposeRun();
+
     _previousPoint = null;
     _metricsEngine = MetricsEngine();
     _gpxLog = RunGpxLog(await newRunGpxFile(DateTime.now()));
