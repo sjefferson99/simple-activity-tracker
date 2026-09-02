@@ -30,6 +30,4 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy app
       - run: uv run pytest
-
-      # Added in W1 once app/openapi_export.py and openapi.json exist:
-      # - run: uv run python -m app.openapi_export | diff - openapi.json
+      - run: uv run python -m app.openapi_export | diff - openapi.json

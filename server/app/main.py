@@ -1,7 +1,11 @@
 import importlib.metadata
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
+from app.api.v1 import admin as admin_api
+from app.api.v1 import auth as auth_api
+from app.api.v1 import runs as runs_api
 from app.db import check_db_connection
 
 try:
@@ -11,7 +15,12 @@ except importlib.metadata.PackageNotFoundError:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Simple Runner Server", version=_VERSION)
+    app = FastAPI(
+        title="Simple Runner Server",
+        version=_VERSION,
+        docs_url="/api/docs",
+        openapi_url="/api/openapi.json",
+    )
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
@@ -20,6 +29,25 @@ def create_app() -> FastAPI:
             "version": _VERSION,
             "db": "ok" if check_db_connection() else "error",
         }
+
+    app.include_router(auth_api.router)
+    app.include_router(auth_api.me_router)
+    app.include_router(runs_api.router)
+    app.include_router(admin_api.router)
+
+    @app.exception_handler(HTTPException)
+    def api_error_handler(_request: Request, exc: HTTPException) -> JSONResponse:
+        # app.api.v1.errors.api_error() builds detail={"error": {...}} to
+        # match the plan's flat error shape — FastAPI's default handler
+        # would otherwise nest it one level deeper as {"detail": {"error":
+        # ...}}. A plain HTTPException (detail=str, from framework/validation
+        # code we don't control) is wrapped into the same shape here so
+        # every error response has one consistent contract.
+        if isinstance(exc.detail, dict) and "error" in exc.detail:
+            body = exc.detail
+        else:
+            body = {"error": {"code": "http_error", "message": str(exc.detail)}}
+        return JSONResponse(status_code=exc.status_code, content=body, headers=exc.headers)
 
     return app
 

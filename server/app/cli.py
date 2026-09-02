@@ -21,11 +21,16 @@ def migrate() -> None:
 
 
 def run() -> None:
-    """migrate -> bootstrap admin (W1) -> serve. The admin bootstrap step is
-    added in W1 once the users table and auth module exist."""
+    """migrate -> bootstrap admin -> serve."""
     import uvicorn
 
+    from app.auth.bootstrap import bootstrap_admin_if_needed
+    from app.db import get_session_factory
+
     migrate()
+
+    with get_session_factory()() as session:
+        bootstrap_admin_if_needed(session)
 
     settings = get_settings()
     forwarded_allow_ips = settings.trusted_proxies or None

@@ -2,6 +2,7 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
+import app.models  # noqa: F401 - registers every model on Base.metadata
 from alembic import context
 from app.config import get_settings
 from app.models.base import Base
@@ -19,8 +20,6 @@ if config.config_file_name is not None:
 # so there's one source of truth shared with the running app.
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
-# Every ORM model (added from W1) inherits app.models.base.Base, so this picks
-# up the whole schema for autogenerate once models exist.
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
