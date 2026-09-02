@@ -1,0 +1,22 @@
+{% for run in runs %}
+<div class="run-list-item">
+  <div>
+    <a href="/runs/{{ run.id }}">{{ run.title or run.started_at.strftime('%Y-%m-%d %H:%M') }}</a>
+    <div class="muted">{{ run.started_at.strftime('%a %d %b %Y, %H:%M') }}</div>
+  </div>
+  <div class="text-right">
+    <div>{{ run.client_summary.distance_meters | distance_km }}</div>
+    <div class="muted">{{ run.client_summary.moving_seconds | duration }}</div>
+  </div>
+</div>
+{% endfor %}
+{% if next_cursor %}
+<div id="load-more-row" style="text-align:center; padding-top: 0.75rem;">
+  <button class="secondary"
+          hx-get="/?cursor={{ next_cursor }}"
+          hx-target="#load-more-row"
+          hx-swap="outerHTML">
+    Load more
+  </button>
+</div>
+{% endif %}

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Settings — Simple Runner{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<div class="card" style="max-width: 420px;">
+  <h2>Change password</h2>
+  <div id="password-form-area">
+    {% include "partials/change_password_form.html" %}
+  </div>
+</div>
+{% endblock %}

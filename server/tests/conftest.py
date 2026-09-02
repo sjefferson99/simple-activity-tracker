@@ -29,6 +29,12 @@ def app_client(tmp_path, monkeypatch) -> Generator:
     monkeypatch.setenv("SR_DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("SR_SECRET_KEY", "test-secret")
     monkeypatch.setenv("SR_DATA_DIR", str(data_dir))
+    # TestClient talks plain http://testserver — a Secure cookie set over
+    # that would be silently dropped by the client's cookie jar (per RFC,
+    # respected by http.cookiejar), breaking every session-cookie-based web
+    # test. Mirrors the real "plain-http LAN testing" setting from
+    # docs/WEB-PLAN.md §5.5.
+    monkeypatch.setenv("SR_SECURE_COOKIES", "false")
     get_settings.cache_clear()
     get_engine.cache_clear()
     # login_rate_limiter is a module-level singleton (see app/auth/rate_limit.py)

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Admin — Users — Simple Runner{% endblock %}
+{% block content %}
+<div id="admin-page">
+  <h1>Users</h1>
+
+  <div class="card" id="admin-user-list">
+    {% include "partials/admin_user_list.html" %}
+  </div>
+
+  <div class="card" style="max-width: 480px;">
+    <h2>Add a user</h2>
+    {% if create_error %}<div class="error-banner">{{ create_error }}</div>{% endif %}
+    <form hx-post="/admin/users" hx-target="#admin-page" hx-select="#admin-page" hx-swap="outerHTML">
+      <label for="new_display_name">Name</label>
+      <input type="text" id="new_display_name" name="display_name" required>
+      <label for="new_email">Email</label>
+      <input type="email" id="new_email" name="email" required>
+      <label for="new_password">Temporary password</label>
+      <input type="password" id="new_password" name="password" required minlength="8">
+      <label style="display:flex; align-items:center; gap:0.5rem;">
+        <input type="checkbox" name="is_admin" value="true" style="width:auto; margin:0;"> Admin
+      </label>
+      <button type="submit" style="margin-top:0.75rem;">Create user</button>
+    </form>
+    <p class="muted" style="margin-top:0.75rem;">Share this password with the user out of band — they can change it in Settings.</p>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}{{ run.title or "Run" }} — Simple Runner{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h1>{{ run.title or "Run" }}</h1>
+  <p class="muted">{{ run.started_at.strftime('%A %d %B %Y, %H:%M') }}</p>
+
+  <div class="stat-grid">
+    <div class="stat">
+      <div class="value">{{ run.client_summary.distance_meters | distance_km }}</div>
+      <div class="label">Distance (phone)</div>
+    </div>
+    <div class="stat">
+      <div class="value">{{ run.client_summary.moving_seconds | duration }}</div>
+      <div class="label">Moving time (phone)</div>
+    </div>
+    <div class="stat">
+      <div class="value">{{ run.client_summary.avg_speed_mps | kmh }}</div>
+      <div class="label">Avg speed (phone)</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Map</h2>
+  <div id="map"></div>
+</div>
+
+<div class="card">
+  <h2>Server analysis</h2>
+  {% if run.analysis.status == "done" %}
+  {% set result = run.analysis.result %}
+  <div class="stat-grid">
+    <div class="stat">
+      <div class="value">{{ result.distance_meters | distance_km }}</div>
+      <div class="label">Distance (server)</div>
+    </div>
+    <div class="stat">
+      <div class="value">{{ result.moving_seconds | duration }}</div>
+      <div class="label">Moving time (server)</div>
+    </div>
+    <div class="stat">
+      <div class="value">{{ result.avg_moving_speed_mps | kmh }}</div>
+      <div class="label">Avg speed (server)</div>
+    </div>
+    <div class="stat">
+      <div class="value">
+        {% if result.elevation.gain_m is not none %}+{{ "%.0f"|format(result.elevation.gain_m) }} m{% else %}—{% endif %}
+      </div>
+      <div class="label">Elevation gain</div>
+    </div>
+    <div class="stat">
+      <div class="value">
+        {% if result.elevation.loss_m is not none %}-{{ "%.0f"|format(result.elevation.loss_m) }} m{% else %}—{% endif %}
+      </div>
+      <div class="label">Elevation loss</div>
+    </div>
+  </div>
+
+  {% if result.best_efforts %}
+  <h2 style="margin-top:1.5rem;">Best efforts</h2>
+  <table>
+    <thead><tr><th>Distance</th><th>Time</th><th>Pace</th></tr></thead>
+    <tbody>
+      {% for effort in result.best_efforts %}
+      <tr>
+        <td>{{ effort.distance_meters | distance_km }}</td>
+        <td>{{ effort.duration_seconds | duration }}</td>
+        <td>{{ effort.avg_speed_mps | pace }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if result.splits %}
+  <h2 style="margin-top:1.5rem;">Splits</h2>
+  <table>
+    <thead><tr><th>Km</th><th>Time</th><th>Pace</th><th>Elevation</th></tr></thead>
+    <tbody>
+      {% for split in result.splits %}
+      <tr>
+        <td>{{ split.index }}</td>
+        <td>{{ split.duration_seconds | duration }}</td>
+        <td>{{ split.avg_speed_mps | pace }}</td>
+        <td>{{ "%+.0f"|format(split.elevation_delta_m) }} m</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <h2 style="margin-top:1.5rem;">Pace &amp; elevation</h2>
+  <div class="chart-container">
+    <div id="chart"></div>
+  </div>
+  {% elif run.analysis.status == "pending" %}
+  <p class="muted">Analysis pending.</p>
+  {% else %}
+  <p class="muted">Analysis failed for this run.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Details</h2>
+  <form hx-patch="/runs/{{ run.id }}">
+    <label for="title">Title</label>
+    <input type="text" id="title" name="title" maxlength="200" value="{{ run.title or '' }}" placeholder="Untitled run">
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="3" maxlength="4000" placeholder="Notes for this run...">{{ run.notes or '' }}</textarea>
+    <button type="submit">Save</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>File</h2>
+  <p><a class="button" href="/api/v1/runs/{{ run.id }}/gpx">Download GPX</a></p>
+  <hr style="border-color: var(--border); margin: 1.25rem 0;">
+  <p class="muted">Deleting a run removes it from the server only — it stays on the phone that uploaded it.</p>
+  <form hx-delete="/runs/{{ run.id }}" hx-confirm="Delete this run? This cannot be undone.">
+    <button type="submit" class="danger">Delete run</button>
+  </form>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script src="/static/vendor/uplot/uPlot.iife.min.js"></script>
+<script>
+  (function () {
+    const runId = {{ run.id | tojson }};
+    const map = L.map('map');
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map);
+
+    fetch(`/api/v1/runs/${runId}/track`)
+      .then((r) => r.json())
+      .then((data) => {
+        const allLatLngs = [];
+        data.segments.forEach((segment) => {
+          const latlngs = segment.map((p) => [p.lat, p.lon]);
+          if (latlngs.length > 1) {
+            L.polyline(latlngs, { color: '#5b9dff', weight: 3 }).addTo(map);
+          }
+          allLatLngs.push(...latlngs);
+        });
+        if (allLatLngs.length > 0) {
+          map.fitBounds(allLatLngs, { padding: [16, 16] });
+        } else {
+          map.setView([0, 0], 2);
+        }
+      });
+
+    {% if run.analysis.status == "done" %}
+    const series = {{ run.analysis.result.series | tojson }};
+    const chartEl = document.getElementById('chart');
+    if (series.length > 1 && chartEl) {
+      const t = series.map((s) => s.t_s);
+      const paceKmh = series.map((s) => (s.speed_mps != null ? s.speed_mps * 3.6 : null));
+      const ele = series.map((s) => s.ele_m);
+      new uPlot(
+        {
+          width: chartEl.clientWidth || 600,
+          height: 260,
+          scales: { x: { time: false } },
+          series: [
+            { label: 'Time (s)' },
+            { label: 'Speed (km/h)', stroke: '#5b9dff', scale: 'kmh' },
+            { label: 'Elevation (m)', stroke: '#4cd07c', scale: 'ele' },
+          ],
+          axes: [{}, { scale: 'kmh', side: 3 }, { scale: 'ele', side: 1 }],
+        },
+        [t, paceKmh, ele],
+        chartEl
+      );
+    }
+    {% endif %}
+  })();
+</script>
+{% endblock %}

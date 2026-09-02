@@ -1,12 +1,20 @@
 import importlib.metadata
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1 import admin as admin_api
 from app.api.v1 import auth as auth_api
 from app.api.v1 import runs as runs_api
 from app.db import check_db_connection
+from app.web import admin as admin_web
+from app.web import devices as devices_web
+from app.web import login as login_web
+from app.web import register as register_web
+from app.web import runs as runs_web
+from app.web import settings as settings_web
+from app.web.paths import STATIC_DIR
 
 try:
     _VERSION = importlib.metadata.version("simple-runner-server")
@@ -35,8 +43,23 @@ def create_app() -> FastAPI:
     app.include_router(runs_api.router)
     app.include_router(admin_api.router)
 
+    app.include_router(login_web.router)
+    app.include_router(runs_web.router)
+    app.include_router(devices_web.router)
+    app.include_router(settings_web.router)
+    app.include_router(register_web.router)
+    app.include_router(admin_web.router)
+
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
     @app.exception_handler(HTTPException)
-    def api_error_handler(_request: Request, exc: HTTPException) -> JSONResponse:
+    def api_error_handler(_request: Request, exc: HTTPException) -> JSONResponse | RedirectResponse:
+        # app.web.deps.get_web_user() raises a bare 303 + Location to send a
+        # signed-out browser to /login — that must stay a plain redirect, not
+        # get wrapped in the JSON error body below.
+        if exc.status_code == 303 and exc.headers and "Location" in exc.headers:
+            return RedirectResponse(url=exc.headers["Location"], status_code=303)
+
         # app.api.v1.errors.api_error() builds detail={"error": {...}} to
         # match the plan's flat error shape — FastAPI's default handler
         # would otherwise nest it one level deeper as {"detail": {"error":

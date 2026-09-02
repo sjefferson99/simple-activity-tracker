@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Simple Runner{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  {% block head %}{% endblock %}
+</head>
+<body hx-headers='{"X-Requested-With": "htmx"}'>
+  <header class="topbar">
+    <a class="brand" href="/">Simple Runner</a>
+    {% if user %}
+    <nav class="topnav">
+      <a href="/">Runs</a>
+      <a href="/devices">Devices</a>
+      <a href="/settings">Settings</a>
+      {% if user.is_admin %}<a href="/admin/users">Admin</a>{% endif %}
+      <button class="link-button" hx-post="/logout" hx-target="body">Sign out</button>
+    </nav>
+    {% endif %}
+  </header>
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+  <script src="/static/vendor/htmx/htmx.min.js"></script>
+  <script>
+    // Login/register/settings/admin forms render an error fragment with a
+    // non-2xx status (401/400/409) so a real page load shows the right HTTP
+    // status too — but htmx's default responseHandling only swaps 2xx/3xx,
+    // so without this override those error fragments would never appear.
+    htmx.config.responseHandling = [
+      { code: "204", swap: false },
+      { code: "[23]..", swap: true },
+      { code: "[45]..", swap: true, error: false },
+    ];
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
