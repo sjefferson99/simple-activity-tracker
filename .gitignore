@@ -33,6 +33,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
-# Local data volumes used by docker compose
+# Local data volumes and secrets used by docker compose
 /data/
 deploy/data/
+deploy/.env
+deploy/traefik/.env

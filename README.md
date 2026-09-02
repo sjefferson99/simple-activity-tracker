@@ -22,3 +22,26 @@ flutter run
 ```
 
 See [CLAUDE.md](CLAUDE.md) for the full command reference and per-platform setup gotchas.
+
+## Server
+
+A self-hosted web app and API (Python/FastAPI, SQLite, htmx) that the mobile app syncs
+runs to. See [docs/WEB-PLAN.md](docs/WEB-PLAN.md) for the design and phased plan.
+
+Local development, from `server/` (managed with [uv](https://docs.astral.sh/uv/)):
+
+```
+uv sync
+uv run ruff check .
+uv run mypy app
+uv run pytest
+```
+
+Or run the whole thing in Docker — from `deploy/`, copy `.env.example` to `.env`, fill in
+`SR_SECRET_KEY`, then:
+
+```
+docker compose up --build
+```
+
+`/healthz` should report `{"status": "ok", ...}` on `http://localhost:8000/healthz`.
