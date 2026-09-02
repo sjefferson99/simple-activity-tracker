@@ -10,6 +10,10 @@ dependencies = [
     "pydantic-settings>=2.6",
     "sqlalchemy>=2.0",
     "alembic>=1.13",
+    "pwdlib[argon2]>=0.2",
+    "itsdangerous>=2.2",
+    "gpxpy>=1.6",
+    "python-multipart>=0.0.12",
 ]
 
 [project.scripts]
