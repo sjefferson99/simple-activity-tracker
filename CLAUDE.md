@@ -2,7 +2,7 @@
 
 Cross-platform (Android-first, iOS later) running app in **Flutter**: live GPS metrics (speed, pace, splits), GPX track logging, eventually a customizable live display.
 
-**Read [docs/PLAN.md](docs/PLAN.md) before doing any work** — it holds the phased plan, the verified machine environment, Windows-specific setup gotchas, and per-phase acceptance criteria.
+**Read [docs/PLAN.md](docs/PLAN.md) before doing any work** — it holds the phased plan, the verified machine environment, Windows-specific setup gotchas, and per-phase acceptance criteria. For the web app, API and phone-to-server sync work, **also read [docs/WEB-PLAN.md](docs/WEB-PLAN.md)** — reviewed and approved, with its own phases (W0–W4), decisions (§12) and working agreements (§13, including: prompt before installing anything on the machine).
 
 For a non-technical walkthrough of the architecture and how the live metrics are calculated (polling rate, outlier filtering, split interpolation), see [docs/how-simple-runner-works.pdf](docs/how-simple-runner-works.pdf) — source at [docs/how-simple-runner-works.html](docs/how-simple-runner-works.html). Regenerate the PDF after editing the HTML with:
 ```
@@ -26,6 +26,7 @@ For a non-technical walkthrough of the architecture and how the live metrics are
   - **`media_store_plus` needed a Gradle patch to build at all.** Its `android/build.gradle` hardcodes `compileSdkVersion 33`; this project's resolved AndroidX dependency versions (pulled in transitively, not from anything we added) now require compileSdk 34+, so the plugin's own `:checkDebugAarMetadata` task fails before our app even builds. Fixed with an `afterEvaluate` block in `android/build.gradle.kts` that force-bumps just that subproject's `compileSdk` to 36. **This had to be `afterEvaluate`, not `plugins.withId(...)`** — the latter runs before the plugin's own Groovy `build.gradle` sets `compileSdkVersion 33`, so it gets silently clobbered; `afterEvaluate` runs strictly after, so it wins.
   - **Known risk, not yet a problem:** `media_store_plus` was last published ~2 years ago (v0.1.3) and the build also prints "Future versions of Flutter will fail to build if your app uses plugins that apply KGP [Kotlin Gradle Plugin]" naming this plugin specifically. Works today; a future Flutter upgrade could break it outright with no upstream fix available. If that happens, the options are: patch further, fork the plugin, or replace it with a hand-written MediaStore platform channel (more work, no dependency risk).
 - **Phase 2 and beyond — NOT STARTED** (see docs/PLAN.md §6).
+- **Web app + sync (docs/WEB-PLAN.md) — PLAN APPROVED 2026-09-02, NOT STARTED.** First step is W0 step 0: move the Flutter app into `mobile/` as its own commit, then the Python/FastAPI server in `server/`, CI, and containers. Track W-phase status here as they complete.
 - Update this section as work progresses (phase started/done, deviations from docs/PLAN.md).
 
 ### Toolchain notes learned during Phase 0 (beyond docs/PLAN.md §1)
