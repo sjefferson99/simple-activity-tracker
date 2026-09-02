@@ -68,4 +68,5 @@ flutter run              # runs on the connected device/emulator
 
 - Units displayed: km/h and min/km. All conversions/formatting via `core/units`, nowhere else.
 - Speeds are stored internally in m/s (as GPS provides); convert only at display time.
-- Commit at meaningful milestones; stay on `main` unless told otherwise.
+- **Always ask before running `git commit`** — even at a meaningful milestone, even if a commit earlier in the same session was already approved. Summarize what would be committed and wait for a go-ahead.
+- Stay on `main` unless told otherwise.
