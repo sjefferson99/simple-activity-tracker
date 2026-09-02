@@ -32,7 +32,20 @@ class LiveRunActive extends LiveRunState {
 class LiveRunFinished extends LiveRunState {
   final LiveMetrics metrics;
 
-  const LiveRunFinished({required this.metrics});
+  /// Where the exported copy of this run's GPX file was written, in
+  /// human-readable form (e.g. "Downloads/SimpleRunner"), for showing in the
+  /// UI. Null while the export is still in flight, on a platform where it
+  /// doesn't apply (iOS relies on Files-app visibility instead — see
+  /// RunExportService), or if the copy failed — the run itself is never at
+  /// risk either way, since export is a copy of the file already saved.
+  final String? exportedTo;
+
+  const LiveRunFinished({required this.metrics, this.exportedTo});
+
+  LiveRunFinished copyWith({String? exportedTo}) => LiveRunFinished(
+        metrics: metrics,
+        exportedTo: exportedTo ?? this.exportedTo,
+      );
 }
 
 class LiveRunPermissionDenied extends LiveRunState {

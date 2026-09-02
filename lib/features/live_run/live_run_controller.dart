@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../../core/files/run_export_service.dart';
 import '../../core/files/run_file_paths.dart';
 import '../../core/files/run_gpx_log.dart';
 import '../../core/location/geolocator_location_service.dart';
@@ -31,6 +33,16 @@ class LiveRunController extends Notifier<LiveRunState> {
   MetricsEngine? _metricsEngine;
   RunGpxLog? _gpxLog;
   Timer? _flushTimer;
+  File? _currentGpxFile;
+  final RunExportService _exportService = RunExportService();
+
+  // Bumped every time a run starts. stop() closes over the token for the
+  // run it's finishing, so a slow export that resolves after the user has
+  // already started (and possibly finished) another run can tell it no
+  // longer owns `state` and must not touch it — `state is LiveRunFinished`
+  // alone isn't enough, since the *next* run reaching Finished first would
+  // otherwise look like a valid target for the *previous* run's result.
+  int _runToken = 0;
 
   @override
   LiveRunState build() {
@@ -77,10 +89,12 @@ class LiveRunController extends Notifier<LiveRunState> {
     // keeps firing into whatever run is current for the app's lifetime, and a
     // dropped RunGpxLog loses its unflushed tail and never finalizes.
     await _disposeRun();
+    _runToken++;
 
     _previousPoint = null;
     _metricsEngine = MetricsEngine();
-    _gpxLog = RunGpxLog(await newRunGpxFile(DateTime.now()));
+    _currentGpxFile = await newRunGpxFile(DateTime.now());
+    _gpxLog = RunGpxLog(_currentGpxFile!);
     // A periodic flush that fails is not fatal: every flush rewrites the
     // whole track, so the next one recovers whatever this one missed.
     // Swallow it here rather than letting it surface as an unhandled error.
@@ -111,8 +125,26 @@ class LiveRunController extends Notifier<LiveRunState> {
 
   Future<void> stop() async {
     final metrics = _metricsEngine?.metrics ?? LiveMetrics.zero;
+    final gpxFile = _currentGpxFile;
+    final finishedRunToken = _runToken;
     await _disposeRun();
     state = LiveRunFinished(metrics: metrics);
+
+    // Export after the state switch, not before — a slow or failed copy
+    // must never delay showing the run summary. exportedTo starts null and
+    // fills in once the copy lands. `state is LiveRunFinished` alone isn't
+    // enough of a guard: if the user starts and finishes another run before
+    // this export resolves, that run's state is *also* LiveRunFinished, and
+    // this run's stale result would be misattributed to it. The token check
+    // catches that — it only fires if _runToken hasn't moved on since.
+    if (gpxFile != null) {
+      final exportedTo = await _exportService.exportToPublicStorage(gpxFile);
+      if (exportedTo != null &&
+          _runToken == finishedRunToken &&
+          state is LiveRunFinished) {
+        state = (state as LiveRunFinished).copyWith(exportedTo: exportedTo);
+      }
+    }
   }
 
   Future<void> startNewRun() async {
@@ -134,6 +166,7 @@ class LiveRunController extends Notifier<LiveRunState> {
       await _gpxLog?.finalizeAndFlush();
     } finally {
       _gpxLog = null;
+      _currentGpxFile = null;
       await WakelockPlus.disable();
     }
   }

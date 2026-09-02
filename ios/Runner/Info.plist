@@ -74,5 +74,13 @@
 	<array>
 		<string>location</string>
 	</array>
+	<!-- Exposes the app's Documents folder (where GPX runs are written) to
+	     the Files app under "On My iPhone", and to Finder/iTunes file
+	     sharing over USB — otherwise it's sandboxed and invisible outside
+	     the app. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 </dict>
 </plist>

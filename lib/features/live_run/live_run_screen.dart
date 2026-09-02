@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import '../../core/units/units.dart';
 import '../../domain/models/live_metrics.dart';
 import '../../domain/tracking/run_phase.dart';
+import '../export_help/export_help_screen.dart';
 import 'live_run_controller.dart';
 import 'live_run_state.dart';
 import 'metric_spec.dart';
@@ -328,10 +329,23 @@ class _Controls extends StatelessWidget {
           style: FilledButton.styleFrom(minimumSize: const Size(160, 56)),
           child: const Text('Start'),
         ),
-      LiveRunFinished() => FilledButton(
-          onPressed: controller.startNewRun,
-          style: FilledButton.styleFrom(minimumSize: const Size(160, 56)),
-          child: const Text('New run'),
+      LiveRunFinished(:final exportedTo) => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FilledButton(
+              onPressed: controller.startNewRun,
+              style: FilledButton.styleFrom(minimumSize: const Size(160, 56)),
+              child: const Text('New run'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ExportHelpScreen(exportedTo: exportedTo),
+                ),
+              ),
+              child: const Text("Where's my file?"),
+            ),
+          ],
         ),
       // GPS may never get a fix (indoors, hardware issue). Offer a way out —
       // the wakelock and flush timer are already running by this point.
