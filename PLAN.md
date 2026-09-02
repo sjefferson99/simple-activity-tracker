@@ -117,6 +117,32 @@ Rules that keep it modular:
 
 ---
 
+## 5a. iOS / Mac bring-up (groundwork done, unverified)
+
+Testing iOS needs **no paid Apple account**. A free Apple ID covers the Simulator and
+side-loading to a physical iPhone (builds expire after 7 days); the $99/yr Developer
+Program is only needed for TestFlight and the App Store.
+
+**Simulator caveat:** there is no GPS hardware. Xcode's *Debug → Simulate Location*
+offers a fixed point or canned routes (City Run, City Bicycle Ride, Freeway Drive),
+which do exercise speed, distance, splits, and GPX writing. It cannot reproduce GPS
+noise, accuracy variation, or signal loss — so the accuracy filter, jitter handling,
+and background/screen-off behaviour still need a real iPhone.
+
+Steps on the Mac:
+
+1. Xcode from the Mac App Store, then `xcode-select --install`.
+2. Install Flutter; `flutter doctor` until the iOS section is green (`sudo gem install cocoapods` if prompted).
+3. Clone repo, `flutter pub get`, `cd ios && pod install`.
+4. `open ios/Runner.xcworkspace` → Runner target → Signing & Capabilities → sign in with the free Apple ID, set a unique bundle id.
+5. `flutter run` against a booted Simulator; drive it with Debug → Simulate Location → City Run.
+
+Already prepared in-repo (but **never compiled** — written on Windows):
+`Info.plist` location usage strings + `UIBackgroundModes: location`, and
+`AppleSettings` branching in `GeolocatorLocationService`.
+
+---
+
 ## 6. Future phases (architecture supports; do not build yet)
 
 Customizable live display (persist MetricSpec list), run history + summary screen, auto-pause, audio cues, map view, iOS build & store setup, HR sensors, share/export.

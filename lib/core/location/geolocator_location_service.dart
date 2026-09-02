@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:geolocator/geolocator.dart';
 
 import 'location_permission_state.dart';
@@ -40,20 +42,44 @@ class GeolocatorLocationService implements LocationService {
   }
 
   @override
-  Stream<LocationSample> get stream => Geolocator.getPositionStream(
-        locationSettings: AndroidSettings(
-          accuracy: LocationAccuracy.bestForNavigation,
-          distanceFilter: 0,
-          intervalDuration: const Duration(seconds: 1),
-          // enableWakeLock defaults to false; wakelock_plus already keeps
-          // the screen on during tracking (see LiveRunController), and
-          // enabling it here would need the WAKE_LOCK manifest permission.
-          foregroundNotificationConfig: const ForegroundNotificationConfig(
-            notificationTitle: 'Simple Runner',
-            notificationText: 'Tracking your run',
-          ),
+  Stream<LocationSample> get stream =>
+      Geolocator.getPositionStream(locationSettings: _settings()).map(_toSample);
+
+  /// Per-platform tuning. The Android and Apple settings classes expose
+  /// different background mechanisms, so they can't be expressed as one
+  /// shared LocationSettings.
+  LocationSettings _settings() {
+    if (Platform.isAndroid) {
+      return AndroidSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 0,
+        intervalDuration: const Duration(seconds: 1),
+        // enableWakeLock defaults to false; wakelock_plus already keeps
+        // the screen on during tracking (see LiveRunController), and
+        // enabling it here would need the WAKE_LOCK manifest permission.
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: 'Simple Runner',
+          notificationText: 'Tracking your run',
         ),
-      ).map(_toSample);
+      );
+    }
+
+    if (Platform.isIOS) {
+      return AppleSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 0,
+        activityType: ActivityType.fitness,
+        // Requires the `location` UIBackgroundModes entry in Info.plist.
+        allowBackgroundLocationUpdates: true,
+        pauseLocationUpdatesAutomatically: false,
+      );
+    }
+
+    return const LocationSettings(
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 0,
+    );
+  }
 
   LocationSample _toSample(Position position) {
     return LocationSample(
