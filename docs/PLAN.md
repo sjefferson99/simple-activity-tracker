@@ -4,6 +4,12 @@ A cross-platform (Android first, iOS later) running app using the phone's GPS to
 
 This document is the implementation handoff. Status of each phase is tracked in [CLAUDE.md](../CLAUDE.md).
 
+**Note:** this plan predates the web app work and its commands/paths below were written
+when the Flutter app lived at the repo root. The app has since moved to `mobile/` (see
+[WEB-PLAN.md](WEB-PLAN.md) §4) — run every `flutter` command from `mobile/` now. Phases 0–1
+below are historical record of what was already done at the old location; nothing here
+needs to be redone.
+
 ---
 
 ## 1. Verified environment (checked 2026-09-01)
@@ -46,22 +52,23 @@ Use latest stable versions from pub.dev at implementation time (`flutter pub add
 ## 3. Architecture (modular, feature-first)
 
 ```
-lib/
-  main.dart             # ProviderScope + runApp
-  app/                  # MaterialApp, theme, top-level routing
-  core/
-    location/           # LocationService interface + GeolocatorLocationService
-                        # + FakeLocationService (scripted points, for tests/dev)
-    units/              # pure conversions & formatting (see §3.1)
-    files/              # GpxWriter, run-file naming/paths       (Phase 1)
-  domain/
-    models/             # TrackPoint, RunSession, Split, LiveMetrics
-    tracking/           # TrackingController state machine        (Phase 1)
-                        # MetricsEngine: pure functions            (Phase 1)
-  features/
-    live_run/           # run screen: metric tile grid + control buttons
-    # future: settings/, history/, display_customizer/
-test/                   # mirrors lib/ structure
+mobile/                 # everything below is rooted here, not the repo root
+  lib/
+    main.dart             # ProviderScope + runApp
+    app/                  # MaterialApp, theme, top-level routing
+    core/
+      location/           # LocationService interface + GeolocatorLocationService
+                          # + FakeLocationService (scripted points, for tests/dev)
+      units/              # pure conversions & formatting (see §3.1)
+      files/              # GpxWriter, run-file naming/paths       (Phase 1)
+    domain/
+      models/             # TrackPoint, RunSession, Split, LiveMetrics
+      tracking/           # TrackingController state machine        (Phase 1)
+                          # MetricsEngine: pure functions            (Phase 1)
+    features/
+      live_run/           # run screen: metric tile grid + control buttons
+      # future: settings/, history/, display_customizer/
+  test/                   # mirrors lib/ structure
 ```
 
 Rules that keep it modular:
