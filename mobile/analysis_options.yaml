@@ -29,6 +29,15 @@ linter:
   rules:
     # avoid_print: false  # Uncomment to disable the `avoid_print` rule
     # prefer_single_quotes: true  # Uncomment to enable the `prefer_single_quotes` rule
+    # A named initializing formal (`{required this._field}`) makes the
+    # parameter's external name `_field` itself, which private identifiers
+    # can't be referenced by from another library — so it only works when a
+    # class is constructed from within its own file. Every multi-parameter
+    # service constructor in core/api, core/auth and core/sync (W3) is
+    # deliberately named-parameter for call-site clarity and constructed
+    # from Riverpod providers in other files, so this lint's fix would
+    # break them rather than improve them.
+    prefer_initializing_formals: false
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options

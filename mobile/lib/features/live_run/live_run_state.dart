@@ -40,11 +40,18 @@ class LiveRunFinished extends LiveRunState {
   /// risk either way, since export is a copy of the file already saved.
   final String? exportedTo;
 
-  const LiveRunFinished({required this.metrics, this.exportedTo});
+  /// Null only if the run had no GPX file to sync (shouldn't happen in
+  /// practice — stop() always has one by the time it builds this state).
+  /// Lets the summary screen watch SyncService.statusChanges and RunStore
+  /// for this specific run's upload/analysis progress.
+  final String? clientRunId;
+
+  const LiveRunFinished({required this.metrics, this.exportedTo, this.clientRunId});
 
   LiveRunFinished copyWith({String? exportedTo}) => LiveRunFinished(
         metrics: metrics,
         exportedTo: exportedTo ?? this.exportedTo,
+        clientRunId: clientRunId,
       );
 }
 

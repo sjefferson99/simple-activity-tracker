@@ -82,5 +82,16 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<!-- A self-hosted server on the LAN is likely plain http:// at first
+	     (docs/WEB-PLAN.md §6.3) — NSAllowsLocalNetworking permits cleartext
+	     to local/LAN addresses without disabling ATS app-wide, and shows an
+	     in-app warning in Settings when the configured URL is http://. The
+	     production expectation is a reverse proxy terminating TLS in front
+	     of the server, after which this has no effect. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

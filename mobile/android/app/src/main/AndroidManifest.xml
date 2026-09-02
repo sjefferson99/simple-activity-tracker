@@ -1,4 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Needed from W3 onward: uploading finished runs to a self-hosted
+         server (docs/WEB-PLAN.md §6). No network calls existed before this. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
@@ -12,10 +16,16 @@
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29"/>
+    <!-- A self-hosted server on the LAN is likely plain http:// at first
+         (docs/WEB-PLAN.md §6.3) — usesCleartextTraffic allows that, with an
+         in-app warning in Settings when the configured URL is http://. The
+         production expectation is a reverse proxy terminating TLS in front
+         of the server, after which this has no effect. -->
     <application
         android:label="simple_runner"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
