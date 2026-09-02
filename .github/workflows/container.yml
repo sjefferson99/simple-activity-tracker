@@ -50,8 +50,10 @@ jobs:
 
       - name: Smoke test /healthz
         run: |
+          mkdir -p /tmp/sr-smoke-data
           docker run -d --name smoke -p 8000:8000 \
             -e SR_SECRET_KEY=ci-smoke-test-key \
+            -v /tmp/sr-smoke-data:/data \
             ${{ env.IMAGE_NAME }}:smoke-test
           for i in $(seq 1 15); do
             if curl -sf http://127.0.0.1:8000/healthz; then
