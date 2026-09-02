@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Sign in — Simple Runner{% endblock %}
+{% block content %}
+<div class="card" style="max-width: 380px; margin: 3rem auto;">
+  <h1>Sign in</h1>
+  {% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
+  <form hx-post="/login" hx-target="body">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" required autofocus value="{{ email or '' }}">
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" required>
+    <button type="submit">Sign in</button>
+  </form>
+  {% if allow_registration %}
+  <p class="muted" style="margin-top:1rem;">No account? <a href="/register">Register</a></p>
+  {% endif %}
+</div>
+{% endblock %}
