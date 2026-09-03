@@ -1,6 +1,8 @@
 import json
 from datetime import UTC
 
+import pytest
+
 from tests.conftest import make_summary, upload_sample_activity
 
 
@@ -265,3 +267,18 @@ def test_pagination_cursor_pages_through_results(
         cursor = page["next_cursor"]
 
     assert len(seen_ids) == 5
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        "garbage",  # invalid base64 padding
+        "Zm9v",  # valid base64, not JSON
+        "WyJub3QtYS1kYXRlIiwieCJd",  # valid JSON list, non-ISO date
+        "WzFd",  # valid JSON list, wrong length
+    ],
+)
+def test_malformed_cursor_returns_400(app_client, auth_headers, cursor) -> None:
+    response = app_client.get("/api/v1/activities", headers=auth_headers, params={"cursor": cursor})
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_cursor"

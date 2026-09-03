@@ -1,4 +1,5 @@
 import base64
+import binascii
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -8,6 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.activity import Activity
+
+
+class InvalidCursor(ValueError):
+    """Raised when a pagination cursor can't be decoded — either tampered
+    with or from an incompatible client. Callers map this to a 400."""
 
 
 @dataclass(frozen=True)
@@ -22,9 +28,12 @@ def encode_cursor(started_at: datetime, activity_id: str) -> str:
 
 
 def decode_cursor(cursor: str) -> tuple[datetime, str]:
-    raw = base64.urlsafe_b64decode(cursor.encode()).decode()
-    started_at_str, activity_id = json.loads(raw)
-    return datetime.fromisoformat(started_at_str), activity_id
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode()).decode()
+        started_at_str, activity_id = json.loads(raw)
+        return datetime.fromisoformat(started_at_str), activity_id
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
+        raise InvalidCursor(f"Invalid cursor: {cursor!r}") from exc
 
 
 class ActivityRepository(Protocol):

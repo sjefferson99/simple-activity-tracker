@@ -75,6 +75,17 @@ def test_activity_list_empty_state(app_client, auth_headers):
     assert "No activities yet" in response.text
 
 
+def test_activity_list_with_malformed_cursor_falls_back_to_first_page(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"cursor": "garbage"})
+    assert response.status_code == 200
+    assert "km" in response.text
+
+
 def test_activity_detail_renders_with_map_and_analysis(app_client, sample_gpx_bytes, auth_headers):
     upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
     activity_id = upload.json()["id"]

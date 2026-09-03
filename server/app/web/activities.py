@@ -9,7 +9,7 @@ from app.config import get_settings
 from app.deps import db_session
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
-from app.repositories.activities import SqlAlchemyActivityRepository
+from app.repositories.activities import InvalidCursor, SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.storage.blob_store import LocalFileBlobStore
 from app.web.deps import WebUser, require_htmx_header
@@ -47,7 +47,13 @@ def activity_list(
     session: Annotated[Session, Depends(db_session)],
     cursor: str | None = None,
 ) -> Response:
-    page = SqlAlchemyActivityRepository(session).list_for_user(user.id, limit=20, cursor=cursor)
+    activities = SqlAlchemyActivityRepository(session)
+    try:
+        page = activities.list_for_user(user.id, limit=20, cursor=cursor)
+    except InvalidCursor:
+        # A tampered or stale cursor in the URL shouldn't break the page for
+        # a human browsing — fall back to the first page rather than a 400.
+        page = activities.list_for_user(user.id, limit=20, cursor=None)
     context = {
         "user": user,
         "activities": page.activities,
