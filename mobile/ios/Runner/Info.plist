@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Simple Runner</string>
+	<string>Simple Activity Tracker</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>simple_runner</string>
+	<string>simple_activity_tracker</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -67,9 +67,9 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Simple Runner uses your location to measure your speed, distance, and splits while you run.</string>
+	<string>Simple Activity Tracker uses your location to measure your speed, distance, and splits while you run.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Simple Runner uses your location to keep tracking your run when the screen is off or the app is in the background.</string>
+	<string>Simple Activity Tracker uses your location to keep tracking your run when the screen is off or the app is in the background.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

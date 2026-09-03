@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:simple_runner/domain/geo_math.dart';
-import 'package:simple_runner/domain/models/track_point.dart';
+import 'package:simple_activity_tracker/domain/geo_math.dart';
+import 'package:simple_activity_tracker/domain/models/track_point.dart';
 
 void main() {
   group('haversineDistanceMeters', () {
@@ -52,8 +52,18 @@ void main() {
 
     test('returns null for a non-positive time delta', () {
       final t = DateTime(2026);
-      final a = TrackPoint(latitude: 0, longitude: 0, timestamp: t, accuracyMeters: 5);
-      final b = TrackPoint(latitude: 0, longitude: 0.001, timestamp: t, accuracyMeters: 5);
+      final a = TrackPoint(
+        latitude: 0,
+        longitude: 0,
+        timestamp: t,
+        accuracyMeters: 5,
+      );
+      final b = TrackPoint(
+        latitude: 0,
+        longitude: 0.001,
+        timestamp: t,
+        accuracyMeters: 5,
+      );
       expect(speedMpsBetween(a, b), isNull);
     });
   });

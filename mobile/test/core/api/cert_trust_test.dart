@@ -2,11 +2,13 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage/test/test_flutter_secure_storage_platform.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:simple_runner/core/api/cert_trust_store.dart';
-import 'package:simple_runner/core/api/http_api_client.dart';
+import 'package:simple_activity_tracker/core/api/cert_trust_store.dart';
+import 'package:simple_activity_tracker/core/api/http_api_client.dart';
 
 CertTrustStore _store(Map<String, String> backing) {
-  FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(backing);
+  FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(
+    backing,
+  );
   return CertTrustStore(storage: const FlutterSecureStorage());
 }
 
@@ -60,21 +62,27 @@ void main() {
       expect(store.pinnedFingerprintSync('runner.example.com'), 'abc123');
     });
 
-    test('trust writes through to both storage and the sync cache immediately', () async {
-      final store = _store({});
-      await store.trust('runner.example.com', 'abc123');
+    test(
+      'trust writes through to both storage and the sync cache immediately',
+      () async {
+        final store = _store({});
+        await store.trust('runner.example.com', 'abc123');
 
-      expect(store.pinnedFingerprintSync('runner.example.com'), 'abc123');
-      expect(await store.pinnedFingerprint('runner.example.com'), 'abc123');
-    });
+        expect(store.pinnedFingerprintSync('runner.example.com'), 'abc123');
+        expect(await store.pinnedFingerprint('runner.example.com'), 'abc123');
+      },
+    );
 
-    test('untrust removes the pin from both storage and the sync cache', () async {
-      final store = _store({'cert_pin_runner.example.com': 'abc123'});
-      await store.ensureLoaded();
-      await store.untrust('runner.example.com');
+    test(
+      'untrust removes the pin from both storage and the sync cache',
+      () async {
+        final store = _store({'cert_pin_runner.example.com': 'abc123'});
+        await store.ensureLoaded();
+        await store.untrust('runner.example.com');
 
-      expect(store.pinnedFingerprintSync('runner.example.com'), isNull);
-    });
+        expect(store.pinnedFingerprintSync('runner.example.com'), isNull);
+      },
+    );
 
     test('a pin for one host is never returned for another', () async {
       final store = _store({});

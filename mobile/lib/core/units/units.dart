@@ -35,3 +35,6 @@ String formatDuration(Duration duration) {
 }
 
 String formatDistanceKm(double meters) => (meters / 1000).toStringAsFixed(2);
+
+/// Formats a metres value (e.g. elevation gain) as a whole number, rounded.
+String formatMeters(double meters) => meters.round().toString();

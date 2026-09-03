@@ -37,10 +37,12 @@ class SettingsScreen extends ConsumerWidget {
           children: [
             authState.when(
               data: (state) => _AuthSection(state: state),
-              loading: () => const Center(child: Padding(
-                padding: EdgeInsets.all(24),
-                child: CircularProgressIndicator(),
-              )),
+              loading: () => const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: CircularProgressIndicator(),
+                ),
+              ),
               error: (error, _) => _ErrorBanner(message: _messageFor(error)),
             ),
             const SizedBox(height: 24),
@@ -88,8 +90,9 @@ class _AuthSection extends ConsumerStatefulWidget {
 }
 
 class _AuthSectionState extends ConsumerState<_AuthSection> {
-  late final _serverUrlController =
-      TextEditingController(text: widget.state.serverUrl ?? '');
+  late final _serverUrlController = TextEditingController(
+    text: widget.state.serverUrl ?? '',
+  );
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _deviceNameController = TextEditingController();
@@ -125,7 +128,11 @@ class _AuthSectionState extends ConsumerState<_AuthSection> {
           const SizedBox(height: 8),
           Row(
             children: [
-              Icon(Icons.warning_amber, color: Theme.of(context).colorScheme.error, size: 18),
+              Icon(
+                Icons.warning_amber,
+                color: Theme.of(context).colorScheme.error,
+                size: 18,
+              ),
               const SizedBox(width: 6),
               const Expanded(
                 child: Text(
@@ -138,12 +145,15 @@ class _AuthSectionState extends ConsumerState<_AuthSection> {
           ),
         ],
         const SizedBox(height: 16),
-        if (state.isSignedIn) _SignedInView(email: state.email) else _SignInForm(
-          serverUrlController: _serverUrlController,
-          emailController: _emailController,
-          passwordController: _passwordController,
-          deviceNameController: _deviceNameController,
-        ),
+        if (state.isSignedIn)
+          _SignedInView(email: state.email)
+        else
+          _SignInForm(
+            serverUrlController: _serverUrlController,
+            emailController: _emailController,
+            passwordController: _passwordController,
+            deviceNameController: _deviceNameController,
+          ),
       ],
     );
   }
@@ -161,7 +171,8 @@ class _SignedInView extends ConsumerWidget {
       children: [
         Expanded(child: Text('Signed in as ${email ?? 'unknown'}')),
         OutlinedButton(
-          onPressed: () => ref.read(authStateControllerProvider.notifier).signOut(),
+          onPressed: () =>
+              ref.read(authStateControllerProvider.notifier).signOut(),
           child: const Text('Sign out'),
         ),
       ],
@@ -204,7 +215,9 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
       // Deliberately caught here, not routed through authStateControllerProvider's
       // state — an AsyncError there would replace this whole form (and the
       // server URL/email the user just typed) with a bare error message.
-      if (mounted) setState(() => _error = e is ApiException ? e.message : e.toString());
+      if (mounted) {
+        setState(() => _error = e is ApiException ? e.message : e.toString());
+      }
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -212,7 +225,9 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
 
   Future<void> _signIn() async {
     try {
-      await ref.read(authStateControllerProvider.notifier).signIn(
+      await ref
+          .read(authStateControllerProvider.notifier)
+          .signIn(
             email: widget.emailController.text.trim(),
             password: widget.passwordController.text,
             deviceName: widget.deviceNameController.text.trim(),
@@ -222,7 +237,9 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
       if (!trusted) rethrow;
       // The dialog already wrote the pin to CertTrustStore — retry once,
       // now that the handshake will succeed.
-      await ref.read(authStateControllerProvider.notifier).signIn(
+      await ref
+          .read(authStateControllerProvider.notifier)
+          .signIn(
             email: widget.emailController.text.trim(),
             password: widget.passwordController.text,
             deviceName: widget.deviceNameController.text.trim(),
@@ -245,9 +262,15 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
           children: [
             Text(e.message),
             const SizedBox(height: 16),
-            const Text('Certificate fingerprint (SHA-256):', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text(
+              'Certificate fingerprint (SHA-256):',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 4),
-            SelectableText(e.fingerprint, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+            SelectableText(
+              e.fingerprint,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
             const SizedBox(height: 12),
             const Text(
               'Compare this to the fingerprint shown when the certificate was generated, '
@@ -257,7 +280,10 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Trust this certificate'),
@@ -293,7 +319,10 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
         const SizedBox(height: 8),
         TextField(
           controller: widget.deviceNameController,
-          decoration: const InputDecoration(labelText: 'Device name', hintText: 'e.g. My Phone'),
+          decoration: const InputDecoration(
+            labelText: 'Device name',
+            hintText: 'e.g. My Phone',
+          ),
         ),
         const SizedBox(height: 12),
         FilledButton(
@@ -346,7 +375,7 @@ class _QueueSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (records.isEmpty) {
-      return const Text('No runs recorded yet.');
+      return const Text('No activities recorded yet.');
     }
 
     var pending = 0;
@@ -369,11 +398,16 @@ class _QueueSummary extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('$uploaded uploaded, $pending queued, $failed failed'
-            '${uploading > 0 ? ', $uploading uploading' : ''}'),
+        Text(
+          '$uploaded uploaded, $pending queued, $failed failed'
+          '${uploading > 0 ? ', $uploading uploading' : ''}',
+        ),
         if (failed > 0) ...[
           const SizedBox(height: 8),
-          ...records.whereType<RunRecord>().where((r) => r.syncStatus is SyncStatusFailed).map(
+          ...records
+              .whereType<RunRecord>()
+              .where((r) => r.syncStatus is SyncStatusFailed)
+              .map(
                 (r) => Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Text(
