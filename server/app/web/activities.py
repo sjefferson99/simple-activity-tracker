@@ -12,6 +12,7 @@ from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
 from app.repositories.activities import SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.storage.blob_store import LocalFileBlobStore
+from app.validation import NOTES_MAX_LENGTH, TITLE_MAX_LENGTH
 from app.web.deps import WebUser, require_htmx_header
 from app.web.templating import templates
 
@@ -90,8 +91,12 @@ def activity_patch(
     activity = activities.get_by_id_for_user(user.id, activity_id)
     if activity is None:
         return Response(status_code=404)
-    activity.title = title.strip() or None
-    activity.notes = notes.strip() or None
+    title = title.strip()
+    notes = notes.strip()
+    if len(title) > TITLE_MAX_LENGTH or len(notes) > NOTES_MAX_LENGTH:
+        return Response(status_code=400)
+    activity.title = title or None
+    activity.notes = notes or None
     activity.updated_at = datetime.now(UTC)
     return Response(status_code=200, headers={"HX-Refresh": "true"})
 

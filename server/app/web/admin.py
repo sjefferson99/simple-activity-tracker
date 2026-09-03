@@ -14,6 +14,7 @@ from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisReposit
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
 from app.repositories.users import SqlAlchemyUserRepository
 from app.storage.blob_store import LocalFileBlobStore
+from app.validation import ValidationFailed, normalize_email, validate_name, validate_password
 from app.web.deps import WebAdmin, require_htmx_header
 from app.web.templating import templates
 
@@ -65,6 +66,18 @@ def admin_create_user(
     is_admin: Annotated[str | None, Form()] = None,
 ) -> Response:
     repo = SqlAlchemyUserRepository(session)
+    try:
+        email = normalize_email(email)
+        display_name = validate_name(display_name, field="Display name")
+        password = validate_password(password)
+    except ValidationFailed as exc:
+        return templates.TemplateResponse(
+            request,
+            "admin_users.html",
+            _list_context(repo, admin, create_error=str(exc)),
+            status_code=400,
+        )
+
     if repo.get_by_email(email) is not None:
         return templates.TemplateResponse(
             request,
@@ -153,15 +166,17 @@ def admin_reset_password(
     if target is None:
         return Response(status_code=404)
 
-    if not hx_prompt or len(hx_prompt) < 8:
+    try:
+        new_password = validate_password(hx_prompt or "")
+    except ValidationFailed as exc:
         return templates.TemplateResponse(
             request,
             "partials/admin_user_list.html",
-            _list_context(repo, admin, error="Password must be at least 8 characters"),
+            _list_context(repo, admin, error=str(exc)),
             status_code=400,
         )
 
-    target.password_hash = hash_password(hx_prompt)
+    target.password_hash = hash_password(new_password)
     _invalidate_sessions_and_tokens(session, target)
     return templates.TemplateResponse(
         request, "partials/admin_user_list.html", _list_context(repo, admin)

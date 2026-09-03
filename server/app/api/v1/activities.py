@@ -29,6 +29,7 @@ from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
 from app.repositories.activities import SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.storage.blob_store import LocalFileBlobStore
+from app.validation import SUMMARY_MAX_BYTES
 
 router = APIRouter(prefix="/api/v1/activities", tags=["activities"])
 
@@ -94,6 +95,10 @@ def upload_activity(
     summary: Annotated[str, Form()],
     gpx: Annotated[UploadFile, File()],
 ) -> ActivityOut:
+    if len(summary.encode()) > SUMMARY_MAX_BYTES:
+        raise api_error(
+            400, "invalid_summary", f"summary exceeds the {SUMMARY_MAX_BYTES}-byte limit"
+        )
     try:
         summary_model = ActivitySummary.model_validate_json(summary)
     except ValidationError as exc:

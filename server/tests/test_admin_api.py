@@ -51,6 +51,34 @@ def test_creating_a_user_with_a_taken_email_is_rejected(app_client, auth_headers
     assert response.status_code == 409
 
 
+def test_creating_a_user_with_invalid_email_is_rejected(app_client, auth_headers) -> None:
+    response = app_client.post(
+        "/api/v1/admin/users",
+        headers=auth_headers,
+        json={
+            "email": "not-an-email",
+            "display_name": "Bad Email",
+            "password": "a-strong-password",
+            "is_admin": False,
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_creating_a_user_with_short_password_is_rejected(app_client, auth_headers) -> None:
+    response = app_client.post(
+        "/api/v1/admin/users",
+        headers=auth_headers,
+        json={
+            "email": "shortpw@example.com",
+            "display_name": "Short Password",
+            "password": "x",
+            "is_admin": False,
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_admin_cannot_demote_themself(app_client, auth_headers) -> None:
     me = app_client.get("/api/v1/me", headers=auth_headers).json()
     response = app_client.patch(
@@ -155,6 +183,27 @@ def test_admin_password_reset_revokes_existing_sessions(app_client, auth_headers
     )
     assert response.status_code == 204
     assert app_client.get("/api/v1/me", headers=target_headers).status_code == 401
+
+
+def test_admin_password_reset_rejects_short_password(app_client, auth_headers) -> None:
+    create = app_client.post(
+        "/api/v1/admin/users",
+        headers=auth_headers,
+        json={
+            "email": "target-shortpw@example.com",
+            "display_name": "Target",
+            "password": "a-strong-password",
+            "is_admin": False,
+        },
+    )
+    target_id = create.json()["id"]
+
+    response = app_client.post(
+        f"/api/v1/admin/users/{target_id}/password",
+        headers=auth_headers,
+        json={"new_password": "x"},
+    )
+    assert response.status_code == 422
 
 
 def test_deleting_a_user_removes_their_activities(
