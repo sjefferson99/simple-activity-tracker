@@ -31,3 +31,6 @@ jobs:
       - run: uv run mypy app
       - run: uv run pytest
       - run: uv run python -m app.openapi_export | diff - openapi.json
+        env:
+          SR_SECRET_KEY: ci-openapi-export-placeholder-not-a-real-secret-key
+
