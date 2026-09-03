@@ -1,0 +1,37 @@
+# Standalone deployment with a self-signed cert — no external reverse proxy
+# required. Use this for a homelab box, a Pi, or to test HTTPS end-to-end.
+#
+# TLS is terminated by the `proxy` nginx container, never by `app` — TLS has
+# always been out of scope for the app container itself (docs/WEB-PLAN.md
+# §5.6). Swapping in a different reverse proxy later means deleting the
+# `proxy` service and its published ports, pointing the new proxy at
+# `app:8000`, and adjusting SR_TRUSTED_PROXIES — `app` itself does not change.
+#
+# Generate the cert first: ./generate-cert.sh <your-hostname-or-IP>
+#
+# Pulls the published image (same one CI pushes on every merge to `main`) —
+# for local development against an unreleased server change instead, use
+# ../docker-compose.yml, which builds from ../../server.
+
+services:
+  app:
+    image: ghcr.io/sjefferson99/simple-runner-server:latest
+    expose:
+      - "8000"                 # reached by `proxy` over the compose network only — not published to the host
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  proxy:
+    image: nginx:alpine
+    ports:
+      - "443:443"
+      - "80:80"                 # plain-http → https redirect only, see nginx.conf
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - app
+    restart: unless-stopped

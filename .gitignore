@@ -37,4 +37,6 @@ __pycache__/
 /data/
 deploy/data/
 deploy/.env
-deploy/traefik/.env
+deploy/standalone-tls/.env
+deploy/standalone-tls/data/
+deploy/standalone-tls/certs/*.pem

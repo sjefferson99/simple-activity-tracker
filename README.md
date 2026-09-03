@@ -28,6 +28,23 @@ See [CLAUDE.md](CLAUDE.md) for the full command reference and per-platform setup
 A self-hosted web app and API (Python/FastAPI, SQLite, htmx) that the mobile app syncs
 runs to. See [docs/WEB-PLAN.md](docs/WEB-PLAN.md) for the design and phased plan.
 
+### Deployment
+
+To run your own instance, see [deploy/standalone-tls/README.md](deploy/standalone-tls/README.md)
+— an app container plus an nginx sidecar that terminates HTTPS with a self-signed
+certificate. No domain or external reverse proxy required; works unchanged on amd64 or
+arm64 (e.g. a Raspberry Pi), and doubles as a template if you'd rather front it with a
+different reverse proxy (Traefik, Caddy, etc.) for production certificate management.
+
+```
+cd deploy/standalone-tls
+cp .env.example .env            # fill in SR_SECRET_KEY, SR_ADMIN_EMAIL, SR_ADMIN_PASSWORD
+./generate-cert.sh <your-LAN-IP-or-hostname>
+docker compose up -d
+```
+
+### Development
+
 Local development, from `server/` (managed with [uv](https://docs.astral.sh/uv/)):
 
 ```
@@ -37,11 +54,13 @@ uv run mypy app
 uv run pytest
 ```
 
-Or run the whole thing in Docker — from `deploy/`, copy `.env.example` to `.env`, fill in
-`SR_SECRET_KEY`, then:
+Or run the app alone in Docker without TLS — from `deploy/`, copy `.env.example` to
+`.env`, fill in `SR_SECRET_KEY`, then:
 
 ```
 docker compose up --build
 ```
 
-`/healthz` should report `{"status": "ok", ...}` on `http://localhost:8000/healthz`.
+`/healthz` should report `{"status": "ok", ...}` on `http://localhost:8000/healthz`. This
+plain compose file is for local iteration and the CI smoke test, not for deploying
+somewhere reachable — see Deployment above for that.

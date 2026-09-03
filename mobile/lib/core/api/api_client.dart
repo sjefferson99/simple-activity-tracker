@@ -3,13 +3,22 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/models/run_summary.dart';
+import 'cert_trust_store.dart';
 import 'dto/analysis_dto.dart';
 import 'dto/login_response_dto.dart';
 import 'dto/run_dto.dart';
 import 'dto/user_dto.dart';
 import 'http_api_client.dart';
 
-final apiClientProvider = Provider<ApiClient>((ref) => HttpApiClient());
+/// Shared with [apiClientProvider] so a certificate the user trusts from
+/// the Settings screen's trust-on-first-use dialog is picked up by the same
+/// [HttpApiClient] used for every other request, not a second store that
+/// never sees the write.
+final certTrustStoreProvider = Provider<CertTrustStore>((ref) => CertTrustStore());
+
+final apiClientProvider = Provider<ApiClient>(
+  (ref) => HttpApiClient(certTrustStore: ref.read(certTrustStoreProvider)),
+);
 
 /// The server's `/api/v1` surface this app needs (docs/WEB-PLAN.md §5.2).
 /// `baseUrl` and `token` are passed per call rather than fixed at

@@ -30,7 +30,7 @@ this work (notably: prompt before installing anything on the machine).
 | Registration | **Closed by default**; first user bootstrapped from env vars; admins add everyone else from the web UI; `SR_ALLOW_REGISTRATION=true` opens self-signup | It's a personal self-hosted server; the operator decides who gets in. |
 | Upload idempotency | Phone generates `client_run_id` (UUID v4) at run start; `POST /runs` is idempotent on `(user, client_run_id)` | A retried upload after a timeout can never create a duplicate run. |
 | Analysis | Computed **synchronously at upload** by a versioned `Analyzer`, result stored as JSON with `analysis_version` | Simple now; the version column plus a `status` field on the API make async workers and re-analysis a non-breaking change. |
-| Containers | Multi-stage Dockerfile, non-root, `/data` volume; **GHCR** image built for `linux/amd64` + `linux/arm64` (QEMU) | **amd64 behind Traefik is the primary deployment**; arm64 keeps Raspberry Pi 4/5 (64-bit OS) working for the homelab/open-source audience. |
+| Containers | Multi-stage Dockerfile, non-root, `/data` volume; **GHCR** image built for `linux/amd64` + `linux/arm64` (QEMU) | Same image runs the standalone-tls deployment (§7.3) on amd64 or arm64 (Raspberry Pi 4/5, 64-bit OS) unchanged. |
 | User management | Admin-only pages + API: create, reset password, disable/enable, promote, delete. Self-service: change password, manage devices | Closed registration needs *some* way to add people; keeping it in the same UI avoids a CLI-only admin path. |
 | CI | GitHub Actions: Flutter analyze/test; server lint/type/test + OpenAPI drift check; container **built on every PR, pushed to GHCR on every merge to `main`** | Day-to-day development runs locally in Docker; anyone can `docker pull` the latest merged state from GHCR. |
 | Raw GPX | Stored **byte-for-byte as uploaded**, downloadable from the run page | GPX 1.1 has no standard for embedding analysis, so the file stays pristine for other apps; all derived data lives in the DB. |
@@ -120,9 +120,12 @@ simple-runner/
   deploy/
     docker-compose.yml                           # plain: app on :8000, ./data volume — local dev and the CI smoke test
     .env.example
-    traefik/docker-compose.yml                   # PRIMARY target (amd64): app + Traefik labels, TLS via ACME, no published app port
-    traefik/README.md                            # what to fill in (domain, email, network name)
-    raspberry-pi.md                              # secondary/homelab: 64-bit OS, pull arm64 image, Caddy variant
+    standalone-tls/                              # deployment guide: app + nginx sidecar terminating a self-signed cert
+      docker-compose.yml                         #   app unpublished (port 8000, compose network only) + proxy on :80/:443
+      nginx.conf                                 #   TLS termination, HTTP→HTTPS redirect, forwards X-Forwarded-*
+      generate-cert.sh                           #   generates the self-signed cert (openssl)
+      .env.example
+      README.md                                  #   setup, which ports to forward, how to move to a different reverse proxy later
   .github/workflows/
     flutter.yml
     server.yml
@@ -271,11 +274,12 @@ controller (§6.3).
 - Uploads: size cap before reading the body, GPX parse errors → `400`, blob keys are
   server-generated (never from the filename).
 - Container runs as non-root; only `/data` is writable; no secrets baked into the image.
-- **TLS is out of scope for the container** — terminate HTTPS at a reverse proxy. The
-  primary deployment is **amd64 + Traefik** (`deploy/traefik/` has a working compose with
-  router/TLS labels); `deploy/raspberry-pi.md` shows the same with Caddy as the lighter
-  homelab option. The container only ever listens on plain `:8000` and trusts forwarded
-  headers from `SR_TRUSTED_PROXIES` only.
+- **TLS is out of scope for the container** — terminate HTTPS at a reverse proxy.
+  `deploy/standalone-tls/` is a working compose with an nginx sidecar terminating a
+  self-signed cert, usable as-is (homelab, Pi, LAN) or as the template for a proxy with
+  real certificate management — the app service itself doesn't change either way. The
+  container only ever listens on plain `:8000` and trusts forwarded headers from
+  `SR_TRUSTED_PROXIES` only.
 - **User administration** lives in the web UI (§8 W2, `/admin/users`) and the `admin`
   API routes (§5.2): create, reset password, disable/enable, promote/demote, delete. The
   first admin comes from the env bootstrap; there is no way to become admin except being
@@ -441,11 +445,34 @@ CLAUDE.md "Current status" updated, and **a commit proposal — ask before commi
 
 **Acceptance:** `flutter analyze`/`flutter test` clean. On the physical Samsung: (a) finish a run with Wi-Fi on → appears in the web UI within seconds, Insights show on the phone; (b) airplane mode → run finishes normally, shows "Queued"; re-enable → uploads without user action; (c) revoke the device in the web UI → next upload shows "Sign in to upload", queue intact, sign in again → uploads; (d) kill the app mid-upload → no duplicate on the server.
 
-### W4 — Deployment guides (amd64 + Traefik primary, Raspberry Pi secondary)
+### W4 — Deployment guide (standalone-tls) — DONE (2026-09-03)
 
-1. `deploy/traefik/docker-compose.yml` + README: Traefik v3 with the Docker provider, ACME (Let's Encrypt) resolver, `websecure` entrypoint, HTTP→HTTPS redirect; the app service with `traefik.http.routers.simple-runner.rule=Host(...)`, `tls.certresolver`, `services...loadbalancer.server.port=8000`, **no published port**, `SR_TRUSTED_PROXIES` set to the compose network, `SR_SECURE_COOKIES=true`. Include the case where Traefik already exists on the host (external network, no second Traefik).
-2. `deploy/raspberry-pi.md`: 64-bit OS requirement, install Docker, `docker compose pull && up -d` (pulls the arm64 image automatically), bootstrap admin env, back up `/data`, Caddy variant for TLS with a LAN or DuckDNS-style hostname.
-3. Verify the Traefik compose end-to-end on the amd64 target: HTTPS reachable, `Secure` cookie set, phone uploads over `https://` with no cleartext warning. Verify on a Pi only if one is to hand.
+1. `deploy/standalone-tls/docker-compose.yml` + README: an `app` service (unpublished,
+   port 8000 reachable only from the compose network) plus a `proxy` service
+   (`nginx:alpine`) that terminates TLS with a self-signed cert and publishes `:80`
+   (redirects to https) and `:443`. `generate-cert.sh` creates the cert
+   (`openssl req -x509 ... -addext subjectAltName=...`, hostname or IP). `.env.example`
+   sets `SR_SECURE_COOKIES=true` and `SR_TRUSTED_PROXIES` to the compose network range.
+2. README documents the ports a router/firewall needs to forward (80, 443 on `proxy`
+   only), and how to move to a different TLS-terminating reverse proxy later: delete the
+   `proxy` service and its cert files, add that proxy's routing config pointed at
+   `app:8000`, adjust `SR_TRUSTED_PROXIES` to its network. The `app` service itself never
+   changes — same image, same env vars, same `/data` volume.
+3. Same image runs on amd64 or arm64 (Raspberry Pi 4/5, 64-bit OS, `docker compose
+   pull && up -d`) unchanged — no separate Pi-specific guide needed.
+4. Verified end-to-end (Windows/Docker Desktop, amd64): HTTP→HTTPS redirect works,
+   `/healthz` 200 over TLS, and a real login sets a `Secure; HttpOnly; SameSite=lax`
+   cookie — confirming `X-Forwarded-Proto`/`SR_TRUSTED_PROXIES` are wired correctly
+   through nginx. Not yet verified on a physical Pi or against a phone upload over
+   `https://`.
+
+**Gotcha worth keeping**: generating the self-signed cert from Git Bash on Windows hit
+the same class of path-mangling bug as the `/data` bind-mount issue (see CLAUDE.md,
+"GHCR image verified standalone") — `openssl -subj "/CN=<host>"` got silently rewritten
+into a Windows path (`C:/Program Files/Git/CN=...`). Fixed in `generate-cert.sh` with a
+`//CN=` (double-leading-slash) escape on `msys`/`cygwin`, which OpenSSL treats
+identically to a single slash — no `MSYS_NO_PATHCONV` needed for this one, unlike the
+bind-mount case.
 
 ---
 
@@ -496,7 +523,7 @@ the container, Postgres actually being exercised.
 | 6 | Headline numbers | **Phone summary is the headline; server analysis is labelled extra.** Raw GPX is downloadable from the web UI, byte-for-byte as uploaded (no standard exists for embedding analysis in GPX, so we don't try). |
 | 7 | Deletion | **Scoped to the device you're on** — server delete never touches the phone. "Delete everywhere" is a later option. |
 | 8 | Fixture data | **Synthetic GPX only.** The owner can supply a short real walk GPX later if a real-world fixture becomes useful. |
-| 9 | Deployment target | **amd64 host behind Traefik is the primary target** and gets the worked compose example. Raspberry Pi (arm64, Caddy) stays supported with a brief guide for the homelab/open-source audience. |
+| 9 | Deployment target | **`deploy/standalone-tls/`** (nginx sidecar + self-signed cert) is the one worked compose example, and runs unchanged on amd64 or arm64 (Raspberry Pi) — no separate Traefik or Pi-specific guide. |
 | 10 | User management | **In the web UI, admin-only** (create, reset password, disable, promote, delete) plus self-service password change and device revocation. No email-based flows. No JWTs — signed session cookies and opaque device tokens, both revocable server-side. |
 
 ---

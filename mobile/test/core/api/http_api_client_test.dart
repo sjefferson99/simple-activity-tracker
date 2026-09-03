@@ -85,6 +85,33 @@ void main() {
     );
   });
 
+  test('throws ApiRejectedException with a helpful message on a 3xx redirect', () async {
+    // Reproduces deploy/standalone-tls/nginx.conf redirecting http:// to
+    // https:// with a 301 — dart:io's HttpClient never auto-follows a
+    // redirect on a POST, so this response reaches HttpApiClient as-is.
+    final client = HttpApiClient(
+      client: MockClient((request) async => http.Response(
+            '<html>301 Moved Permanently</html>',
+            301,
+            headers: {'location': 'https://runner.example.com/api/v1/auth/login'},
+          )),
+    );
+
+    await expectLater(
+      () => client.login(
+        baseUrl: _baseUrl,
+        email: 'runner@example.com',
+        password: 'secret',
+        deviceName: 'Pixel 8',
+      ),
+      throwsA(isA<ApiRejectedException>().having(
+        (e) => e.message,
+        'message',
+        contains('https://'),
+      )),
+    );
+  });
+
   test('throws ApiRateLimitedException on 429', () async {
     final client = HttpApiClient(
       client: MockClient((request) async => http.Response('{"error":{"code":"rate_limited","message":"slow down"}}', 429)),

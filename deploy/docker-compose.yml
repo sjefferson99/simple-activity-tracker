@@ -1,6 +1,6 @@
 # Plain local-dev compose: app on :8000, no reverse proxy. Used for local
 # development and the container.yml CI smoke test. For a real deployment,
-# see traefik/docker-compose.yml (primary) or ../docs/raspberry-pi.md.
+# see standalone-tls/docker-compose.yml.
 services:
   app:
     build:

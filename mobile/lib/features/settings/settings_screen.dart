@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/api/api_client.dart';
 import '../../core/api/api_exception.dart';
 import '../../core/auth/auth_state.dart';
 import '../../core/auth/auth_state_controller.dart';
@@ -198,11 +199,7 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
       await ref
           .read(authStateControllerProvider.notifier)
           .setServerUrl(widget.serverUrlController.text.trim());
-      await ref.read(authStateControllerProvider.notifier).signIn(
-            email: widget.emailController.text.trim(),
-            password: widget.passwordController.text,
-            deviceName: widget.deviceNameController.text.trim(),
-          );
+      await _signIn();
     } on Object catch (e) {
       // Deliberately caught here, not routed through authStateControllerProvider's
       // state — an AsyncError there would replace this whole form (and the
@@ -211,6 +208,66 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  Future<void> _signIn() async {
+    try {
+      await ref.read(authStateControllerProvider.notifier).signIn(
+            email: widget.emailController.text.trim(),
+            password: widget.passwordController.text,
+            deviceName: widget.deviceNameController.text.trim(),
+          );
+    } on ApiCertificateException catch (e) {
+      final trusted = mounted ? await _confirmCertificateTrust(e) : false;
+      if (!trusted) rethrow;
+      // The dialog already wrote the pin to CertTrustStore — retry once,
+      // now that the handshake will succeed.
+      await ref.read(authStateControllerProvider.notifier).signIn(
+            email: widget.emailController.text.trim(),
+            password: widget.passwordController.text,
+            deviceName: widget.deviceNameController.text.trim(),
+          );
+    }
+  }
+
+  /// Trust-on-first-use: shows the presented certificate's fingerprint and
+  /// asks the user to confirm it out of band (e.g. against what
+  /// generate-cert.sh printed) before pinning it in CertTrustStore. Returns
+  /// whether the user confirmed.
+  Future<bool> _confirmCertificateTrust(ApiCertificateException e) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Can't verify this server's identity"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(e.message),
+            const SizedBox(height: 16),
+            const Text('Certificate fingerprint (SHA-256):', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            SelectableText(e.fingerprint, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+            const SizedBox(height: 12),
+            const Text(
+              'Compare this to the fingerprint shown when the certificate was generated, '
+              'or in a browser\'s certificate viewer for this server. Only trust it if it matches.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Trust this certificate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return false;
+    await ref.read(certTrustStoreProvider).trust(e.host, e.fingerprint);
+    return true;
   }
 
   @override

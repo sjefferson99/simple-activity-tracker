@@ -44,3 +44,16 @@ class ApiRejectedException extends ApiException {
 
   const ApiRejectedException(super.message, {required this.statusCode});
 }
+
+/// TLS handshake failed because the server presented a certificate the
+/// platform trust store doesn't recognise (e.g. a self-signed cert, see
+/// deploy/standalone-tls/) and [host] has no pinned fingerprint for it yet
+/// — or its pinned fingerprint no longer matches. Not retryable on its own;
+/// the caller should offer trust-on-first-use (show [fingerprint], ask the
+/// user to confirm it out of band, then pin it) rather than retry blindly.
+class ApiCertificateException extends ApiException {
+  final String host;
+  final String fingerprint;
+
+  const ApiCertificateException(super.message, {required this.host, required this.fingerprint});
+}
