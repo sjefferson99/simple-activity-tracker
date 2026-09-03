@@ -1,13 +1,14 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:simple_runner/domain/models/live_metrics.dart';
-import 'package:simple_runner/domain/models/run_summary.dart';
-import 'package:simple_runner/domain/models/split.dart';
+import 'package:simple_activity_tracker/domain/models/live_metrics.dart';
+import 'package:simple_activity_tracker/domain/models/run_summary.dart';
+import 'package:simple_activity_tracker/domain/models/split.dart';
+import 'package:simple_activity_tracker/domain/tracking/activity_mode.dart';
 
 void main() {
-  // Mirrors server/tests/conftest.py's make_summary() — the server has no
+  // Mirrors server/tests/conftest.py's make_summary() â€” the server has no
   // OpenAPI example for this shape (it's parsed from a raw JSON form field,
   // not a typed request body), so its own test fixture is the closest thing
   // to a canonical example.
@@ -21,6 +22,7 @@ void main() {
     expect(summary.clientRunId, '11111111-1111-1111-1111-111111111111');
     expect(summary.startedAt, DateTime.utc(2026, 1, 1, 7, 0, 0));
     expect(summary.endedAt, DateTime.utc(2026, 1, 1, 7, 16, 30));
+    expect(summary.activityMode, ActivityMode.running);
     expect(summary.movingSeconds, 900.0);
     expect(summary.distanceMeters, 3000.0);
     expect(summary.avgSpeedMps, 3.33);
@@ -57,6 +59,7 @@ void main() {
       clientRunId: '11111111-1111-1111-1111-111111111111',
       startedAt: DateTime.utc(2026, 1, 1, 7, 0, 0),
       endedAt: DateTime.utc(2026, 1, 1, 7, 16, 30),
+      activityMode: ActivityMode.running,
       metrics: metrics,
       sourcePlatform: 'android',
       sourceAppVersion: '1.0.0+1',
@@ -70,6 +73,7 @@ void main() {
       clientRunId: 'abc',
       startedAt: DateTime(2026, 6, 1, 10, 0, 0), // local time, no offset
       endedAt: DateTime(2026, 6, 1, 10, 30, 0),
+      activityMode: ActivityMode.running,
       metrics: LiveMetrics.zero,
       sourcePlatform: 'android',
       sourceAppVersion: '1.0.0+1',

@@ -2,13 +2,15 @@ import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage
 import 'package:flutter_secure_storage/test/test_flutter_secure_storage_platform.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:simple_runner/core/api/api_exception.dart';
-import 'package:simple_runner/core/auth/auth_service.dart';
+import 'package:simple_activity_tracker/core/api/api_exception.dart';
+import 'package:simple_activity_tracker/core/auth/auth_service.dart';
 
 import '../../fakes/fake_api_client.dart';
 
 AuthService _service(FakeApiClient api, Map<String, String> store) {
-  FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(store);
+  FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(
+    store,
+  );
   return AuthService(apiClient: api, storage: const FlutterSecureStorage());
 }
 
@@ -33,7 +35,11 @@ void main() {
   test('signIn without a server URL throws', () async {
     final service = _service(FakeApiClient(), {});
     expect(
-      () => service.signIn(email: 'a@example.com', password: 'x', deviceName: 'Pixel'),
+      () => service.signIn(
+        email: 'a@example.com',
+        password: 'x',
+        deviceName: 'Pixel',
+      ),
       throwsStateError,
     );
   });
@@ -57,18 +63,23 @@ void main() {
 
   test('signIn surfaces an ApiException from the server', () async {
     final api = FakeApiClient()
-      ..loginHandler = ({
-        required baseUrl,
-        required email,
-        required password,
-        required deviceName,
-      }) async =>
-          throw const ApiUnauthorizedException('Invalid email or password');
+      ..loginHandler =
+          ({
+            required baseUrl,
+            required email,
+            required password,
+            required deviceName,
+          }) async =>
+              throw const ApiUnauthorizedException('Invalid email or password');
     final service = _service(api, {});
     await service.setServerUrl('https://runner.example.com');
 
     expect(
-      () => service.signIn(email: 'a@example.com', password: 'wrong', deviceName: 'Pixel'),
+      () => service.signIn(
+        email: 'a@example.com',
+        password: 'wrong',
+        deviceName: 'Pixel',
+      ),
       throwsA(isA<ApiUnauthorizedException>()),
     );
   });
@@ -77,7 +88,11 @@ void main() {
     final api = FakeApiClient();
     final service = _service(api, {});
     await service.setServerUrl('https://runner.example.com');
-    await service.signIn(email: 'runner@example.com', password: 'x', deviceName: 'Pixel');
+    await service.signIn(
+      email: 'runner@example.com',
+      password: 'x',
+      deviceName: 'Pixel',
+    );
 
     final state = await service.signOut();
 
@@ -85,33 +100,47 @@ void main() {
     expect(state.serverUrl, 'https://runner.example.com');
   });
 
-  test('signOut succeeds locally even if the server logout call fails', () async {
-    final api = FakeApiClient();
-    final service = _service(api, {});
-    await service.setServerUrl('https://runner.example.com');
-    await service.signIn(email: 'runner@example.com', password: 'x', deviceName: 'Pixel');
+  test(
+    'signOut succeeds locally even if the server logout call fails',
+    () async {
+      final api = FakeApiClient();
+      final service = _service(api, {});
+      await service.setServerUrl('https://runner.example.com');
+      await service.signIn(
+        email: 'runner@example.com',
+        password: 'x',
+        deviceName: 'Pixel',
+      );
 
-    // Simulate the server being unreachable during logout.
-    final failingService = AuthService(
-      apiClient: _ThrowingLogoutClient(api),
-      storage: const FlutterSecureStorage(),
-    );
-    final state = await failingService.signOut();
+      // Simulate the server being unreachable during logout.
+      final failingService = AuthService(
+        apiClient: _ThrowingLogoutClient(api),
+        storage: const FlutterSecureStorage(),
+      );
+      final state = await failingService.signOut();
 
-    expect(state.isSignedIn, isFalse);
-  });
+      expect(state.isSignedIn, isFalse);
+    },
+  );
 
-  test('markSignedOutDueToAuthFailure clears the token, keeps the server URL', () async {
-    final api = FakeApiClient();
-    final service = _service(api, {});
-    await service.setServerUrl('https://runner.example.com');
-    await service.signIn(email: 'runner@example.com', password: 'x', deviceName: 'Pixel');
+  test(
+    'markSignedOutDueToAuthFailure clears the token, keeps the server URL',
+    () async {
+      final api = FakeApiClient();
+      final service = _service(api, {});
+      await service.setServerUrl('https://runner.example.com');
+      await service.signIn(
+        email: 'runner@example.com',
+        password: 'x',
+        deviceName: 'Pixel',
+      );
 
-    final state = await service.markSignedOutDueToAuthFailure();
+      final state = await service.markSignedOutDueToAuthFailure();
 
-    expect(state.isSignedIn, isFalse);
-    expect(state.serverUrl, 'https://runner.example.com');
-  });
+      expect(state.isSignedIn, isFalse);
+      expect(state.serverUrl, 'https://runner.example.com');
+    },
+  );
 }
 
 class _ThrowingLogoutClient extends FakeApiClient {

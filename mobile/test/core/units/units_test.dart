@@ -1,5 +1,5 @@
-import 'package:flutter_test/flutter_test.dart';
-import 'package:simple_runner/core/units/units.dart';
+﻿import 'package:flutter_test/flutter_test.dart';
+import 'package:simple_activity_tracker/core/units/units.dart';
 
 void main() {
   group('kmhFromMps', () {
@@ -60,6 +60,14 @@ void main() {
     test('formats meters as km with two decimals', () {
       expect(formatDistanceKm(5210), '5.21');
       expect(formatDistanceKm(0), '0.00');
+    });
+  });
+
+  group('formatMeters', () {
+    test('rounds to the nearest whole metre', () {
+      expect(formatMeters(123.4), '123');
+      expect(formatMeters(123.6), '124');
+      expect(formatMeters(0), '0');
     });
   });
 }

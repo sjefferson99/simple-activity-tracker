@@ -15,5 +15,5 @@ Future<void> main() async {
     // ignore: nothing to do here — exportToPublicStorage() checks its own
     // preconditions and simply returns null if initialization never ran.
   }
-  runApp(const ProviderScope(child: SimpleRunnerApp()));
+  runApp(const ProviderScope(child: SimpleActivityTrackerApp()));
 }

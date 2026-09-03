@@ -22,6 +22,7 @@ import '../../domain/models/run_record.dart';
 import '../../domain/models/run_summary.dart';
 import '../../domain/models/sync_status.dart';
 import '../../domain/models/track_point.dart';
+import '../../domain/tracking/activity_mode.dart';
 import '../../domain/tracking/metrics_engine.dart';
 import '../../domain/tracking/run_phase.dart';
 import 'live_run_state.dart';
@@ -52,6 +53,7 @@ class LiveRunController extends Notifier<LiveRunState> {
 
   String? _clientRunId;
   DateTime? _startedAt;
+  ActivityMode? _activityMode;
   String? _cachedAppVersion;
 
   // Bumped every time a run starts. stop() closes over the token for the
@@ -76,9 +78,9 @@ class LiveRunController extends Notifier<LiveRunState> {
   }
 
   RunPhase? get _phase => switch (state) {
-        LiveRunActive(:final phase) => phase,
-        _ => null,
-      };
+    LiveRunActive(:final phase) => phase,
+    _ => null,
+  };
 
   Future<void> start() async {
     final service = ref.read(locationServiceProvider);
@@ -116,8 +118,11 @@ class LiveRunController extends Notifier<LiveRunState> {
     // Fixed for the run's duration — read once here, not from a live
     // `ref.watch`, so switching the home screen toggle mid-run (which the UI
     // already disables, but this is the actual guarantee) can't change which
-    // plausibility thresholds an in-progress run is judged against.
-    _metricsEngine = MetricsEngine(mode: ref.read(activityModeControllerProvider));
+    // plausibility thresholds an in-progress run is judged against. The same
+    // captured value is reused at stop() for the RunRecord/RunSummary, since
+    // the toggle may have moved on by then.
+    _activityMode = ref.read(activityModeControllerProvider);
+    _metricsEngine = MetricsEngine(mode: _activityMode!);
     _currentGpxFile = await newRunGpxFile(DateTime.now());
     _gpxLog = RunGpxLog(_currentGpxFile!);
     // A periodic flush that fails is not fatal: every flush rewrites the
@@ -153,32 +158,47 @@ class LiveRunController extends Notifier<LiveRunState> {
     final gpxFile = _currentGpxFile;
     final clientRunId = _clientRunId;
     final startedAt = _startedAt;
+    final activityMode = _activityMode;
     final finishedRunToken = _runToken;
     await _disposeRun();
 
     // Sidecar write happens before the state switch (docs/WEB-PLAN.md §6.3)
     // — it's a small local JSON write, not a network call, so this doesn't
     // delay the summary screen the way waiting on SyncService would.
-    if (gpxFile != null && clientRunId != null && startedAt != null) {
+    if (gpxFile != null &&
+        clientRunId != null &&
+        startedAt != null &&
+        activityMode != null) {
       final summary = RunSummary.fromMetrics(
         clientRunId: clientRunId,
         startedAt: startedAt,
         endedAt: DateTime.now().toUtc(),
+        activityMode: activityMode,
         metrics: metrics,
         sourcePlatform: _sourcePlatform,
         sourceAppVersion: await _appVersion(),
       );
-      await ref.read(runStoreProvider).save(RunRecord(
-            clientRunId: clientRunId,
-            gpxPath: gpxFile.path,
-            summary: summary,
-            syncStatus: const SyncStatusPending(),
-          ));
+      await ref
+          .read(runStoreProvider)
+          .save(
+            RunRecord(
+              clientRunId: clientRunId,
+              gpxPath: gpxFile.path,
+              activityMode: activityMode,
+              summary: summary,
+              syncStatus: const SyncStatusPending(),
+            ),
+          );
     }
     _clientRunId = null;
     _startedAt = null;
+    _activityMode = null;
 
-    state = LiveRunFinished(metrics: metrics, clientRunId: clientRunId);
+    state = LiveRunFinished(
+      metrics: metrics,
+      activityMode: activityMode ?? ActivityMode.running,
+      clientRunId: clientRunId,
+    );
     // Fire-and-forget — a slow or failed upload must never delay the
     // summary screen, which is already showing by this point.
     ref.read(syncServiceProvider).runFinished();
@@ -249,7 +269,11 @@ class LiveRunController extends Notifier<LiveRunState> {
     _metricsEngine?.addPoint(point);
     _gpxLog?.addPoint(point);
 
-    _emitActive(RunPhase.tracking, speedMps: speed, accuracyMeters: sample.accuracyMeters);
+    _emitActive(
+      RunPhase.tracking,
+      speedMps: speed,
+      accuracyMeters: sample.accuracyMeters,
+    );
   }
 
   /// `1.0.0+1` — matches pubspec's version+build format, and the shape the
@@ -275,14 +299,19 @@ class LiveRunController extends Notifier<LiveRunState> {
     required double? speedMps,
     required double? accuracyMeters,
   }) {
-    final previousAccuracy =
-        state is LiveRunActive ? (state as LiveRunActive).accuracyMeters : 0.0;
+    final previousAccuracy = state is LiveRunActive
+        ? (state as LiveRunActive).accuracyMeters
+        : 0.0;
 
     state = LiveRunActive(
       phase: phase,
       speedMps: speedMps,
       accuracyMeters: accuracyMeters ?? previousAccuracy,
       metrics: _metricsEngine?.metrics ?? LiveMetrics.zero,
+      // Fixed for the run's whole duration (see start()); _activityMode is
+      // only ever null before a run has started, at which point nothing
+      // reaches LiveRunActive.
+      activityMode: _activityMode ?? ActivityMode.running,
     );
   }
 }

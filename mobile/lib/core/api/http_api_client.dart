@@ -43,18 +43,20 @@ CertificateTrustDecision decideCertificateTrust({
   if (pinnedFingerprint != null && pinnedFingerprint == fingerprint) {
     return const CertificateTrustDecision.trust();
   }
-  return CertificateTrustDecision.reject(ApiCertificateException(
-    pinnedFingerprint == null
-        ? 'The server at $host presented a certificate that isn\'t from a trusted '
-            'authority. If this is your own server with a self-signed certificate, '
-            'confirm the fingerprint to trust it.'
-        : 'The certificate presented by $host has changed and no longer matches the '
-            'one you trusted. Confirm the new fingerprint before trusting it again — '
-            'this can happen after legitimately regenerating the certificate, or if '
-            'something on the network is intercepting the connection.',
-    host: host,
-    fingerprint: fingerprint,
-  ));
+  return CertificateTrustDecision.reject(
+    ApiCertificateException(
+      pinnedFingerprint == null
+          ? 'The server at $host presented a certificate that isn\'t from a trusted '
+                'authority. If this is your own server with a self-signed certificate, '
+                'confirm the fingerprint to trust it.'
+          : 'The certificate presented by $host has changed and no longer matches the '
+                'one you trusted. Confirm the new fingerprint before trusting it again — '
+                'this can happen after legitimately regenerating the certificate, or if '
+                'something on the network is intercepting the connection.',
+      host: host,
+      fingerprint: fingerprint,
+    ),
+  );
 }
 
 /// The only file in the app that knows the server's URLs and JSON wire
@@ -93,8 +95,8 @@ class HttpApiClient implements ApiClient {
   ApiCertificateException? _lastCertRejection;
 
   HttpApiClient({http.Client? client, CertTrustStore? certTrustStore})
-      : _certTrustStore = certTrustStore ?? CertTrustStore(),
-        _checksCertificates = client == null {
+    : _certTrustStore = certTrustStore ?? CertTrustStore(),
+      _checksCertificates = client == null {
     if (client != null) {
       _client = client;
       return;
@@ -120,7 +122,9 @@ class HttpApiClient implements ApiClient {
 
   Uri _uri(String baseUrl, String path) => Uri.parse('$baseUrl$path');
 
-  Map<String, String> _authHeaders(String token) => {'Authorization': 'Bearer $token'};
+  Map<String, String> _authHeaders(String token) => {
+    'Authorization': 'Bearer $token',
+  };
 
   @override
   Future<LoginResponseDto> login({
@@ -129,31 +133,41 @@ class HttpApiClient implements ApiClient {
     required String password,
     required String deviceName,
   }) async {
-    final response = await _send(() => _client
-        .post(
-          _uri(baseUrl, '/api/v1/auth/login'),
-          headers: const {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'email': email,
-            'password': password,
-            'device_name': deviceName,
-          }),
-        )
-        .timeout(_requestTimeout));
+    final response = await _send(
+      () => _client
+          .post(
+            _uri(baseUrl, '/api/v1/auth/login'),
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'email': email,
+              'password': password,
+              'device_name': deviceName,
+            }),
+          )
+          .timeout(_requestTimeout),
+    );
     return LoginResponseDto.fromJson(_decodeJson(response));
   }
 
   @override
   Future<void> logout({required String baseUrl, required String token}) async {
-    await _send(() => _client
-        .post(_uri(baseUrl, '/api/v1/auth/logout'), headers: _authHeaders(token))
-        .timeout(_requestTimeout));
+    await _send(
+      () => _client
+          .post(
+            _uri(baseUrl, '/api/v1/auth/logout'),
+            headers: _authHeaders(token),
+          )
+          .timeout(_requestTimeout),
+    );
   }
 
   @override
   Future<UserDto> me({required String baseUrl, required String token}) async {
-    final response = await _send(() =>
-        _client.get(_uri(baseUrl, '/api/v1/me'), headers: _authHeaders(token)).timeout(_requestTimeout));
+    final response = await _send(
+      () => _client
+          .get(_uri(baseUrl, '/api/v1/me'), headers: _authHeaders(token))
+          .timeout(_requestTimeout),
+    );
     return UserDto.fromJson(_decodeJson(response));
   }
 
@@ -165,10 +179,11 @@ class HttpApiClient implements ApiClient {
     required File gpxFile,
   }) async {
     final response = await _send(() async {
-      final request = http.MultipartRequest('POST', _uri(baseUrl, '/api/v1/runs'))
-        ..headers.addAll(_authHeaders(token))
-        ..fields['summary'] = jsonEncode(summary.toJson())
-        ..files.add(await http.MultipartFile.fromPath('gpx', gpxFile.path));
+      final request =
+          http.MultipartRequest('POST', _uri(baseUrl, '/api/v1/activities'))
+            ..headers.addAll(_authHeaders(token))
+            ..fields['summary'] = jsonEncode(summary.toJson())
+            ..files.add(await http.MultipartFile.fromPath('gpx', gpxFile.path));
       final streamed = await _client.send(request).timeout(_requestTimeout);
       return http.Response.fromStream(streamed);
     });
@@ -181,9 +196,14 @@ class HttpApiClient implements ApiClient {
     required String token,
     required String serverRunId,
   }) async {
-    final response = await _send(() => _client
-        .get(_uri(baseUrl, '/api/v1/runs/$serverRunId/analysis'), headers: _authHeaders(token))
-        .timeout(_requestTimeout));
+    final response = await _send(
+      () => _client
+          .get(
+            _uri(baseUrl, '/api/v1/activities/$serverRunId/analysis'),
+            headers: _authHeaders(token),
+          )
+          .timeout(_requestTimeout),
+    );
     return AnalysisDto.fromJson(_decodeJson(response));
   }
 

@@ -21,7 +21,9 @@ class _UseKmhNotifier extends Notifier<bool> {
   void toggle() => state = !state;
 }
 
-final _useKmhProvider = NotifierProvider<_UseKmhNotifier, bool>(_UseKmhNotifier.new);
+final _useKmhProvider = NotifierProvider<_UseKmhNotifier, bool>(
+  _UseKmhNotifier.new,
+);
 
 /// Run/Cycle segmented toggle, always on the home screen (not tucked into
 /// Settings) since it changes how GPS is interpreted for the next run, not
@@ -40,8 +42,9 @@ class _ActivityModeToggle extends ConsumerWidget {
       ],
       selected: {mode},
       showSelectedIcon: false,
-      onSelectionChanged: (selected) =>
-          ref.read(activityModeControllerProvider.notifier).select(selected.first),
+      onSelectionChanged: (selected) => ref
+          .read(activityModeControllerProvider.notifier)
+          .select(selected.first),
       style: const ButtonStyle(visualDensity: VisualDensity.compact),
     );
   }
@@ -54,13 +57,32 @@ class LiveRunScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(liveRunControllerProvider);
     final controller = ref.read(liveRunControllerProvider.notifier);
-    final useKmh = ref.watch(_useKmhProvider);
+
+    // The mode a run is actually recorded under — the source of truth once a
+    // run has started/finished, since LiveRunController fixes it at start()
+    // and it must not change mid-run even if the (now-hidden) home screen
+    // toggle's own state moved on. Before a run starts, this falls back to
+    // the toggle's live value so the idle screen's tile-less UI has
+    // something to key off of if it ever needs to.
+    final runActivityMode = switch (state) {
+      LiveRunActive(:final activityMode) => activityMode,
+      LiveRunFinished(:final activityMode) => activityMode,
+      _ => ref.watch(activityModeControllerProvider),
+    };
+    final isCycling = runActivityMode == ActivityMode.cycling;
+
+    // Cycling has no pace concept — the toggle is forced to km/h and hidden
+    // rather than just disabled, so a run started in cycling mode never
+    // shows a min/km readout even if useKmh was left false from a previous
+    // running-mode session.
+    final useKmh = isCycling || ref.watch(_useKmhProvider);
 
     // Before a run starts there is no reading to show or unit to toggle, so
     // the idle screen is just its Start button. The same applies to the
     // states that replace it when a run can't begin (no permission, location
     // services off) — those carry a message and a retry, not a readout.
-    final showsReadout = state is LiveRunAcquiring ||
+    final showsReadout =
+        state is LiveRunAcquiring ||
         state is LiveRunActive ||
         state is LiveRunFinished;
 
@@ -88,13 +110,19 @@ class LiveRunScreen extends ConsumerWidget {
                   children: [
                     IconButton(
                       onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                        MaterialPageRoute(
+                          builder: (_) => const SettingsScreen(),
+                        ),
                       ),
                       icon: const Icon(Icons.settings_outlined),
                     ),
-                    showsReadout
+                    // Cycling never shows a unit toggle at all — pace isn't a
+                    // cycling concept, so there's nothing to switch to.
+                    showsReadout && !isCycling
                         ? TextButton(
-                            onPressed: ref.read(_useKmhProvider.notifier).toggle,
+                            onPressed: ref
+                                .read(_useKmhProvider.notifier)
+                                .toggle,
                             child: Text(useKmh ? 'km/h' : 'min/km'),
                           )
                         // Holds the row's height so the content below doesn't
@@ -148,6 +176,7 @@ class LiveRunScreen extends ConsumerWidget {
                               metrics: metrics,
                               useKmh: useKmh,
                               unit: unit,
+                              activityMode: runActivityMode,
                             ),
                           ),
                         SizedBox(height: unit * 3),
@@ -182,9 +211,13 @@ class _PrimarySpeedReadout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final speedMps = state is LiveRunActive ? (state as LiveRunActive).speedMps : null;
+    final speedMps = state is LiveRunActive
+        ? (state as LiveRunActive).speedMps
+        : null;
     final text = speedMps != null
-        ? (useKmh ? formatKmh(speedMps) : formatPace(paceSecPerKmFromMps(speedMps)))
+        ? (useKmh
+              ? formatKmh(speedMps)
+              : formatPace(paceSecPerKmFromMps(speedMps)))
         : (useKmh ? '--.-' : '--:--');
 
     // The number you read at arm's length mid-run, so it gets the largest
@@ -240,7 +273,8 @@ class _StatusLine extends StatelessWidget {
       LiveRunPermissionDenied(forever: false) => 'Location permission denied',
     };
 
-    final showSettingsAction = state is LiveRunPermissionDenied &&
+    final showSettingsAction =
+        state is LiveRunPermissionDenied &&
         (state as LiveRunPermissionDenied).forever;
 
     return Column(
@@ -267,23 +301,26 @@ class _MetricGrid extends StatelessWidget {
   final LiveMetrics metrics;
   final bool useKmh;
   final double unit;
+  final ActivityMode activityMode;
 
   const _MetricGrid({
     required this.metrics,
     required this.useKmh,
     required this.unit,
+    required this.activityMode,
   });
 
   @override
   Widget build(BuildContext context) {
+    final specs = metricSpecsFor(activityMode);
+
     // Two per row, so each tile gets half the width to grow into. An odd
     // spec count leaves the last tile centred on its own row rather than
     // stretched across the full width, which would make it read as more
     // important than the others.
     final rows = <List<MetricSpec>>[
-      for (var i = 0; i < defaultMetricSpecs.length; i += 2)
-        defaultMetricSpecs.sublist(
-            i, (i + 2).clamp(0, defaultMetricSpecs.length)),
+      for (var i = 0; i < specs.length; i += 2)
+        specs.sublist(i, (i + 2).clamp(0, specs.length)),
     ];
 
     return Column(
@@ -377,74 +414,74 @@ class _Controls extends StatelessWidget {
     return switch (state) {
       LiveRunIdle() ||
       LiveRunServiceDisabled() ||
-      LiveRunPermissionDenied() =>
-        FilledButton(
-          onPressed: controller.start,
-          style: FilledButton.styleFrom(minimumSize: const Size(160, 56)),
-          child: const Text('Start'),
-        ),
+      LiveRunPermissionDenied() => FilledButton(
+        onPressed: controller.start,
+        style: FilledButton.styleFrom(minimumSize: const Size(160, 56)),
+        child: const Text('Start'),
+      ),
       LiveRunFinished(:final exportedTo, :final clientRunId) => Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (clientRunId != null) RunSyncSection(clientRunId: clientRunId),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Back to the idle screen — the only way to reach the
-                // run/cycle toggle again, which the home screen hides once a
-                // run is active or finished.
-                OutlinedButton(
-                  onPressed: controller.goToIdle,
-                  style: OutlinedButton.styleFrom(minimumSize: const Size(120, 56)),
-                  child: const Text('Home'),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (clientRunId != null) RunSyncSection(clientRunId: clientRunId),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Back to the idle screen — the only way to reach the
+              // run/cycle toggle again, which the home screen hides once a
+              // run is active or finished.
+              OutlinedButton(
+                onPressed: controller.goToIdle,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(120, 56),
                 ),
-                const SizedBox(width: 16),
-                FilledButton(
-                  onPressed: controller.startNewRun,
-                  style: FilledButton.styleFrom(minimumSize: const Size(120, 56)),
-                  child: const Text('New run'),
-                ),
-              ],
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ExportHelpScreen(exportedTo: exportedTo),
-                ),
+                child: const Text('Home'),
               ),
-              child: const Text("Where's my file?"),
+              const SizedBox(width: 16),
+              FilledButton(
+                onPressed: controller.startNewRun,
+                style: FilledButton.styleFrom(minimumSize: const Size(120, 56)),
+                child: const Text('New run'),
+              ),
+            ],
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => ExportHelpScreen(exportedTo: exportedTo),
+              ),
             ),
-          ],
-        ),
+            child: const Text("Where's my file?"),
+          ),
+        ],
+      ),
       // GPS may never get a fix (indoors, hardware issue). Offer a way out —
       // the wakelock and flush timer are already running by this point.
       LiveRunAcquiring() => Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const FilledButton(
-              onPressed: null,
-              child: Text('Acquiring…'),
-            ),
-            const SizedBox(width: 16),
-            OutlinedButton(
-              onPressed: controller.stop,
-              style: OutlinedButton.styleFrom(minimumSize: const Size(120, 56)),
-              child: const Text('Cancel'),
-            ),
-          ],
-        ),
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const FilledButton(onPressed: null, child: Text('Acquiring…')),
+          const SizedBox(width: 16),
+          OutlinedButton(
+            onPressed: controller.stop,
+            style: OutlinedButton.styleFrom(minimumSize: const Size(120, 56)),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
       LiveRunActive(:final phase) => Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            FilledButton(
-              onPressed: phase == RunPhase.paused ? controller.resume : controller.pause,
-              style: FilledButton.styleFrom(minimumSize: const Size(120, 56)),
-              child: Text(phase == RunPhase.paused ? 'Resume' : 'Pause'),
-            ),
-            const SizedBox(width: 16),
-            _StopButton(controller: controller),
-          ],
-        ),
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          FilledButton(
+            onPressed: phase == RunPhase.paused
+                ? controller.resume
+                : controller.pause,
+            style: FilledButton.styleFrom(minimumSize: const Size(120, 56)),
+            child: Text(phase == RunPhase.paused ? 'Resume' : 'Pause'),
+          ),
+          const SizedBox(width: 16),
+          _StopButton(controller: controller),
+        ],
+      ),
     };
   }
 }
@@ -460,9 +497,9 @@ class _StopButton extends StatelessWidget {
     return GestureDetector(
       onLongPress: controller.stop,
       child: FilledButton.tonal(
-        onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Hold to stop')),
-        ),
+        onPressed: () =>
+            ScaffoldMessenger.of(context)
+                .showSnackBar(const SnackBar(content: Text('Hold to stop'))),
         style: FilledButton.styleFrom(minimumSize: const Size(120, 56)),
         child: const Text('Stop'),
       ),

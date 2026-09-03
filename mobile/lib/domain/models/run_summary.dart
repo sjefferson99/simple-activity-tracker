@@ -1,13 +1,21 @@
+import '../tracking/activity_mode.dart';
 import 'live_metrics.dart';
 
 /// The phone's own numbers for a finished run — mirrors the server's
-/// RunSummary schema exactly (docs/WEB-PLAN.md §5.3), including field names
-/// and units (seconds/meters/m-per-second, not Duration/formatted strings),
-/// so [toJson] can be sent to the server without any renaming at the call site.
+/// ActivitySummary schema exactly (docs/WEB-PLAN.md §5.3), including field
+/// names and units (seconds/meters/m-per-second, not Duration/formatted
+/// strings), so [toJson] can be sent to the server without any renaming at
+/// the call site.
+///
+/// The Dart field is still named `clientRunId` (an internal domain concept,
+/// not renamed per the activities-terminology scope) but it's serialized as
+/// the wire's `client_activity_id` — see [toJson]/[fromJson]. Likewise
+/// `activityMode` is serialized as `activity_type`.
 class RunSummary {
   final String clientRunId;
   final DateTime startedAt;
   final DateTime endedAt;
+  final ActivityMode activityMode;
   final double movingSeconds;
   final double distanceMeters;
   final double? avgSpeedMps;
@@ -19,6 +27,7 @@ class RunSummary {
     required this.clientRunId,
     required this.startedAt,
     required this.endedAt,
+    required this.activityMode,
     required this.movingSeconds,
     required this.distanceMeters,
     required this.avgSpeedMps,
@@ -33,6 +42,7 @@ class RunSummary {
     required String clientRunId,
     required DateTime startedAt,
     required DateTime endedAt,
+    required ActivityMode activityMode,
     required LiveMetrics metrics,
     required String sourcePlatform,
     required String sourceAppVersion,
@@ -41,6 +51,7 @@ class RunSummary {
       clientRunId: clientRunId,
       startedAt: startedAt,
       endedAt: endedAt,
+      activityMode: activityMode,
       movingSeconds: metrics.elapsed.inMilliseconds / 1000,
       distanceMeters: metrics.distanceMeters,
       avgSpeedMps: metrics.avgSpeedMps,
@@ -60,9 +71,10 @@ class RunSummary {
   factory RunSummary.fromJson(Map<String, dynamic> json) {
     final source = json['source'] as Map<String, dynamic>;
     return RunSummary(
-      clientRunId: json['client_run_id'] as String,
+      clientRunId: json['client_activity_id'] as String,
       startedAt: DateTime.parse(json['started_at'] as String),
       endedAt: DateTime.parse(json['ended_at'] as String),
+      activityMode: ActivityMode.values.byName(json['activity_type'] as String),
       movingSeconds: (json['moving_seconds'] as num).toDouble(),
       distanceMeters: (json['distance_meters'] as num).toDouble(),
       avgSpeedMps: (json['avg_speed_mps'] as num?)?.toDouble(),
@@ -76,15 +88,16 @@ class RunSummary {
   }
 
   Map<String, dynamic> toJson() => {
-        'client_run_id': clientRunId,
-        'started_at': startedAt.toUtc().toIso8601String(),
-        'ended_at': endedAt.toUtc().toIso8601String(),
-        'moving_seconds': movingSeconds,
-        'distance_meters': distanceMeters,
-        'avg_speed_mps': avgSpeedMps,
-        'splits': [for (final split in splits) split.toJson()],
-        'source': {'platform': sourcePlatform, 'app_version': sourceAppVersion},
-      };
+    'client_activity_id': clientRunId,
+    'started_at': startedAt.toUtc().toIso8601String(),
+    'ended_at': endedAt.toUtc().toIso8601String(),
+    'activity_type': activityMode.name,
+    'moving_seconds': movingSeconds,
+    'distance_meters': distanceMeters,
+    'avg_speed_mps': avgSpeedMps,
+    'splits': [for (final split in splits) split.toJson()],
+    'source': {'platform': sourcePlatform, 'app_version': sourceAppVersion},
+  };
 }
 
 class RunSummarySplit {
@@ -98,15 +111,16 @@ class RunSummarySplit {
     required this.avgSpeedMps,
   });
 
-  factory RunSummarySplit.fromJson(Map<String, dynamic> json) => RunSummarySplit(
+  factory RunSummarySplit.fromJson(Map<String, dynamic> json) =>
+      RunSummarySplit(
         index: json['index'] as int,
         durationSeconds: (json['duration_seconds'] as num).toDouble(),
         avgSpeedMps: (json['avg_speed_mps'] as num).toDouble(),
       );
 
   Map<String, dynamic> toJson() => {
-        'index': index,
-        'duration_seconds': durationSeconds,
-        'avg_speed_mps': avgSpeedMps,
-      };
+    'index': index,
+    'duration_seconds': durationSeconds,
+    'avg_speed_mps': avgSpeedMps,
+  };
 }

@@ -22,7 +22,7 @@
          production expectation is a reverse proxy terminating TLS in front
          of the server, after which this has no effect. -->
     <application
-        android:label="simple_runner"
+        android:label="Simple Activity Tracker"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">

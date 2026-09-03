@@ -14,6 +14,19 @@ class LiveMetrics {
   final Duration currentSplitElapsed;
   final double currentSplitDistanceMeters;
 
+  /// Highest accepted instantaneous/segment speed seen so far this run. Null
+  /// until at least one segment has been accepted — mirrors [currentSpeedMps]
+  /// rather than defaulting to 0, so "no data yet" isn't confused with
+  /// "stationary". Unaffected by pause/resume, same as [distanceMeters].
+  final double? maxSpeedMps;
+
+  /// Cumulative positive elevation change across accepted points (sum of
+  /// each accepted-point-to-next-accepted-point altitude increase, ignoring
+  /// decreases and points with no elevation reading) — a rough live
+  /// indicator, not the server's smoothed figure. Unaffected by pause/resume,
+  /// same as [distanceMeters].
+  final double elevationGainMeters;
+
   const LiveMetrics({
     required this.elapsed,
     required this.distanceMeters,
@@ -22,6 +35,8 @@ class LiveMetrics {
     required this.completedSplits,
     required this.currentSplitElapsed,
     required this.currentSplitDistanceMeters,
+    this.maxSpeedMps,
+    this.elevationGainMeters = 0,
   });
 
   static const zero = LiveMetrics(
@@ -32,6 +47,8 @@ class LiveMetrics {
     completedSplits: [],
     currentSplitElapsed: Duration.zero,
     currentSplitDistanceMeters: 0,
+    maxSpeedMps: null,
+    elevationGainMeters: 0,
   );
 
   Split? get lastCompletedSplit =>

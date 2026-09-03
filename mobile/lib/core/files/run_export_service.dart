@@ -12,7 +12,7 @@ import 'package:path_provider/path_provider.dart';
 /// UIFileSharingEnabled / LSSupportsOpeningDocumentsInPlace in Info.plist),
 /// so this is a no-op there.
 class RunExportService {
-  static const _appFolder = 'SimpleRunner';
+  static const _appFolder = 'SimpleActivityTracker';
 
   static Future<void> ensureInitialized() async {
     if (!Platform.isAndroid) return;
@@ -34,7 +34,8 @@ class RunExportService {
     // in this class enforces one-export-at-a-time, so this is cheap
     // insurance against one call's cleanup deleting another's in-flight file.
     final scratch = File(
-        '${(await getTemporaryDirectory()).path}/${DateTime.now().microsecondsSinceEpoch}_${gpxFile.uri.pathSegments.last}');
+      '${(await getTemporaryDirectory()).path}/${DateTime.now().microsecondsSinceEpoch}_${gpxFile.uri.pathSegments.last}',
+    );
 
     try {
       await gpxFile.copy(scratch.path);

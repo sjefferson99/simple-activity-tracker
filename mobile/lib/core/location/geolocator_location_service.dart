@@ -43,7 +43,8 @@ class GeolocatorLocationService implements LocationService {
 
   @override
   Stream<LocationSample> get stream =>
-      Geolocator.getPositionStream(locationSettings: _settings()).map(_toSample);
+      Geolocator.getPositionStream(locationSettings: _settings())
+          .map(_toSample);
 
   /// Per-platform tuning. The Android and Apple settings classes expose
   /// different background mechanisms, so they can't be expressed as one
@@ -58,7 +59,7 @@ class GeolocatorLocationService implements LocationService {
         // the screen on during tracking (see LiveRunController), and
         // enabling it here would need the WAKE_LOCK manifest permission.
         foregroundNotificationConfig: const ForegroundNotificationConfig(
-          notificationTitle: 'Simple Runner',
+          notificationTitle: 'Simple Activity Tracker',
           notificationText: 'Tracking your run',
         ),
       );
