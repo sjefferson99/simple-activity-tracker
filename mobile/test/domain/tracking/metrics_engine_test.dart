@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:simple_runner/domain/tracking/activity_mode.dart';
 import 'package:simple_runner/domain/tracking/metrics_engine.dart';
 import 'package:simple_runner/domain/models/track_point.dart';
 
@@ -317,6 +318,55 @@ void main() {
       final start = DateTime(2026, 1, 1, 0, 0, 0);
       engine.addPoint(_pointAtMeters(0, start));
       engine.addPoint(_pointAtMeters(65000, start.add(const Duration(hours: 1))));
+
+      expect(engine.metrics.distanceMeters, 0);
+    });
+  });
+
+  group('ActivityMode.cycling raises both plausibility thresholds', () {
+    test('accepts a segment fast enough to be rejected in running mode', () {
+      // 20 m/s (72 km/h) is a plausible fast descent on a bike, but well
+      // past running mode's 12 m/s cap.
+      final runningEngine = MetricsEngine();
+      final cyclingEngine = MetricsEngine(mode: ActivityMode.cycling);
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      for (final engine in [runningEngine, cyclingEngine]) {
+        engine.addPoint(_pointAtMeters(0, start));
+        engine.addPoint(_pointAtMeters(200, start.add(const Duration(seconds: 10))));
+      }
+
+      expect(runningEngine.metrics.distanceMeters, 0,
+          reason: 'running mode should reject a 20 m/s segment');
+      expect(cyclingEngine.metrics.distanceMeters, closeTo(200, 1),
+          reason: 'cycling mode should accept a 20 m/s segment');
+    });
+
+    test('tolerates a larger sparse-fix gap than running mode allows', () {
+      // 30km in 25 minutes implies 20 m/s — plausible for cycling mode's
+      // higher speed cap, and comfortably under its 40km segment cap, but
+      // beyond running mode's 20km segment cap regardless of speed.
+      final runningEngine = MetricsEngine();
+      final cyclingEngine = MetricsEngine(mode: ActivityMode.cycling);
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      for (final engine in [runningEngine, cyclingEngine]) {
+        engine.addPoint(_pointAtMeters(0, start));
+        engine.addPoint(_pointAtMeters(30000, start.add(const Duration(minutes: 25))));
+      }
+
+      expect(runningEngine.metrics.distanceMeters, 0,
+          reason: 'running mode\'s 20km segment cap should reject this gap');
+      expect(cyclingEngine.metrics.distanceMeters, closeTo(30000, 1),
+          reason: 'cycling mode\'s 40km segment cap should accept this gap');
+    });
+
+    test('still rejects a jump too far for cycling, however long the gap', () {
+      // Mirrors the running-mode "rejects a jump too far for any gap" case
+      // above, scaled past cycling mode's 40km cap — the cap has to have
+      // a ceiling somewhere, not just a higher one than running.
+      final engine = MetricsEngine(mode: ActivityMode.cycling);
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      engine.addPoint(_pointAtMeters(0, start));
+      engine.addPoint(_pointAtMeters(100000, start.add(const Duration(hours: 2))));
 
       expect(engine.metrics.distanceMeters, 0);
     });

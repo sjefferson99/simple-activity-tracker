@@ -15,6 +15,7 @@ import '../../core/location/location_sample.dart';
 import '../../core/location/location_service.dart';
 import '../../core/sync/file_run_store.dart';
 import '../../core/sync/sync_service.dart';
+import '../../core/tracking/activity_mode_controller.dart';
 import '../../domain/geo_math.dart';
 import '../../domain/models/live_metrics.dart';
 import '../../domain/models/run_record.dart';
@@ -112,7 +113,11 @@ class LiveRunController extends Notifier<LiveRunState> {
     _startedAt = DateTime.now().toUtc();
 
     _previousPoint = null;
-    _metricsEngine = MetricsEngine();
+    // Fixed for the run's duration — read once here, not from a live
+    // `ref.watch`, so switching the home screen toggle mid-run (which the UI
+    // already disables, but this is the actual guarantee) can't change which
+    // plausibility thresholds an in-progress run is judged against.
+    _metricsEngine = MetricsEngine(mode: ref.read(activityModeControllerProvider));
     _currentGpxFile = await newRunGpxFile(DateTime.now());
     _gpxLog = RunGpxLog(_currentGpxFile!);
     // A periodic flush that fails is not fatal: every flush rewrites the
@@ -198,6 +203,18 @@ class LiveRunController extends Notifier<LiveRunState> {
   Future<void> startNewRun() async {
     state = const LiveRunIdle();
     await start();
+  }
+
+  /// Returns to the idle/home screen from [LiveRunFinished] without starting
+  /// a new run — unlike [startNewRun], which immediately begins GPS
+  /// acquisition. All of a finished run's resources (subscription, GPX log,
+  /// wakelock) are already torn down by [stop] before that state is reached,
+  /// so this is just a state reset, not cleanup. Lets the user change the
+  /// activity mode before their next run, which the home screen only offers
+  /// outside an active/finished run.
+  void goToIdle() {
+    if (state is! LiveRunFinished) return;
+    state = const LiveRunIdle();
   }
 
   Future<void> _disposeRun() async {

@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../../core/tracking/activity_mode_controller.dart';
 import '../../core/units/units.dart';
 import '../../domain/models/live_metrics.dart';
+import '../../domain/tracking/activity_mode.dart';
 import '../../domain/tracking/run_phase.dart';
 import '../export_help/export_help_screen.dart';
 import '../settings/settings_screen.dart';
@@ -20,6 +22,30 @@ class _UseKmhNotifier extends Notifier<bool> {
 }
 
 final _useKmhProvider = NotifierProvider<_UseKmhNotifier, bool>(_UseKmhNotifier.new);
+
+/// Run/Cycle segmented toggle, always on the home screen (not tucked into
+/// Settings) since it changes how GPS is interpreted for the next run, not
+/// just a display preference.
+class _ActivityModeToggle extends ConsumerWidget {
+  const _ActivityModeToggle();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(activityModeControllerProvider);
+
+    return SegmentedButton<ActivityMode>(
+      segments: const [
+        ButtonSegment(value: ActivityMode.running, label: Text('Run')),
+        ButtonSegment(value: ActivityMode.cycling, label: Text('Cycle')),
+      ],
+      selected: {mode},
+      showSelectedIcon: false,
+      onSelectionChanged: (selected) =>
+          ref.read(activityModeControllerProvider.notifier).select(selected.first),
+      style: const ButtonStyle(visualDensity: VisualDensity.compact),
+    );
+  }
+}
 
 class LiveRunScreen extends ConsumerWidget {
   const LiveRunScreen({super.key});
@@ -38,27 +64,45 @@ class LiveRunScreen extends ConsumerWidget {
         state is LiveRunActive ||
         state is LiveRunFinished;
 
+    // The activity mode is fixed once a run starts (LiveRunController reads
+    // it only at start()), so switching it mid-run wouldn't do anything —
+    // the toggle is only shown while that would actually take effect.
+    final canSwitchActivityMode = !showsReadout;
+
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            // Stacked rather than a single spaceBetween Row: with unequal
+            // side elements (a fixed-width icon vs. a variable-width or
+            // empty right slot), spaceBetween centres the middle child on
+            // the *leftover space between its neighbours*, not on the
+            // screen — visibly off-centre by about the icon's width. The
+            // toggle is centred on the row itself here instead, independent
+            // of what the side elements measure.
+            Stack(
+              alignment: Alignment.center,
               children: [
-                IconButton(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                  ),
-                  icon: const Icon(Icons.settings_outlined),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    IconButton(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                      ),
+                      icon: const Icon(Icons.settings_outlined),
+                    ),
+                    showsReadout
+                        ? TextButton(
+                            onPressed: ref.read(_useKmhProvider.notifier).toggle,
+                            child: Text(useKmh ? 'km/h' : 'min/km'),
+                          )
+                        // Holds the row's height so the content below doesn't
+                        // shift up when the toggle appears on starting a run.
+                        : const SizedBox(height: 48),
+                  ],
                 ),
-                showsReadout
-                    ? TextButton(
-                        onPressed: ref.read(_useKmhProvider.notifier).toggle,
-                        child: Text(useKmh ? 'km/h' : 'min/km'),
-                      )
-                    // Holds the row's height so the content below doesn't
-                    // shift up when the toggle appears on starting a run.
-                    : const SizedBox(height: 48),
+                if (canSwitchActivityMode) const _ActivityModeToggle(),
               ],
             ),
             Expanded(
@@ -343,10 +387,24 @@ class _Controls extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (clientRunId != null) RunSyncSection(clientRunId: clientRunId),
-            FilledButton(
-              onPressed: controller.startNewRun,
-              style: FilledButton.styleFrom(minimumSize: const Size(160, 56)),
-              child: const Text('New run'),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Back to the idle screen — the only way to reach the
+                // run/cycle toggle again, which the home screen hides once a
+                // run is active or finished.
+                OutlinedButton(
+                  onPressed: controller.goToIdle,
+                  style: OutlinedButton.styleFrom(minimumSize: const Size(120, 56)),
+                  child: const Text('Home'),
+                ),
+                const SizedBox(width: 16),
+                FilledButton(
+                  onPressed: controller.startNewRun,
+                  style: FilledButton.styleFrom(minimumSize: const Size(120, 56)),
+                  child: const Text('New run'),
+                ),
+              ],
             ),
             TextButton(
               onPressed: () => Navigator.of(context).push(

@@ -2,21 +2,51 @@ import '../geo_math.dart';
 import '../models/live_metrics.dart';
 import '../models/split.dart';
 import '../models/track_point.dart';
+import 'activity_mode.dart';
 
 const double _splitDistanceMeters = 1000;
 const double _maxAcceptableAccuracyMeters = 25;
 const Duration _currentSpeedWindow = Duration(seconds: 3);
 
-/// No runner sustains this; a segment implying more is a bad fix (e.g. a
-/// stale/default location before the GPS gets a real lock), not real motion.
-const double _maxPlausibleSpeedMps = 12;
+/// The two plausibility thresholds [MetricsEngine] checks every accepted
+/// segment against — see [MetricsEngine._isPlausibleSegment]. Per-[ActivityMode]
+/// because a cyclist routinely exceeds a runner's plausible speed and can
+/// cover far more distance in a sparse-fix gap (freewheeling downhill, a
+/// tunnel) without it being a GPS glitch.
+class _PlausibilityLimits {
+  /// No one sustains this for the given activity; a segment implying more is
+  /// a bad fix (e.g. a stale/default location before the GPS gets a real
+  /// lock), not real motion.
+  final double maxPlausibleSpeedMps;
 
-/// Backstop for the "a long enough gap makes anything look slow" hole in a
-/// speed-only test: a 65km jump implies a plausible ~18 m/s once the previous
-/// fix is an hour old. Set well above any distance a sparse-but-real stretch
-/// of fixes could cover (a tunnel or a backgrounded app can easily leave
-/// kilometres between consecutive fixes), so this only catches teleports.
-const double _maxPlausibleSegmentMeters = 20000;
+  /// Backstop for the "a long enough gap makes anything look slow" hole in a
+  /// speed-only test: a 65km jump implies a plausible ~18 m/s once the
+  /// previous fix is an hour old. Set well above any distance a
+  /// sparse-but-real stretch of fixes could cover (a tunnel or a
+  /// backgrounded app can easily leave kilometres between consecutive
+  /// fixes), so this only catches teleports.
+  final double maxPlausibleSegmentMeters;
+
+  const _PlausibilityLimits({
+    required this.maxPlausibleSpeedMps,
+    required this.maxPlausibleSegmentMeters,
+  });
+
+  factory _PlausibilityLimits.forMode(ActivityMode mode) => switch (mode) {
+        ActivityMode.running => const _PlausibilityLimits(
+            maxPlausibleSpeedMps: 12, // ~43 km/h
+            maxPlausibleSegmentMeters: 20000,
+          ),
+        // Downhill cycling comfortably exceeds a runner's cap, and a bike can
+        // cover much more ground than a runner in the same sparse-fix gap —
+        // both thresholds raised accordingly. Still well short of "obviously
+        // not a bike" (a car, a plane) so genuine teleports are still caught.
+        ActivityMode.cycling => const _PlausibilityLimits(
+            maxPlausibleSpeedMps: 25, // 90 km/h
+            maxPlausibleSegmentMeters: 40000,
+          ),
+      };
+}
 
 /// How long a rejected fix stays eligible to be recognised as the real
 /// position (see the recovery path in [MetricsEngine.addPoint]). Beyond this
@@ -35,7 +65,16 @@ const double _minReanchorMotionMeters = 2;
 ///
 /// Pure Dart, no Flutter dependency — fed one point at a time via [addPoint]
 /// so it never has to recompute a whole run's history from scratch.
+///
+/// [mode] only affects which GPS segments are accepted as plausible motion
+/// versus discarded as a bad fix — see [_PlausibilityLimits]. It does not
+/// yet change how metrics are computed or displayed.
 class MetricsEngine {
+  final _PlausibilityLimits _limits;
+
+  MetricsEngine({ActivityMode mode = ActivityMode.running})
+      : _limits = _PlausibilityLimits.forMode(mode);
+
   final List<TrackPoint> _recentPoints = [];
   TrackPoint? _lastAccepted;
 
@@ -122,15 +161,15 @@ class MetricsEngine {
     _acceptSegment(segmentDistance, segmentDuration, point);
   }
 
-  /// Whether a segment could have been covered by a runner rather than being
-  /// a GPS glitch. Distance and speed are both bounded: speed alone lets an
-  /// arbitrarily large jump through once the gap is long enough, and distance
-  /// alone would reject a legitimately sparse stretch of fixes.
+  /// Whether a segment could have been covered under [mode] rather than
+  /// being a GPS glitch. Distance and speed are both bounded: speed alone
+  /// lets an arbitrarily large jump through once the gap is long enough, and
+  /// distance alone would reject a legitimately sparse stretch of fixes.
   bool _isPlausibleSegment(double distanceMeters, Duration duration) {
-    if (distanceMeters > _maxPlausibleSegmentMeters) return false;
+    if (distanceMeters > _limits.maxPlausibleSegmentMeters) return false;
     if (duration <= Duration.zero) return distanceMeters == 0;
     return distanceMeters / (duration.inMilliseconds / 1000) <=
-        _maxPlausibleSpeedMps;
+        _limits.maxPlausibleSpeedMps;
   }
 
   /// Restarts measurement from [point] without crediting distance or elapsed
