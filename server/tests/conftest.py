@@ -108,9 +108,13 @@ def sample_gpx_bytes() -> bytes:
     return (_FIXTURE_DIR / "sample_run.gpx").read_bytes()
 
 
-def make_summary(client_run_id: str = "11111111-1111-1111-1111-111111111111") -> dict:
+def make_summary(
+    client_activity_id: str = "11111111-1111-1111-1111-111111111111",
+    activity_type: str = "running",
+) -> dict:
     return {
-        "client_run_id": client_run_id,
+        "client_activity_id": client_activity_id,
+        "activity_type": activity_type,
         "started_at": "2026-01-01T07:00:00Z",
         "ended_at": "2026-01-01T07:16:30Z",
         "moving_seconds": 900.0,
@@ -121,15 +125,16 @@ def make_summary(client_run_id: str = "11111111-1111-1111-1111-111111111111") ->
     }
 
 
-def upload_sample_run(
+def upload_sample_activity(
     app_client,
     headers,
     sample_gpx_bytes,
-    client_run_id: str = "11111111-1111-1111-1111-111111111111",
+    client_activity_id: str = "11111111-1111-1111-1111-111111111111",
+    activity_type: str = "running",
 ):
     return app_client.post(
-        "/api/v1/runs",
+        "/api/v1/activities",
         headers=headers,
-        data={"summary": json.dumps(make_summary(client_run_id))},
-        files={"gpx": ("run.gpx", sample_gpx_bytes, "application/gpx+xml")},
+        data={"summary": json.dumps(make_summary(client_activity_id, activity_type))},
+        files={"gpx": ("activity.gpx", sample_gpx_bytes, "application/gpx+xml")},
     )

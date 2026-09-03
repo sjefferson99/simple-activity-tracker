@@ -9,7 +9,7 @@ class BlobStore(Protocol):
     paths (see docs/WEB-PLAN.md §5.6)."""
 
     def put(self, user_id: str, data: bytes) -> str:
-        """Stores data, returns the blob key to persist on the Run row."""
+        """Stores data, returns the blob key to persist on the Activity row."""
         ...
 
     def get(self, blob_key: str) -> bytes: ...

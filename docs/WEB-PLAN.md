@@ -1,4 +1,4 @@
-# Simple Runner — Web app & sync: Plan & Handoff
+# Simple Activity Tracker — Web app & sync: Plan & Handoff
 
 Adds a self-hostable **web app + API** that the mobile app uploads finished runs to
 (GPX file + the phone's post-run stats), stores them in a database, computes richer

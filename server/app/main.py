@@ -4,15 +4,15 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.v1 import activities as activities_api
 from app.api.v1 import admin as admin_api
 from app.api.v1 import auth as auth_api
-from app.api.v1 import runs as runs_api
 from app.db import check_db_connection
+from app.web import activities as activities_web
 from app.web import admin as admin_web
 from app.web import devices as devices_web
 from app.web import login as login_web
 from app.web import register as register_web
-from app.web import runs as runs_web
 from app.web import settings as settings_web
 from app.web.paths import STATIC_DIR
 
@@ -24,7 +24,7 @@ except importlib.metadata.PackageNotFoundError:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Simple Runner Server",
+        title="Simple Activity Tracker Server",
         version=_VERSION,
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
@@ -40,11 +40,11 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_api.router)
     app.include_router(auth_api.me_router)
-    app.include_router(runs_api.router)
+    app.include_router(activities_api.router)
     app.include_router(admin_api.router)
 
     app.include_router(login_web.router)
-    app.include_router(runs_web.router)
+    app.include_router(activities_web.router)
     app.include_router(devices_web.router)
     app.include_router(settings_web.router)
     app.include_router(register_web.router)

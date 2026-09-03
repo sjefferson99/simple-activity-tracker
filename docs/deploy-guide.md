@@ -1,4 +1,4 @@
-# Installing Simple Runner on your own phone
+# Installing Simple Activity Tracker on your own phone
 
 This guide walks you through building this app from source and installing it
 on your own iPhone or Android phone. You don't need to know how to code —
@@ -172,7 +172,7 @@ The first time you open the app, iOS will refuse to run it and show
    Device Management**).
 2. Under "Developer App," tap your Apple ID email address.
 3. Tap **Trust "[your Apple ID]"**, then confirm.
-4. Open Simple Runner from your home screen — it should now launch normally.
+4. Open Simple Activity Tracker from your home screen — it should now launch normally.
 
 **You're done.** The app is installed and ready to use. Remember: it'll stop
 opening after 7 days (an Apple limit on free developer accounts, explained

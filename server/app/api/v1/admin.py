@@ -17,9 +17,9 @@ from app.auth.passwords import hash_password
 from app.config import get_settings
 from app.deps import db_session
 from app.models.user import User
+from app.repositories.activities import SqlAlchemyActivityRepository
+from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
-from app.repositories.run_analyses import SqlAlchemyRunAnalysisRepository
-from app.repositories.runs import SqlAlchemyRunRepository
 from app.repositories.users import SqlAlchemyUserRepository
 from app.storage.blob_store import LocalFileBlobStore
 
@@ -33,8 +33,8 @@ def _user_out(repo: SqlAlchemyUserRepository, user: User) -> AdminUserOut:
         display_name=user.display_name,
         is_admin=user.is_admin,
         disabled=user.disabled_at is not None,
-        run_count=repo.count_runs(user.id),
-        last_run_at=repo.last_run_at(user.id),
+        activity_count=repo.count_activities(user.id),
+        last_activity_at=repo.last_activity_at(user.id),
         created_at=user.created_at,
     )
 
@@ -152,23 +152,24 @@ def delete_user(
     if target.is_admin and repo.count_admins_enabled() <= 1 and target.disabled_at is None:
         raise api_error(400, "last_admin", "Cannot remove the last enabled admin")
 
-    runs_repo = SqlAlchemyRunRepository(session)
-    analyses_repo = SqlAlchemyRunAnalysisRepository(session)
+    activities_repo = SqlAlchemyActivityRepository(session)
+    analyses_repo = SqlAlchemyActivityAnalysisRepository(session)
     blob_store = LocalFileBlobStore(Path(get_settings().data_dir))
 
     cursor: str | None = None
     while True:
-        page = runs_repo.list_for_user(target.id, limit=200, cursor=cursor)
-        for run in page.runs:
-            analysis = analyses_repo.get_by_run_id(run.id)
+        page = activities_repo.list_for_user(target.id, limit=200, cursor=cursor)
+        for activity in page.activities:
+            analysis = analyses_repo.get_by_activity_id(activity.id)
             if analysis is not None:
                 analyses_repo.delete(analysis)
-                # See the matching comment in app/api/v1/runs.py:delete_run —
-                # no relationship() means the analysis delete must be
-                # flushed before the run delete, or the FK constraint fails.
+                # See the matching comment in
+                # app/api/v1/activities.py:delete_activity — no relationship()
+                # means the analysis delete must be flushed before the
+                # activity delete, or the FK constraint fails.
                 session.flush()
-            blob_store.delete(run.gpx_blob_key)
-            runs_repo.delete(run)
+            blob_store.delete(activity.gpx_blob_key)
+            activities_repo.delete(activity)
         if page.next_cursor is None:
             break
         cursor = page.next_cursor

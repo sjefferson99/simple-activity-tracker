@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ run.title or "Run" }} — Simple Runner{% endblock %}
+{% block title %}{{ activity.title or "Activity" }} — Simple Activity Tracker{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
@@ -7,20 +7,20 @@
 {% block content %}
 
 <div class="card">
-  <h1>{{ run.title or "Run" }}</h1>
-  <p class="muted">{{ run.started_at.strftime('%A %d %B %Y, %H:%M') }}</p>
+  <h1>{{ activity.title or "Activity" }} <span class="badge type-{{ activity.activity_type }}">{{ "Cycle" if activity.activity_type == "cycling" else "Run" }}</span></h1>
+  <p class="muted">{{ activity.started_at.strftime('%A %d %B %Y, %H:%M') }}</p>
 
   <div class="stat-grid">
     <div class="stat">
-      <div class="value">{{ run.client_summary.distance_meters | distance_km }}</div>
+      <div class="value">{{ activity.client_summary.distance_meters | distance_km }}</div>
       <div class="label">Distance (phone)</div>
     </div>
     <div class="stat">
-      <div class="value">{{ run.client_summary.moving_seconds | duration }}</div>
+      <div class="value">{{ activity.client_summary.moving_seconds | duration }}</div>
       <div class="label">Moving time (phone)</div>
     </div>
     <div class="stat">
-      <div class="value">{{ run.client_summary.avg_speed_mps | kmh }}</div>
+      <div class="value">{{ activity.client_summary.avg_speed_mps | kmh }}</div>
       <div class="label">Avg speed (phone)</div>
     </div>
   </div>
@@ -33,8 +33,8 @@
 
 <div class="card">
   <h2>Server analysis</h2>
-  {% if run.analysis.status == "done" %}
-  {% set result = run.analysis.result %}
+  {% if activity.analysis.status == "done" %}
+  {% set result = activity.analysis.result %}
   <div class="stat-grid">
     <div class="stat">
       <div class="value">{{ result.distance_meters | distance_km }}</div>
@@ -99,31 +99,31 @@
   <div class="chart-container">
     <div id="chart"></div>
   </div>
-  {% elif run.analysis.status == "pending" %}
+  {% elif activity.analysis.status == "pending" %}
   <p class="muted">Analysis pending.</p>
   {% else %}
-  <p class="muted">Analysis failed for this run.</p>
+  <p class="muted">Analysis failed for this activity.</p>
   {% endif %}
 </div>
 
 <div class="card">
   <h2>Details</h2>
-  <form hx-patch="/runs/{{ run.id }}">
+  <form hx-patch="/activities/{{ activity.id }}">
     <label for="title">Title</label>
-    <input type="text" id="title" name="title" maxlength="200" value="{{ run.title or '' }}" placeholder="Untitled run">
+    <input type="text" id="title" name="title" maxlength="200" value="{{ activity.title or '' }}" placeholder="Untitled activity">
     <label for="notes">Notes</label>
-    <textarea id="notes" name="notes" rows="3" maxlength="4000" placeholder="Notes for this run...">{{ run.notes or '' }}</textarea>
+    <textarea id="notes" name="notes" rows="3" maxlength="4000" placeholder="Notes for this activity...">{{ activity.notes or '' }}</textarea>
     <button type="submit">Save</button>
   </form>
 </div>
 
 <div class="card">
   <h2>File</h2>
-  <p><a class="button" href="/api/v1/runs/{{ run.id }}/gpx">Download GPX</a></p>
+  <p><a class="button" href="/api/v1/activities/{{ activity.id }}/gpx">Download GPX</a></p>
   <hr style="border-color: var(--border); margin: 1.25rem 0;">
-  <p class="muted">Deleting a run removes it from the server only — it stays on the phone that uploaded it.</p>
-  <form hx-delete="/runs/{{ run.id }}" hx-confirm="Delete this run? This cannot be undone.">
-    <button type="submit" class="danger">Delete run</button>
+  <p class="muted">Deleting an activity removes it from the server only — it stays on the phone that uploaded it.</p>
+  <form hx-delete="/activities/{{ activity.id }}" hx-confirm="Delete this activity? This cannot be undone.">
+    <button type="submit" class="danger">Delete activity</button>
   </form>
 </div>
 
@@ -133,21 +133,21 @@
 <script src="/static/vendor/uplot/uPlot.iife.min.js"></script>
 <script>
   (function () {
-    const runId = {{ run.id | tojson }};
+    const activityId = {{ activity.id | tojson }};
     const map = L.map('map');
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
       maxZoom: 19,
     }).addTo(map);
 
-    fetch(`/api/v1/runs/${runId}/track`)
+    fetch(`/api/v1/activities/${activityId}/track`)
       .then((r) => r.json())
       .then((data) => {
         const allLatLngs = [];
         data.segments.forEach((segment) => {
           const latlngs = segment.map((p) => [p.lat, p.lon]);
           if (latlngs.length > 1) {
-            L.polyline(latlngs, { color: '#5b9dff', weight: 3 }).addTo(map);
+            L.polyline(latlngs, { color: '#0f766e', weight: 3 }).addTo(map);
           }
           allLatLngs.push(...latlngs);
         });
@@ -158,8 +158,8 @@
         }
       });
 
-    {% if run.analysis.status == "done" %}
-    const series = {{ run.analysis.result.series | tojson }};
+    {% if activity.analysis.status == "done" %}
+    const series = {{ activity.analysis.result.series | tojson }};
     const chartEl = document.getElementById('chart');
     if (series.length > 1 && chartEl) {
       const t = series.map((s) => s.t_s);
@@ -172,8 +172,8 @@
           scales: { x: { time: false } },
           series: [
             { label: 'Time (s)' },
-            { label: 'Speed (km/h)', stroke: '#5b9dff', scale: 'kmh' },
-            { label: 'Elevation (m)', stroke: '#4cd07c', scale: 'ele' },
+            { label: 'Speed (km/h)', stroke: '#0f766e', scale: 'kmh' },
+            { label: 'Elevation (m)', stroke: '#c2410c', scale: 'ele' },
           ],
           axes: [{}, { scale: 'kmh', side: 3 }, { scale: 'ele', side: 1 }],
         },

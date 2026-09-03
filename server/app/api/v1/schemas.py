@@ -12,27 +12,28 @@ class SplitSummary(BaseModel):
     avg_speed_mps: float = Field(ge=0)
 
 
-class RunSource(BaseModel):
+class ActivitySource(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     platform: str
     app_version: str
 
 
-class RunSummary(BaseModel):
+class ActivitySummary(BaseModel):
     """The phone's own numbers, uploaded verbatim — mirrors LiveMetrics.
     See docs/WEB-PLAN.md §5.3."""
 
     model_config = ConfigDict(extra="forbid")
 
-    client_run_id: str
+    client_activity_id: str
+    activity_type: Literal["running", "cycling"]
     started_at: datetime
     ended_at: datetime
     moving_seconds: float = Field(ge=0, allow_inf_nan=False)
     distance_meters: float = Field(ge=0, allow_inf_nan=False)
     avg_speed_mps: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     splits: list[SplitSummary] = Field(default_factory=list)
-    source: RunSource
+    source: ActivitySource
 
 
 # --- Auth ---
@@ -73,11 +74,12 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
-# --- Runs ---
+# --- Activities ---
 
 
-class RunListItem(BaseModel):
+class ActivityListItem(BaseModel):
     id: str
+    activity_type: Literal["running", "cycling"]
     started_at: datetime
     ended_at: datetime
     title: str | None
@@ -85,8 +87,8 @@ class RunListItem(BaseModel):
     moving_seconds: float
 
 
-class RunListResponse(BaseModel):
-    runs: list[RunListItem]
+class ActivityListResponse(BaseModel):
+    activities: list[ActivityListItem]
     next_cursor: str | None
 
 
@@ -95,9 +97,10 @@ class AnalysisOut(BaseModel):
     result: dict[str, Any] | None = None
 
 
-class RunOut(BaseModel):
+class ActivityOut(BaseModel):
     id: str
-    client_run_id: str
+    client_activity_id: str
+    activity_type: Literal["running", "cycling"]
     started_at: datetime
     ended_at: datetime
     title: str | None
@@ -110,7 +113,7 @@ class RunOut(BaseModel):
     analysis: AnalysisOut
 
 
-class RunPatchRequest(BaseModel):
+class ActivityPatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str | None = Field(default=None, max_length=200)
@@ -137,8 +140,8 @@ class AdminUserOut(BaseModel):
     display_name: str
     is_admin: bool
     disabled: bool
-    run_count: int
-    last_run_at: datetime | None
+    activity_count: int
+    last_activity_at: datetime | None
     created_at: datetime
 
 

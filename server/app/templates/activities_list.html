@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Activities — Simple Activity Tracker{% endblock %}
+{% block content %}
+<h1>Activities</h1>
+{% if activities %}
+<div class="card" id="activity-list">
+  {% include "partials/activity_list_items.html" %}
+</div>
+{% else %}
+<div class="card empty-state">
+  <p>No activities yet.</p>
+  <p>Sign in to the Simple Activity Tracker phone app and finish a run or ride — it'll show up here
+  automatically once uploaded.</p>
+</div>
+{% endif %}
+{% endblock %}

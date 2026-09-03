@@ -157,8 +157,10 @@ def test_admin_password_reset_revokes_existing_sessions(app_client, auth_headers
     assert app_client.get("/api/v1/me", headers=target_headers).status_code == 401
 
 
-def test_deleting_a_user_removes_their_runs(app_client, auth_headers, sample_gpx_bytes) -> None:
-    from tests.conftest import upload_sample_run
+def test_deleting_a_user_removes_their_activities(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    from tests.conftest import upload_sample_activity
 
     create = app_client.post(
         "/api/v1/admin/users",
@@ -177,7 +179,7 @@ def test_deleting_a_user_removes_their_runs(app_client, auth_headers, sample_gpx
         json={"email": "target3@example.com", "password": "a-strong-password", "device_name": "x"},
     )
     target_headers = {"Authorization": f"Bearer {login.json()['token']}"}
-    upload_sample_run(app_client, target_headers, sample_gpx_bytes)
+    upload_sample_activity(app_client, target_headers, sample_gpx_bytes)
 
     response = app_client.delete(f"/api/v1/admin/users/{target_id}", headers=auth_headers)
     assert response.status_code == 204
