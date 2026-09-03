@@ -1,12 +1,15 @@
 import importlib.metadata
+import sys
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
 from app.api.v1 import activities as activities_api
 from app.api.v1 import admin as admin_api
 from app.api.v1 import auth as auth_api
+from app.config import get_settings
 from app.db import check_db_connection
 from app.web import activities as activities_web
 from app.web import admin as admin_web
@@ -23,6 +26,11 @@ except importlib.metadata.PackageNotFoundError:
 
 
 def create_app() -> FastAPI:
+    try:
+        get_settings()
+    except ValidationError as exc:
+        sys.exit(f"Invalid configuration: {exc}")
+
     app = FastAPI(
         title="Simple Activity Tracker Server",
         version=_VERSION,
