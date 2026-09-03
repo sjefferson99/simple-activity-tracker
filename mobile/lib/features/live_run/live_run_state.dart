@@ -1,4 +1,5 @@
 import '../../domain/models/live_metrics.dart';
+import '../../domain/tracking/activity_mode.dart';
 import '../../domain/tracking/run_phase.dart';
 
 sealed class LiveRunState {
@@ -21,19 +22,31 @@ class LiveRunActive extends LiveRunState {
   final double accuracyMeters;
   final LiveMetrics metrics;
 
+  /// The mode captured at start() for this run — the source of truth for
+  /// which metric tiles/units to show, independent of the home screen
+  /// toggle's live value (which the UI hides once a run is active, but the
+  /// mode itself is also fixed for a run's whole duration — see
+  /// LiveRunController.start()).
+  final ActivityMode activityMode;
+
   const LiveRunActive({
     required this.phase,
     required this.speedMps,
     required this.accuracyMeters,
     required this.metrics,
+    required this.activityMode,
   });
 }
 
 class LiveRunFinished extends LiveRunState {
   final LiveMetrics metrics;
 
+  /// The mode the finished run was recorded under — see
+  /// [LiveRunActive.activityMode].
+  final ActivityMode activityMode;
+
   /// Where the exported copy of this run's GPX file was written, in
-  /// human-readable form (e.g. "Downloads/SimpleRunner"), for showing in the
+  /// human-readable form (e.g. "Downloads/SimpleActivityTracker"), for showing in the
   /// UI. Null while the export is still in flight, on a platform where it
   /// doesn't apply (iOS relies on Files-app visibility instead — see
   /// RunExportService), or if the copy failed — the run itself is never at
@@ -46,13 +59,19 @@ class LiveRunFinished extends LiveRunState {
   /// for this specific run's upload/analysis progress.
   final String? clientRunId;
 
-  const LiveRunFinished({required this.metrics, this.exportedTo, this.clientRunId});
+  const LiveRunFinished({
+    required this.metrics,
+    required this.activityMode,
+    this.exportedTo,
+    this.clientRunId,
+  });
 
   LiveRunFinished copyWith({String? exportedTo}) => LiveRunFinished(
-        metrics: metrics,
-        exportedTo: exportedTo ?? this.exportedTo,
-        clientRunId: clientRunId,
-      );
+    metrics: metrics,
+    activityMode: activityMode,
+    exportedTo: exportedTo ?? this.exportedTo,
+    clientRunId: clientRunId,
+  );
 }
 
 class LiveRunPermissionDenied extends LiveRunState {

@@ -1,12 +1,12 @@
 import 'dart:io';
 
-import 'package:simple_runner/core/api/api_client.dart';
-import 'package:simple_runner/core/api/dto/analysis_dto.dart';
-import 'package:simple_runner/core/api/dto/device_dto.dart';
-import 'package:simple_runner/core/api/dto/login_response_dto.dart';
-import 'package:simple_runner/core/api/dto/run_dto.dart';
-import 'package:simple_runner/core/api/dto/user_dto.dart';
-import 'package:simple_runner/domain/models/run_summary.dart';
+import 'package:simple_activity_tracker/core/api/api_client.dart';
+import 'package:simple_activity_tracker/core/api/dto/analysis_dto.dart';
+import 'package:simple_activity_tracker/core/api/dto/device_dto.dart';
+import 'package:simple_activity_tracker/core/api/dto/login_response_dto.dart';
+import 'package:simple_activity_tracker/core/api/dto/run_dto.dart';
+import 'package:simple_activity_tracker/core/api/dto/user_dto.dart';
+import 'package:simple_activity_tracker/domain/models/run_summary.dart';
 
 /// A scriptable [ApiClient] test double. Each method defers to a settable
 /// handler field defaulting to a reasonable success response, so a test only
@@ -22,20 +22,23 @@ class FakeApiClient implements ApiClient {
     required String email,
     required String password,
     required String deviceName,
-  })? loginHandler;
+  })?
+  loginHandler;
 
   Future<RunDto> Function({
     required String baseUrl,
     required String token,
     required RunSummary summary,
     required File gpxFile,
-  })? uploadRunHandler;
+  })?
+  uploadRunHandler;
 
   Future<AnalysisDto> Function({
     required String baseUrl,
     required String token,
     required String serverRunId,
-  })? getAnalysisHandler;
+  })?
+  getAnalysisHandler;
 
   @override
   Future<LoginResponseDto> login({
@@ -53,11 +56,23 @@ class FakeApiClient implements ApiClient {
         deviceName: deviceName,
       );
     }
-    return Future.value(LoginResponseDto(
-      token: 'fake-token',
-      device: DeviceDto(id: 'd1', name: deviceName, createdAt: DateTime.utc(2026), lastUsedAt: null),
-      user: UserDto(id: 'u1', email: email, displayName: 'Runner', isAdmin: false),
-    ));
+    return Future.value(
+      LoginResponseDto(
+        token: 'fake-token',
+        device: DeviceDto(
+          id: 'd1',
+          name: deviceName,
+          createdAt: DateTime.utc(2026),
+          lastUsedAt: null,
+        ),
+        user: UserDto(
+          id: 'u1',
+          email: email,
+          displayName: 'Runner',
+          isAdmin: false,
+        ),
+      ),
+    );
   }
 
   @override
@@ -66,7 +81,12 @@ class FakeApiClient implements ApiClient {
   @override
   Future<UserDto> me({required String baseUrl, required String token}) {
     return Future.value(
-      const UserDto(id: 'u1', email: 'runner@example.com', displayName: 'Runner', isAdmin: false),
+      const UserDto(
+        id: 'u1',
+        email: 'runner@example.com',
+        displayName: 'Runner',
+        isAdmin: false,
+      ),
     );
   }
 
@@ -81,20 +101,28 @@ class FakeApiClient implements ApiClient {
     uploadCalls.add(summary);
     final handler = uploadRunHandler;
     if (handler != null) {
-      return handler(baseUrl: baseUrl, token: token, summary: summary, gpxFile: gpxFile);
+      return handler(
+        baseUrl: baseUrl,
+        token: token,
+        summary: summary,
+        gpxFile: gpxFile,
+      );
     }
-    return Future.value(RunDto(
-      id: 'server-${summary.clientRunId}',
-      clientRunId: summary.clientRunId,
-      startedAt: summary.startedAt,
-      endedAt: summary.endedAt,
-      title: null,
-      notes: null,
-      clientSummary: summary.toJson(),
-      sourcePlatform: summary.sourcePlatform,
-      sourceAppVersion: summary.sourceAppVersion,
-      analysis: const AnalysisDto(status: 'pending', result: null),
-    ));
+    return Future.value(
+      RunDto(
+        id: 'server-${summary.clientRunId}',
+        clientRunId: summary.clientRunId,
+        startedAt: summary.startedAt,
+        endedAt: summary.endedAt,
+        activityType: summary.activityMode.name,
+        title: null,
+        notes: null,
+        clientSummary: summary.toJson(),
+        sourcePlatform: summary.sourcePlatform,
+        sourceAppVersion: summary.sourceAppVersion,
+        analysis: const AnalysisDto(status: 'pending', result: null),
+      ),
+    );
   }
 
   @override

@@ -4,14 +4,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/sync/sync_service.dart';
 import '../features/live_run/live_run_screen.dart';
 
-class SimpleRunnerApp extends ConsumerStatefulWidget {
-  const SimpleRunnerApp({super.key});
+class SimpleActivityTrackerApp extends ConsumerStatefulWidget {
+  const SimpleActivityTrackerApp({super.key});
 
   @override
-  ConsumerState<SimpleRunnerApp> createState() => _SimpleRunnerAppState();
+  ConsumerState<SimpleActivityTrackerApp> createState() =>
+      _SimpleActivityTrackerAppState();
 }
 
-class _SimpleRunnerAppState extends ConsumerState<SimpleRunnerApp> with WidgetsBindingObserver {
+class _SimpleActivityTrackerAppState
+    extends ConsumerState<SimpleActivityTrackerApp>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
@@ -37,14 +40,10 @@ class _SimpleRunnerAppState extends ConsumerState<SimpleRunnerApp> with WidgetsB
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Simple Runner',
+      title: 'Simple Activity Tracker',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        brightness: Brightness.dark,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.deepOrange,
-          brightness: Brightness.dark,
-        ),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
       ),
       home: const LiveRunScreen(),
     );

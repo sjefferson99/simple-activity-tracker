@@ -33,19 +33,19 @@ class _PlausibilityLimits {
   });
 
   factory _PlausibilityLimits.forMode(ActivityMode mode) => switch (mode) {
-        ActivityMode.running => const _PlausibilityLimits(
-            maxPlausibleSpeedMps: 12, // ~43 km/h
-            maxPlausibleSegmentMeters: 20000,
-          ),
-        // Downhill cycling comfortably exceeds a runner's cap, and a bike can
-        // cover much more ground than a runner in the same sparse-fix gap —
-        // both thresholds raised accordingly. Still well short of "obviously
-        // not a bike" (a car, a plane) so genuine teleports are still caught.
-        ActivityMode.cycling => const _PlausibilityLimits(
-            maxPlausibleSpeedMps: 25, // 90 km/h
-            maxPlausibleSegmentMeters: 40000,
-          ),
-      };
+    ActivityMode.running => const _PlausibilityLimits(
+      maxPlausibleSpeedMps: 12, // ~43 km/h
+      maxPlausibleSegmentMeters: 20000,
+    ),
+    // Downhill cycling comfortably exceeds a runner's cap, and a bike can
+    // cover much more ground than a runner in the same sparse-fix gap —
+    // both thresholds raised accordingly. Still well short of "obviously
+    // not a bike" (a car, a plane) so genuine teleports are still caught.
+    ActivityMode.cycling => const _PlausibilityLimits(
+      maxPlausibleSpeedMps: 25, // 90 km/h
+      maxPlausibleSegmentMeters: 40000,
+    ),
+  };
 }
 
 /// How long a rejected fix stays eligible to be recognised as the real
@@ -73,7 +73,7 @@ class MetricsEngine {
   final _PlausibilityLimits _limits;
 
   MetricsEngine({ActivityMode mode = ActivityMode.running})
-      : _limits = _PlausibilityLimits.forMode(mode);
+    : _limits = _PlausibilityLimits.forMode(mode);
 
   final List<TrackPoint> _recentPoints = [];
   TrackPoint? _lastAccepted;
@@ -89,6 +89,9 @@ class MetricsEngine {
   double _splitStartDistanceMeters = 0;
   Duration _splitStartElapsed = Duration.zero;
   final List<Split> _completedSplits = [];
+
+  double? _maxSpeedMps;
+  double _elevationGainMeters = 0;
 
   LiveMetrics _metrics = LiveMetrics.zero;
   LiveMetrics get metrics => _metrics;
@@ -131,14 +134,16 @@ class MetricsEngine {
       final sincePending = pending == null
           ? null
           : point.timestamp.difference(pending.timestamp);
-      final pendingDistance =
-          pending == null ? null : haversineDistanceMeters(pending, point);
+      final pendingDistance = pending == null
+          ? null
+          : haversineDistanceMeters(pending, point);
       // Agreement has to be *evidence*, not merely an absence of
       // contradiction. A GPS stuck on one wrong position repeats it exactly:
       // those duplicates imply 0 m/s, trivially "agree", and would hand the
       // anchor to the bad location. Requiring the pair to show real movement
       // means only a fix that is genuinely tracking the runner can re-anchor.
-      final agreesWithPending = pending != null &&
+      final agreesWithPending =
+          pending != null &&
           sincePending! <= _pendingCandidateTtl &&
           pendingDistance! >= _minReanchorMotionMeters &&
           _isPlausibleSegment(pendingDistance, sincePending);
@@ -158,7 +163,7 @@ class MetricsEngine {
     }
 
     _pendingCandidate = null;
-    _acceptSegment(segmentDistance, segmentDuration, point);
+    _acceptSegment(segmentDistance, segmentDuration, previous, point);
   }
 
   /// Whether a segment could have been covered under [mode] rather than
@@ -186,10 +191,27 @@ class MetricsEngine {
   }
 
   void _acceptSegment(
-      double segmentDistance, Duration segmentDuration, TrackPoint point) {
+    double segmentDistance,
+    Duration segmentDuration,
+    TrackPoint previous,
+    TrackPoint point,
+  ) {
     _lastAccepted = point;
     _recentPoints.add(point);
     _pruneRecentPoints(point.timestamp);
+
+    final segmentSpeedMps =
+        segmentDistance / (segmentDuration.inMilliseconds / 1000);
+    if (_maxSpeedMps == null || segmentSpeedMps > _maxSpeedMps!) {
+      _maxSpeedMps = segmentSpeedMps;
+    }
+
+    final previousElevation = previous.elevationMeters;
+    final currentElevation = point.elevationMeters;
+    if (previousElevation != null && currentElevation != null) {
+      final delta = currentElevation - previousElevation;
+      if (delta > 0) _elevationGainMeters += delta;
+    }
 
     _applySegment(segmentDistance, segmentDuration);
     _metrics = _buildMetrics();
@@ -211,21 +233,24 @@ class MetricsEngine {
             _splitStartDistanceMeters + _splitDistanceMeters &&
         remainingDistance > 0) {
       final distanceIntoSplit =
-          (_splitStartDistanceMeters + _splitDistanceMeters) - _totalDistanceMeters;
+          (_splitStartDistanceMeters + _splitDistanceMeters) -
+          _totalDistanceMeters;
       final fraction = distanceIntoSplit / remainingDistance;
       final crossingDuration = segmentDuration * fraction;
       final crossingElapsed = elapsedBefore + crossingDuration;
 
       final splitDuration = crossingElapsed - _splitStartElapsed;
-      _completedSplits.add(Split(
-        index: _completedSplits.length + 1,
-        duration: splitDuration,
-        // A split covering measurable distance in no measurable time would
-        // divide by zero; report 0 rather than an infinite pace.
-        avgSpeedMps: splitDuration.inMilliseconds > 0
-            ? _splitDistanceMeters / splitDuration.inMilliseconds * 1000
-            : 0,
-      ));
+      _completedSplits.add(
+        Split(
+          index: _completedSplits.length + 1,
+          duration: splitDuration,
+          // A split covering measurable distance in no measurable time would
+          // divide by zero; report 0 rather than an infinite pace.
+          avgSpeedMps: splitDuration.inMilliseconds > 0
+              ? _splitDistanceMeters / splitDuration.inMilliseconds * 1000
+              : 0,
+        ),
+      );
 
       _totalDistanceMeters += distanceIntoSplit;
       elapsedBefore = crossingElapsed;
@@ -273,7 +298,10 @@ class MetricsEngine {
       avgSpeedMps: _avgSpeedMps(),
       completedSplits: List.unmodifiable(_completedSplits),
       currentSplitElapsed: _movingElapsed - _splitStartElapsed,
-      currentSplitDistanceMeters: _totalDistanceMeters - _splitStartDistanceMeters,
+      currentSplitDistanceMeters:
+          _totalDistanceMeters - _splitStartDistanceMeters,
+      maxSpeedMps: _maxSpeedMps,
+      elevationGainMeters: _elevationGainMeters,
     );
   }
 }

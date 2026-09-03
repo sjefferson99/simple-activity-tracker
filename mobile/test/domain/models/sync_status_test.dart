@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:simple_runner/domain/models/sync_status.dart';
+import 'package:simple_activity_tracker/domain/models/sync_status.dart';
 
 void main() {
   test('pending round-trips through JSON', () {
@@ -20,7 +20,11 @@ void main() {
   });
 
   test('failed round-trips through JSON with error/attempts/retryable', () {
-    const status = SyncStatusFailed(error: 'boom', attempts: 3, retryable: true);
+    const status = SyncStatusFailed(
+      error: 'boom',
+      attempts: 3,
+      retryable: true,
+    );
     final result = SyncStatus.fromJson(status.toJson());
     expect(result, isA<SyncStatusFailed>());
     final failed = result as SyncStatusFailed;

@@ -2,7 +2,7 @@
 criteria: render/redirect for signed-in vs signed-out, the htmx CSRF header
 rule, admin 404s for non-admins, and the self/last-admin guards."""
 
-from tests.conftest import upload_sample_run
+from tests.conftest import upload_sample_activity
 
 HTMX_HEADERS = {"X-Requested-With": "htmx"}
 
@@ -59,8 +59,8 @@ def test_login_wrong_password_shows_error(app_client):
     assert "Invalid email or password" in response.text
 
 
-def test_run_list_renders_for_signed_in_user(app_client, sample_gpx_bytes, auth_headers):
-    upload_sample_run(app_client, auth_headers, sample_gpx_bytes)
+def test_activity_list_renders_for_signed_in_user(app_client, sample_gpx_bytes, auth_headers):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
     _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
 
     response = app_client.get("/")
@@ -68,68 +68,68 @@ def test_run_list_renders_for_signed_in_user(app_client, sample_gpx_bytes, auth_
     assert "3.00 km" in response.text or "km" in response.text
 
 
-def test_run_list_empty_state(app_client, auth_headers):
+def test_activity_list_empty_state(app_client, auth_headers):
     _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
     response = app_client.get("/")
     assert response.status_code == 200
-    assert "No runs yet" in response.text
+    assert "No activities yet" in response.text
 
 
-def test_run_detail_renders_with_map_and_analysis(app_client, sample_gpx_bytes, auth_headers):
-    upload = upload_sample_run(app_client, auth_headers, sample_gpx_bytes)
-    run_id = upload.json()["id"]
+def test_activity_detail_renders_with_map_and_analysis(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
     _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
 
-    response = app_client.get(f"/runs/{run_id}")
+    response = app_client.get(f"/activities/{activity_id}")
     assert response.status_code == 200
     assert 'id="map"' in response.text
     assert "Distance (server)" in response.text
     assert "Splits" in response.text
 
 
-def test_run_detail_404_for_missing_run(app_client, auth_headers):
+def test_activity_detail_404_for_missing_activity(app_client, auth_headers):
     _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
-    response = app_client.get("/runs/does-not-exist")
+    response = app_client.get("/activities/does-not-exist")
     assert response.status_code == 404
 
 
-def test_run_patch_without_htmx_header_is_403(app_client, sample_gpx_bytes, auth_headers):
-    upload = upload_sample_run(app_client, auth_headers, sample_gpx_bytes)
-    run_id = upload.json()["id"]
+def test_activity_patch_without_htmx_header_is_403(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
     _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
 
-    response = app_client.patch(f"/runs/{run_id}", data={"title": "Morning run"})
+    response = app_client.patch(f"/activities/{activity_id}", data={"title": "Morning run"})
     assert response.status_code == 403
 
 
-def test_run_patch_updates_title_and_notes(app_client, sample_gpx_bytes, auth_headers):
-    upload = upload_sample_run(app_client, auth_headers, sample_gpx_bytes)
-    run_id = upload.json()["id"]
+def test_activity_patch_updates_title_and_notes(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
     _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
 
     response = app_client.patch(
-        f"/runs/{run_id}",
+        f"/activities/{activity_id}",
         headers=HTMX_HEADERS,
         data={"title": "Morning run", "notes": "Felt good"},
     )
     assert response.status_code == 200
     assert response.headers.get("hx-refresh") == "true"
 
-    check = app_client.get(f"/api/v1/runs/{run_id}", headers=auth_headers)
+    check = app_client.get(f"/api/v1/activities/{activity_id}", headers=auth_headers)
     assert check.json()["title"] == "Morning run"
     assert check.json()["notes"] == "Felt good"
 
 
-def test_run_delete_via_web_removes_run(app_client, sample_gpx_bytes, auth_headers):
-    upload = upload_sample_run(app_client, auth_headers, sample_gpx_bytes)
-    run_id = upload.json()["id"]
+def test_activity_delete_via_web_removes_activity(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
     _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
 
-    response = app_client.delete(f"/runs/{run_id}", headers=HTMX_HEADERS)
+    response = app_client.delete(f"/activities/{activity_id}", headers=HTMX_HEADERS)
     assert response.status_code == 200
     assert response.headers.get("hx-redirect") == "/"
 
-    check = app_client.get(f"/api/v1/runs/{run_id}", headers=auth_headers)
+    check = app_client.get(f"/api/v1/activities/{activity_id}", headers=auth_headers)
     assert check.status_code == 404
 
 

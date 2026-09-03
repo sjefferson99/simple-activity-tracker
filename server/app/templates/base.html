@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Simple Runner{% endblock %}</title>
+  <title>{% block title %}Simple Activity Tracker{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
   {% block head %}{% endblock %}
 </head>
 <body hx-headers='{"X-Requested-With": "htmx"}'>
   <header class="topbar">
-    <a class="brand" href="/">Simple Runner</a>
+    <a class="brand" href="/">Simple Activity Tracker</a>
     {% if user %}
     <nav class="topnav">
-      <a href="/">Runs</a>
+      <a href="/">Activities</a>
       <a href="/devices">Devices</a>
       <a href="/settings">Settings</a>
       {% if user.is_admin %}<a href="/admin/users">Admin</a>{% endif %}

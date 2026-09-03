@@ -1,15 +1,15 @@
 {% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
 <table>
   <thead>
-    <tr><th>Name</th><th>Email</th><th>Runs</th><th>Last run</th><th>Status</th><th></th></tr>
+    <tr><th>Name</th><th>Email</th><th>Activities</th><th>Last activity</th><th>Status</th><th></th></tr>
   </thead>
   <tbody>
     {% for u in users %}
     <tr>
       <td>{{ u.display_name }}</td>
       <td>{{ u.email }}</td>
-      <td>{{ u.run_count }}</td>
-      <td>{{ u.last_run_at.strftime('%Y-%m-%d') if u.last_run_at else "—" }}</td>
+      <td>{{ u.activity_count }}</td>
+      <td>{{ u.last_activity_at.strftime('%Y-%m-%d') if u.last_activity_at else "—" }}</td>
       <td>
         {% if u.is_admin %}<span class="badge admin">Admin</span>{% endif %}
         {% if u.disabled %}<span class="badge disabled">Disabled</span>{% endif %}
@@ -36,7 +36,7 @@
         </button>
         <button class="danger"
                 hx-delete="/admin/users/{{ u.id }}"
-                hx-confirm="Delete {{ u.email }}? This permanently removes their account and all {{ u.run_count }} run(s)."
+                hx-confirm="Delete {{ u.email }}? This permanently removes their account and all {{ u.activity_count }} activity(ies)."
                 hx-target="#admin-user-list" hx-select="#admin-user-list" hx-swap="outerHTML">
           Delete
         </button>

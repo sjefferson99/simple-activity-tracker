@@ -1,4 +1,4 @@
-# Simple Runner — Flutter Running App: Plan & Handoff
+# Simple Activity Tracker — Flutter Running App: Plan & Handoff
 
 A cross-platform (Android first, iOS later) running app using the phone's GPS to track runs and display live metrics. Modular architecture so the MVP (current speed display) ships quickly while scaling to splits, GPX logging, customizable display, history, etc.
 

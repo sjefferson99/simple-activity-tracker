@@ -2,15 +2,15 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpx/gpx.dart';
-import 'package:simple_runner/core/files/run_gpx_log.dart';
-import 'package:simple_runner/domain/models/track_point.dart';
+import 'package:simple_activity_tracker/core/files/run_gpx_log.dart';
+import 'package:simple_activity_tracker/domain/models/track_point.dart';
 
 TrackPoint _point(double lat, double lon, DateTime time) => TrackPoint(
-      latitude: lat,
-      longitude: lon,
-      timestamp: time,
-      accuracyMeters: 5,
-    );
+  latitude: lat,
+  longitude: lon,
+  timestamp: time,
+  accuracyMeters: 5,
+);
 
 void main() {
   late Directory tempDir;
@@ -58,38 +58,48 @@ void main() {
     expect(gpx.trks.first.trksegs[1].trkpts, hasLength(1));
   });
 
-  test('finalizeAndFlush drops empty segments (e.g. an unused pause gap)', () async {
-    final file = File('${tempDir.path}/run.gpx');
-    final log = RunGpxLog(file);
-    final start = DateTime(2026, 1, 1, 9, 0, 0);
+  test(
+    'finalizeAndFlush drops empty segments (e.g. an unused pause gap)',
+    () async {
+      final file = File('${tempDir.path}/run.gpx');
+      final log = RunGpxLog(file);
+      final start = DateTime(2026, 1, 1, 9, 0, 0);
 
-    log.addPoint(_point(51.5, -0.1, start));
-    log.startNewSegment(); // never receives a point (e.g. pause then stop)
-    await log.finalizeAndFlush();
+      log.addPoint(_point(51.5, -0.1, start));
+      log.startNewSegment(); // never receives a point (e.g. pause then stop)
+      await log.finalizeAndFlush();
 
-    final gpx = GpxReader().fromString(await file.readAsString());
-    expect(gpx.trks.first.trksegs, hasLength(1));
-  });
+      final gpx = GpxReader().fromString(await file.readAsString());
+      expect(gpx.trks.first.trksegs, hasLength(1));
+    },
+  );
 
-  test('concurrent flushes do not clobber each other and keep every point', () async {
-    final file = File('${tempDir.path}/run.gpx');
-    final log = RunGpxLog(file);
-    final start = DateTime(2026, 1, 1, 9, 0, 0);
+  test(
+    'concurrent flushes do not clobber each other and keep every point',
+    () async {
+      final file = File('${tempDir.path}/run.gpx');
+      final log = RunGpxLog(file);
+      final start = DateTime(2026, 1, 1, 9, 0, 0);
 
-    log.addPoint(_point(51.5, -0.1, start));
-    // Kick off a periodic-style flush and immediately finalize, the exact
-    // overlap that previously raced on the shared .tmp path.
-    final periodic = log.flush();
-    log.addPoint(_point(51.51, -0.11, start.add(const Duration(seconds: 10))));
-    final finalFlush = log.finalizeAndFlush();
+      log.addPoint(_point(51.5, -0.1, start));
+      // Kick off a periodic-style flush and immediately finalize, the exact
+      // overlap that previously raced on the shared .tmp path.
+      final periodic = log.flush();
+      log.addPoint(
+        _point(51.51, -0.11, start.add(const Duration(seconds: 10))),
+      );
+      final finalFlush = log.finalizeAndFlush();
 
-    await Future.wait([periodic, finalFlush]);
+      await Future.wait([periodic, finalFlush]);
 
-    final gpx = GpxReader().fromString(await file.readAsString());
-    final points =
-        gpx.trks.expand((t) => t.trksegs).expand((s) => s.trkpts).toList();
-    expect(points, hasLength(2));
-  });
+      final gpx = GpxReader().fromString(await file.readAsString());
+      final points = gpx.trks
+          .expand((t) => t.trksegs)
+          .expand((s) => s.trkpts)
+          .toList();
+      expect(points, hasLength(2));
+    },
+  );
 
   test('flush is crash-safe: an interrupted temp write leaves the prior file intact', () async {
     final file = File('${tempDir.path}/run.gpx');
@@ -100,7 +110,7 @@ void main() {
     await log.flush();
     final firstFlushContent = await file.readAsString();
 
-    // Simulate a crash mid-write by leaving a stray temp file behind —
+    // Simulate a crash mid-write by leaving a stray temp file behind â€”
     // the real target file must still be the last successfully flushed one.
     await File('${file.path}.tmp').writeAsString('not valid xml, mid-write');
 

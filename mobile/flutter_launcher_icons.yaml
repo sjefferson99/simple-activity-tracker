@@ -1,0 +1,18 @@
+# Config for the flutter_launcher_icons package (dev dependency in
+# pubspec.yaml). Drop a 1024x1024 icon.png into assets/icon/ (see the README
+# there), then run:
+#
+#   dart run flutter_launcher_icons
+#
+# to regenerate the platform-specific icon files. Not run yet — no real
+# artwork exists at the placeholder path below yet.
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/icon.png"
+  # Light teal, matching the app's Material 3 seed color (Colors.teal,
+  # ColorScheme.fromSeed in lib/app/app.dart) — shows behind the adaptive
+  # icon's foreground layer on Android 8+ when the foreground doesn't fill
+  # the full safe area.
+  adaptive_icon_background: "#B2DFDB"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"

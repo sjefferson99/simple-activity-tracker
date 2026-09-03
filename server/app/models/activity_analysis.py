@@ -16,10 +16,10 @@ class AnalysisStatus(enum.StrEnum):
     failed = "failed"
 
 
-class RunAnalysis(Base):
-    __tablename__ = "run_analyses"
+class ActivityAnalysis(Base):
+    __tablename__ = "activity_analyses"
 
-    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), primary_key=True)
+    activity_id: Mapped[str] = mapped_column(ForeignKey("activities.id"), primary_key=True)
     analysis_version: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[AnalysisStatus] = mapped_column(
         Enum(AnalysisStatus, native_enum=False), nullable=False

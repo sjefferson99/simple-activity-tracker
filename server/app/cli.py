@@ -22,46 +22,49 @@ def migrate() -> None:
     command.upgrade(_alembic_config(), "head")
 
 
-def reanalyze(*, run_id: str | None, all_runs: bool) -> None:
-    """Reruns AnalyzerV1 against stored runs, per docs/WEB-PLAN.md §5.4: the
-    extensibility hook for algorithm changes (a bumped ANALYSIS_VERSION, a
-    fixed bug in the analyzer) to reach runs that were already analysed
+def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
+    """Reruns AnalyzerV1 against stored activities, per docs/WEB-PLAN.md §5.4:
+    the extensibility hook for algorithm changes (a bumped ANALYSIS_VERSION, a
+    fixed bug in the analyzer) to reach activities that were already analysed
     under an older version, without needing a re-upload from the phone —
     the GPX itself never changes, only what's derived from it. Exactly one
-    of run_id/all_runs must be given by the caller (main() enforces this).
+    of activity_id/all_activities must be given by the caller (main() enforces
+    this).
     """
     from app.analysis.gpx_parser import GpxParseError, parse_gpx
     from app.analysis.v1 import ANALYSIS_VERSION, AnalyzerV1
     from app.db import get_session_factory
-    from app.models.run import Run
-    from app.models.run_analysis import AnalysisStatus, RunAnalysis
+    from app.models.activity import Activity
+    from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
     from app.storage.blob_store import LocalFileBlobStore
 
     blob_store = LocalFileBlobStore(Path(get_settings().data_dir))
     analyzer = AnalyzerV1()
 
     with get_session_factory()() as session:
-        if run_id is not None:
-            run = session.get(Run, run_id)
-            runs = [run] if run is not None else []
-            if not runs:
-                sys.exit(f"No run found with id {run_id}")
+        if activity_id is not None:
+            activity = session.get(Activity, activity_id)
+            activities = [activity] if activity is not None else []
+            if not activities:
+                sys.exit(f"No activity found with id {activity_id}")
         else:
-            assert all_runs  # enforced by main()'s mutually-exclusive group
+            assert all_activities  # enforced by main()'s mutually-exclusive group
             stmt = (
-                select(Run)
-                .outerjoin(RunAnalysis, RunAnalysis.run_id == Run.id)
+                select(Activity)
+                .outerjoin(ActivityAnalysis, ActivityAnalysis.activity_id == Activity.id)
                 .where(
-                    (RunAnalysis.run_id.is_(None))
-                    | (RunAnalysis.analysis_version < ANALYSIS_VERSION)
+                    (ActivityAnalysis.activity_id.is_(None))
+                    | (ActivityAnalysis.analysis_version < ANALYSIS_VERSION)
                 )
             )
-            runs = list(session.execute(stmt).scalars())
+            activities = list(session.execute(stmt).scalars())
 
-        print(f"Reanalyzing {len(runs)} run(s) at analysis_version={ANALYSIS_VERSION}...")
-        for run in runs:
+        print(
+            f"Reanalyzing {len(activities)} activity(ies) at analysis_version={ANALYSIS_VERSION}..."
+        )
+        for activity in activities:
             try:
-                gpx_bytes = blob_store.get(run.gpx_blob_key)
+                gpx_bytes = blob_store.get(activity.gpx_blob_key)
                 track = parse_gpx(gpx_bytes)
                 result = analyzer.analyze(track)
                 status = AnalysisStatus.done
@@ -70,11 +73,11 @@ def reanalyze(*, run_id: str | None, all_runs: bool) -> None:
                 result = None
                 status = AnalysisStatus.failed
                 error = str(exc)
-                print(f"  {run.id}: FAILED — {exc}")
+                print(f"  {activity.id}: FAILED — {exc}")
 
-            existing = session.get(RunAnalysis, run.id)
+            existing = session.get(ActivityAnalysis, activity.id)
             if existing is None:
-                existing = RunAnalysis(run_id=run.id, computed_at=datetime.now(UTC))
+                existing = ActivityAnalysis(activity_id=activity.id, computed_at=datetime.now(UTC))
                 session.add(existing)
             existing.analysis_version = ANALYSIS_VERSION
             existing.status = status
@@ -83,7 +86,7 @@ def reanalyze(*, run_id: str | None, all_runs: bool) -> None:
             existing.computed_at = datetime.now(UTC)
 
             if status == AnalysisStatus.done:
-                print(f"  {run.id}: done")
+                print(f"  {activity.id}: done")
 
         session.commit()
 
@@ -119,14 +122,18 @@ def main() -> None:
     subparsers.add_parser("migrate", help="Run pending migrations and exit.")
 
     reanalyze_parser = subparsers.add_parser(
-        "reanalyze", help="Rerun the current analyzer against stored runs."
+        "reanalyze", help="Rerun the current analyzer against stored activities."
     )
     reanalyze_group = reanalyze_parser.add_mutually_exclusive_group(required=True)
-    reanalyze_group.add_argument("--run", metavar="ID", help="Reanalyze a single run by id.")
+    reanalyze_group.add_argument(
+        "--activity", metavar="ID", help="Reanalyze a single activity by id."
+    )
     reanalyze_group.add_argument(
         "--all",
         action="store_true",
-        help="Reanalyze every run whose stored analysis_version is older than the current one.",
+        help=(
+            "Reanalyze every activity whose stored analysis_version is older than the current one."
+        ),
     )
 
     args = parser.parse_args()
@@ -135,7 +142,7 @@ def main() -> None:
     elif args.command == "migrate":
         migrate()
     elif args.command == "reanalyze":
-        reanalyze(run_id=args.run, all_runs=args.all)
+        reanalyze(activity_id=args.activity, all_activities=args.all)
     else:  # pragma: no cover - argparse enforces this
         sys.exit(f"Unknown command: {args.command}")
 

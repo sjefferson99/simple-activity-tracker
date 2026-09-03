@@ -35,12 +35,14 @@ class RunGpxLog {
   }
 
   void addPoint(TrackPoint point) {
-    _currentSegment!.trkpts.add(Wpt(
-      lat: point.latitude,
-      lon: point.longitude,
-      ele: point.elevationMeters,
-      time: point.timestamp,
-    ));
+    _currentSegment!.trkpts.add(
+      Wpt(
+        lat: point.latitude,
+        lon: point.longitude,
+        ele: point.elevationMeters,
+        time: point.timestamp,
+      ),
+    );
   }
 
   /// Serializes the current track to a temp file and atomically renames it
@@ -56,7 +58,7 @@ class RunGpxLog {
 
   Future<void> _writeSnapshot() async {
     final gpx = Gpx()
-      ..creator = 'Simple Runner'
+      ..creator = 'Simple Activity Tracker'
       ..trks = [_track];
     final xml = GpxWriter().asString(
       gpx,

@@ -4,7 +4,7 @@ from typing import Protocol
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.run import Run
+from app.models.activity import Activity
 from app.models.user import User
 
 
@@ -14,8 +14,8 @@ class UserRepository(Protocol):
     def add(self, user: User) -> None: ...
     def list_all(self) -> list[User]: ...
     def count_admins_enabled(self) -> int: ...
-    def count_runs(self, user_id: str) -> int: ...
-    def last_run_at(self, user_id: str) -> datetime | None: ...
+    def count_activities(self, user_id: str) -> int: ...
+    def last_activity_at(self, user_id: str) -> datetime | None: ...
     def delete(self, user: User) -> None: ...
 
 
@@ -45,12 +45,12 @@ class SqlAlchemyUserRepository:
         )
         return self._session.execute(stmt).scalar_one()
 
-    def count_runs(self, user_id: str) -> int:
-        stmt = select(func.count()).select_from(Run).where(Run.user_id == user_id)
+    def count_activities(self, user_id: str) -> int:
+        stmt = select(func.count()).select_from(Activity).where(Activity.user_id == user_id)
         return self._session.execute(stmt).scalar_one()
 
-    def last_run_at(self, user_id: str) -> datetime | None:
-        stmt = select(func.max(Run.started_at)).where(Run.user_id == user_id)
+    def last_activity_at(self, user_id: str) -> datetime | None:
+        stmt = select(func.max(Activity.started_at)).where(Activity.user_id == user_id)
         return self._session.execute(stmt).scalar_one_or_none()
 
     def delete(self, user: User) -> None:

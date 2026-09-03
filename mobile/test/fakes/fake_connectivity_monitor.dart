@@ -1,6 +1,6 @@
-import 'dart:async';
+﻿import 'dart:async';
 
-import 'package:simple_runner/core/sync/connectivity.dart';
+import 'package:simple_activity_tracker/core/sync/connectivity.dart';
 
 class FakeConnectivityMonitor implements ConnectivityMonitor {
   bool connected;

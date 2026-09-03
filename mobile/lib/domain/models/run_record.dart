@@ -1,3 +1,4 @@
+import '../tracking/activity_mode.dart';
 import 'run_summary.dart';
 import 'sync_status.dart';
 
@@ -7,6 +8,7 @@ import 'sync_status.dart';
 class RunRecord {
   final String clientRunId;
   final String gpxPath;
+  final ActivityMode activityMode;
   final RunSummary summary;
   final SyncStatus syncStatus;
 
@@ -18,6 +20,7 @@ class RunRecord {
   const RunRecord({
     required this.clientRunId,
     required this.gpxPath,
+    required this.activityMode,
     required this.summary,
     required this.syncStatus,
     this.analysisResult,
@@ -26,28 +29,36 @@ class RunRecord {
   RunRecord copyWith({
     SyncStatus? syncStatus,
     Map<String, dynamic>? analysisResult,
-  }) =>
-      RunRecord(
-        clientRunId: clientRunId,
-        gpxPath: gpxPath,
-        summary: summary,
-        syncStatus: syncStatus ?? this.syncStatus,
-        analysisResult: analysisResult ?? this.analysisResult,
-      );
+  }) => RunRecord(
+    clientRunId: clientRunId,
+    gpxPath: gpxPath,
+    activityMode: activityMode,
+    summary: summary,
+    syncStatus: syncStatus ?? this.syncStatus,
+    analysisResult: analysisResult ?? this.analysisResult,
+  );
 
+  /// `activityMode` defaults to [ActivityMode.running] when reading an older
+  /// sidecar written before this field existed, so an app update doesn't
+  /// break parsing of runs already queued on disk.
   factory RunRecord.fromJson(Map<String, dynamic> json) => RunRecord(
-        clientRunId: json['clientRunId'] as String,
-        gpxPath: json['gpxPath'] as String,
-        summary: RunSummary.fromJson(json['summary'] as Map<String, dynamic>),
-        syncStatus: SyncStatus.fromJson(json['syncStatus'] as Map<String, dynamic>),
-        analysisResult: json['analysisResult'] as Map<String, dynamic>?,
-      );
+    clientRunId: json['clientRunId'] as String,
+    gpxPath: json['gpxPath'] as String,
+    activityMode: ActivityMode.values.firstWhere(
+      (m) => m.name == json['activityMode'] as String?,
+      orElse: () => ActivityMode.running,
+    ),
+    summary: RunSummary.fromJson(json['summary'] as Map<String, dynamic>),
+    syncStatus: SyncStatus.fromJson(json['syncStatus'] as Map<String, dynamic>),
+    analysisResult: json['analysisResult'] as Map<String, dynamic>?,
+  );
 
   Map<String, dynamic> toJson() => {
-        'clientRunId': clientRunId,
-        'gpxPath': gpxPath,
-        'summary': summary.toJson(),
-        'syncStatus': syncStatus.toJson(),
-        'analysisResult': analysisResult,
-      };
+    'clientRunId': clientRunId,
+    'gpxPath': gpxPath,
+    'activityMode': activityMode.name,
+    'summary': summary.toJson(),
+    'syncStatus': syncStatus.toJson(),
+    'analysisResult': analysisResult,
+  };
 }

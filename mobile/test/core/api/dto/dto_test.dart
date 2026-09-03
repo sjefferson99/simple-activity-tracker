@@ -2,16 +2,19 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:simple_runner/core/api/dto/login_response_dto.dart';
-import 'package:simple_runner/core/api/dto/run_dto.dart';
+import 'package:simple_activity_tracker/core/api/dto/login_response_dto.dart';
+import 'package:simple_activity_tracker/core/api/dto/run_dto.dart';
 
 Map<String, dynamic> _loadFixture(String name) =>
-    jsonDecode(File('test/fixtures/$name').readAsStringSync()) as Map<String, dynamic>;
+    jsonDecode(File('test/fixtures/$name').readAsStringSync())
+        as Map<String, dynamic>;
 
 void main() {
   group('LoginResponseDto', () {
     test('parses the server fixture', () {
-      final dto = LoginResponseDto.fromJson(_loadFixture('login_response_sample.json'));
+      final dto = LoginResponseDto.fromJson(
+        _loadFixture('login_response_sample.json'),
+      );
 
       expect(dto.token, 'srdt_examplefaketoken1234567890');
       expect(dto.device.id, '22222222-2222-2222-2222-222222222222');
@@ -28,6 +31,7 @@ void main() {
 
       expect(dto.id, '44444444-4444-4444-4444-444444444444');
       expect(dto.clientRunId, '11111111-1111-1111-1111-111111111111');
+      expect(dto.activityType, 'running');
       expect(dto.title, isNull);
       expect(dto.notes, isNull);
       expect(dto.sourcePlatform, 'android');

@@ -1,8 +1,8 @@
-import 'package:simple_runner/core/sync/run_store.dart';
-import 'package:simple_runner/domain/models/run_record.dart';
-import 'package:simple_runner/domain/models/sync_status.dart';
+﻿import 'package:simple_activity_tracker/core/sync/run_store.dart';
+import 'package:simple_activity_tracker/domain/models/run_record.dart';
+import 'package:simple_activity_tracker/domain/models/sync_status.dart';
 
-/// In-memory [RunStore] for tests — avoids real file I/O so SyncService
+/// In-memory [RunStore] for tests â€” avoids real file I/O so SyncService
 /// tests can run fast and control exactly what's in the queue.
 class FakeRunStore implements RunStore {
   final Map<String, RunRecord> _records = {};
