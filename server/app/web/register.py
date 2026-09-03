@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.deps import db_session
 from app.models.user import User
 from app.repositories.users import SqlAlchemyUserRepository
+from app.validation import ValidationFailed, normalize_email, validate_name, validate_password
 from app.web.deps import require_htmx_header
 from app.web.login import set_session_cookie
 from app.web.templating import templates
@@ -37,6 +38,23 @@ def register_submit(
     email: Annotated[str, Form()],
     password: Annotated[str, Form()],
 ) -> Response:
+    try:
+        email = normalize_email(email)
+        display_name = validate_name(display_name, field="Display name")
+        password = validate_password(password)
+    except ValidationFailed as exc:
+        return templates.TemplateResponse(
+            request,
+            "register.html",
+            {
+                "user": None,
+                "error": str(exc),
+                "display_name": display_name,
+                "email": email,
+            },
+            status_code=400,
+        )
+
     repo = SqlAlchemyUserRepository(session)
     if repo.get_by_email(email) is not None:
         # No user enumeration on login, but registration must tell the user

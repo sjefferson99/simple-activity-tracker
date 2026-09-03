@@ -90,3 +90,12 @@ def test_change_password_with_wrong_current_password_is_rejected(app_client, aut
         json={"current_password": "not-the-password", "new_password": "new-password-456"},
     )
     assert response.status_code == 401
+
+
+def test_change_password_with_short_new_password_is_rejected(app_client, auth_headers) -> None:
+    response = app_client.put(
+        "/api/v1/me/password",
+        headers=auth_headers,
+        json={"current_password": "admin-password-123", "new_password": "short"},
+    )
+    assert response.status_code == 422

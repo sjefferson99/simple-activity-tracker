@@ -1,7 +1,20 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.validation import (
+    EMAIL_MAX_LENGTH,
+    NAME_MAX_LENGTH,
+    NOTES_MAX_LENGTH,
+    PASSWORD_MAX_LENGTH,
+    SPLITS_MAX_COUNT,
+    TITLE_MAX_LENGTH,
+    ValidationFailed,
+    normalize_email,
+    validate_name,
+    validate_password,
+)
 
 
 class SplitSummary(BaseModel):
@@ -32,7 +45,7 @@ class ActivitySummary(BaseModel):
     moving_seconds: float = Field(ge=0, allow_inf_nan=False)
     distance_meters: float = Field(ge=0, allow_inf_nan=False)
     avg_speed_mps: float | None = Field(default=None, ge=0, allow_inf_nan=False)
-    splits: list[SplitSummary] = Field(default_factory=list)
+    splits: list[SplitSummary] = Field(default_factory=list, max_length=SPLITS_MAX_COUNT)
     source: ActivitySource
 
 
@@ -43,8 +56,26 @@ class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     email: str
-    password: str
-    device_name: str
+    password: str = Field(max_length=PASSWORD_MAX_LENGTH)
+    device_name: str = Field(min_length=1, max_length=NAME_MAX_LENGTH)
+
+    @field_validator("email")
+    @classmethod
+    def _normalize_email(cls, value: str) -> str:
+        # Login intentionally accepts a malformed-looking email rather than
+        # rejecting it here — the generic "invalid credentials" message
+        # (docs/WEB-PLAN.md §5.6) must not distinguish "bad email shape" from
+        # "wrong password", or it becomes a user-enumeration/format oracle.
+        # Just lowercase+trim so lookups still match what registration stored.
+        return value.strip().lower()
+
+    @field_validator("device_name")
+    @classmethod
+    def _strip_device_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("device_name must not be blank")
+        return stripped
 
 
 class UserOut(BaseModel):
@@ -70,8 +101,16 @@ class LoginResponse(BaseModel):
 class ChangePasswordRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    current_password: str
+    current_password: str = Field(max_length=PASSWORD_MAX_LENGTH)
     new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _validate_new_password(cls, value: str) -> str:
+        try:
+            return validate_password(value)
+        except ValidationFailed as exc:
+            raise ValueError(str(exc)) from exc
 
 
 # --- Activities ---
@@ -116,8 +155,8 @@ class ActivityOut(BaseModel):
 class ActivityPatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    title: str | None = Field(default=None, max_length=200)
-    notes: str | None = Field(default=None, max_length=4000)
+    title: str | None = Field(default=None, max_length=TITLE_MAX_LENGTH)
+    notes: str | None = Field(default=None, max_length=NOTES_MAX_LENGTH)
 
 
 class TrackPointOut(BaseModel):
@@ -148,24 +187,66 @@ class AdminUserOut(BaseModel):
 class AdminCreateUserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    email: str
-    display_name: str
+    email: str = Field(max_length=EMAIL_MAX_LENGTH)
+    display_name: str = Field(min_length=1, max_length=NAME_MAX_LENGTH)
     password: str
     is_admin: bool = False
+
+    @field_validator("email")
+    @classmethod
+    def _normalize_email(cls, value: str) -> str:
+        try:
+            return normalize_email(value)
+        except ValidationFailed as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_validator("display_name")
+    @classmethod
+    def _strip_display_name(cls, value: str) -> str:
+        try:
+            return validate_name(value, field="Display name")
+        except ValidationFailed as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_validator("password")
+    @classmethod
+    def _validate_password(cls, value: str) -> str:
+        try:
+            return validate_password(value)
+        except ValidationFailed as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class AdminPatchUserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    display_name: str | None = None
+    display_name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
     is_admin: bool | None = None
     disabled: bool | None = None
+
+    @field_validator("display_name")
+    @classmethod
+    def _strip_display_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            return validate_name(value, field="Display name")
+        except ValidationFailed as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class AdminSetPasswordRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _validate_new_password(cls, value: str) -> str:
+        try:
+            return validate_password(value)
+        except ValidationFailed as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class ErrorDetail(BaseModel):

@@ -132,6 +132,36 @@ def test_upload_with_malformed_summary_is_rejected(
     assert response.json()["error"]["code"] == "invalid_summary"
 
 
+def test_upload_with_too_many_splits_is_rejected(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    summary = make_summary()
+    summary["splits"] = [
+        {"index": i, "duration_seconds": 60.0, "avg_speed_mps": 3.0} for i in range(1, 2002)
+    ]
+    response = app_client.post(
+        "/api/v1/activities",
+        headers=auth_headers,
+        data={"summary": json.dumps(summary)},
+        files={"gpx": ("activity.gpx", sample_gpx_bytes, "application/gpx+xml")},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_summary"
+
+
+def test_upload_with_oversized_summary_is_rejected(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    response = app_client.post(
+        "/api/v1/activities",
+        headers=auth_headers,
+        data={"summary": "x" * (256 * 1024 + 1)},
+        files={"gpx": ("activity.gpx", sample_gpx_bytes, "application/gpx+xml")},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_summary"
+
+
 def test_get_activity_by_id(app_client, auth_headers, sample_gpx_bytes) -> None:
     created = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
     response = app_client.get(f"/api/v1/activities/{created['id']}", headers=auth_headers)

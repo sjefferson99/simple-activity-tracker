@@ -131,6 +131,22 @@ def test_activity_patch_updates_title_and_notes(app_client, sample_gpx_bytes, au
     assert check.json()["notes"] == "Felt good"
 
 
+def test_activity_patch_rejects_oversized_title(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.patch(
+        f"/activities/{activity_id}",
+        headers=HTMX_HEADERS,
+        data={"title": "x" * 100_000, "notes": ""},
+    )
+    assert response.status_code == 400
+
+    check = app_client.get(f"/api/v1/activities/{activity_id}", headers=auth_headers)
+    assert check.json()["title"] is None
+
+
 def test_activity_delete_via_web_removes_activity(app_client, sample_gpx_bytes, auth_headers):
     upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
     activity_id = upload.json()["id"]
@@ -234,6 +250,27 @@ def test_register_when_enabled(app_client, monkeypatch):
         assert response.status_code == 200
         assert response.headers["hx-redirect"] == "/"
         assert "sr_session" in response.cookies
+    finally:
+        get_settings.cache_clear()
+
+
+def test_register_rejects_short_password_and_invalid_email(app_client, monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setenv("SR_ALLOW_REGISTRATION", "true")
+    get_settings.cache_clear()
+    try:
+        response = app_client.post(
+            "/register",
+            headers=HTMX_HEADERS,
+            data={
+                "display_name": "New User",
+                "email": "not-an-email",
+                "password": "x",
+            },
+        )
+        assert response.status_code == 400
+        assert "sr_session" not in response.cookies
     finally:
         get_settings.cache_clear()
 
