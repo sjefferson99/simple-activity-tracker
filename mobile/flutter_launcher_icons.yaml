@@ -15,4 +15,4 @@ flutter_launcher_icons:
   # icon's foreground layer on Android 8+ when the foreground doesn't fill
   # the full safe area.
   adaptive_icon_background: "#B2DFDB"
-  adaptive_icon_foreground: "assets/icon/icon.png"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
