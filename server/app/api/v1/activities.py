@@ -26,7 +26,7 @@ from app.config import get_settings
 from app.deps import db_session
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
-from app.repositories.activities import SqlAlchemyActivityRepository
+from app.repositories.activities import InvalidCursor, SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.storage.blob_store import LocalFileBlobStore
 
@@ -70,7 +70,12 @@ def list_activities(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: str | None = None,
 ) -> ActivityListResponse:
-    page = SqlAlchemyActivityRepository(session).list_for_user(user.id, limit=limit, cursor=cursor)
+    try:
+        page = SqlAlchemyActivityRepository(session).list_for_user(
+            user.id, limit=limit, cursor=cursor
+        )
+    except InvalidCursor as exc:
+        raise api_error(400, "invalid_cursor", str(exc)) from exc
     items = [
         ActivityListItem(
             id=activity.id,
