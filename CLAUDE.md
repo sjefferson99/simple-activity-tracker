@@ -101,6 +101,63 @@ flutter test             # must pass before finishing any task
 flutter run              # runs on the connected device/emulator
 ```
 
+## Server dev/test workflow (use every time we work on `server/`)
+
+Applies to work driven by docs/SERVER-PRODUCTION-PLAN.md or any other server change of
+more than trivial size. One plan item (or tightly related group, e.g. "S5 + D1 together")
+= one branch = one PR, following the plan's delivery order.
+
+1. **Branch per item/group.** `git checkout main && git checkout -b server-<short-name>`
+   (matches existing naming: `server-s1-secret-key-required`, `server-s2-input-validation`).
+   Never commit server work straight to `main`.
+2. **Implement with tests.** Every behavior change gets a test. Run from `server/`:
+   `ruff check . && ruff format --check . && mypy app && pytest` (use the full path to
+   `uv.exe` under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\astral-sh.uv_...` from Bash —
+   see the Toolchain notes above). Regenerate `openapi.json`
+   (`uv run python -m app.openapi_export > openapi.json`) if the API surface or request
+   schema changed, and diff it — new/changed constraints are expected drift, anything else
+   isn't. Run `snyk_code_scan` on `server/` and fix any new finding (ignore the ~29-32
+   known low-severity "hardcoded password" hits in `tests/`, all pre-existing literals).
+3. **Local integration test before asking for a commit.** For each batch of items being
+   verified together, build a throwaway local branch that merges every relevant PR branch
+   (or just the current feature branch if it's alone), then verify it in a *real* container
+   — unit tests alone don't exercise startup behavior, container networking, or the
+   deployed nginx/TLS layer:
+   - `git checkout main && git checkout -b integration-<short-name>-local-test && git merge --no-edit <branch-1> <branch-2> ...`
+   - Run the full check suite (`ruff`/`mypy`/`pytest`/openapi diff/Snyk) on the merged tree.
+   - Build the image from that branch and tag it **exactly** `ghcr.io/sjefferson99/simple-runner-server:latest`
+     (`docker build -t ghcr.io/sjefferson99/simple-runner-server:latest server/`) so
+     `deploy/standalone-tls/docker-compose.yml` picks it up with no file edits — this is
+     the dev host's real stack (persistent, own `.env`, real self-signed cert, real
+     `./data`), not a disposable one. Only tag `:latest` locally like this for a
+     verification pass immediately before merging; don't leave a stale local build
+     shadowing the real tag longer than that.
+   - `cd deploy/standalone-tls && docker compose up -d`, confirm `docker logs
+     standalone-tls-app-1` shows a clean migrate+bootstrap+startup with no tracebacks, the
+     app container reports `(healthy)`, and `curl -sk https://127.0.0.1/healthz` returns
+     `{"status":"ok",...}`.
+   - Exercise the actual behavior that changed via `curl` (auth via `/api/v1/auth/login`,
+     then bearer requests; web login needs `-c cookies.txt` + `X-Requested-With: htmx` on
+     POSTs) — reproduce each plan item's "verified during review" probe against the new
+     code and confirm the fix. From Git Bash: prefer `-F field=<file` (multipart) over
+     `--data-urlencode field=@file` for large payloads — the latter sends the literal `@path`
+     string here, not the file's contents.
+   - Delete the local `integration-*` test branch once done — it only ever exists locally,
+     never pushed.
+4. **Hand off to the user.** Report what was verified (each probe/behavior, pass/fail,
+   test counts, Snyk result) and ask the user to log into the same running dev-host stack
+   and confirm before anything is pushed. Do not push or open a PR before this sign-off.
+5. **On confirmation: commit, push, open the PR, stop.** One commit per item/group
+   (ask first, per the git commit rule below), `git push -u origin <branch>`, then
+   `gh pr create` with a summary + test plan (both the automated checks and what was
+   manually verified in the container). Wait for the user to merge — do not merge
+   server PRs automatically.
+6. **After the user merges:** `gh pr checks <n>` to confirm CI green, watch/confirm the
+   `Container` workflow pushes to GHCR, `docker pull ghcr.io/sjefferson99/simple-runner-server:latest`,
+   restart the dev stack on the real pulled image (`docker compose up -d` in
+   `deploy/standalone-tls/`), confirm healthy, and reconcile local `main` with
+   `origin/main` (`git checkout main && git pull`) before starting the next batch.
+
 ## Architecture rules (from docs/PLAN.md §3 — follow strictly)
 
 - Feature-first layout under `mobile/lib/`: `app`, `core/{location,units,files}`, `domain/{models,tracking}`, `features/live_run`.
