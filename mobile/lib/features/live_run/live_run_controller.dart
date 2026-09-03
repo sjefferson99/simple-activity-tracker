@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:uuid/uuid.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../core/files/run_export_service.dart';
@@ -11,14 +13,25 @@ import '../../core/location/geolocator_location_service.dart';
 import '../../core/location/location_permission_state.dart';
 import '../../core/location/location_sample.dart';
 import '../../core/location/location_service.dart';
+import '../../core/sync/file_run_store.dart';
+import '../../core/sync/sync_service.dart';
 import '../../domain/geo_math.dart';
 import '../../domain/models/live_metrics.dart';
+import '../../domain/models/run_record.dart';
+import '../../domain/models/run_summary.dart';
+import '../../domain/models/sync_status.dart';
 import '../../domain/models/track_point.dart';
 import '../../domain/tracking/metrics_engine.dart';
 import '../../domain/tracking/run_phase.dart';
 import 'live_run_state.dart';
 
 const _gpxFlushInterval = Duration(seconds: 5);
+
+String get _sourcePlatform {
+  if (Platform.isAndroid) return 'android';
+  if (Platform.isIOS) return 'ios';
+  return 'unknown';
+}
 
 final locationServiceProvider = Provider<LocationService>((ref) {
   return GeolocatorLocationService();
@@ -35,6 +48,10 @@ class LiveRunController extends Notifier<LiveRunState> {
   Timer? _flushTimer;
   File? _currentGpxFile;
   final RunExportService _exportService = RunExportService();
+
+  String? _clientRunId;
+  DateTime? _startedAt;
+  String? _cachedAppVersion;
 
   // Bumped every time a run starts. stop() closes over the token for the
   // run it's finishing, so a slow export that resolves after the user has
@@ -91,6 +108,9 @@ class LiveRunController extends Notifier<LiveRunState> {
     await _disposeRun();
     _runToken++;
 
+    _clientRunId = const Uuid().v4();
+    _startedAt = DateTime.now().toUtc();
+
     _previousPoint = null;
     _metricsEngine = MetricsEngine();
     _currentGpxFile = await newRunGpxFile(DateTime.now());
@@ -126,9 +146,37 @@ class LiveRunController extends Notifier<LiveRunState> {
   Future<void> stop() async {
     final metrics = _metricsEngine?.metrics ?? LiveMetrics.zero;
     final gpxFile = _currentGpxFile;
+    final clientRunId = _clientRunId;
+    final startedAt = _startedAt;
     final finishedRunToken = _runToken;
     await _disposeRun();
-    state = LiveRunFinished(metrics: metrics);
+
+    // Sidecar write happens before the state switch (docs/WEB-PLAN.md §6.3)
+    // — it's a small local JSON write, not a network call, so this doesn't
+    // delay the summary screen the way waiting on SyncService would.
+    if (gpxFile != null && clientRunId != null && startedAt != null) {
+      final summary = RunSummary.fromMetrics(
+        clientRunId: clientRunId,
+        startedAt: startedAt,
+        endedAt: DateTime.now().toUtc(),
+        metrics: metrics,
+        sourcePlatform: _sourcePlatform,
+        sourceAppVersion: await _appVersion(),
+      );
+      await ref.read(runStoreProvider).save(RunRecord(
+            clientRunId: clientRunId,
+            gpxPath: gpxFile.path,
+            summary: summary,
+            syncStatus: const SyncStatusPending(),
+          ));
+    }
+    _clientRunId = null;
+    _startedAt = null;
+
+    state = LiveRunFinished(metrics: metrics, clientRunId: clientRunId);
+    // Fire-and-forget — a slow or failed upload must never delay the
+    // summary screen, which is already showing by this point.
+    ref.read(syncServiceProvider).runFinished();
 
     // Export after the state switch, not before — a slow or failed copy
     // must never delay showing the run summary. exportedTo starts null and
@@ -185,6 +233,18 @@ class LiveRunController extends Notifier<LiveRunState> {
     _gpxLog?.addPoint(point);
 
     _emitActive(RunPhase.tracking, speedMps: speed, accuracyMeters: sample.accuracyMeters);
+  }
+
+  /// `1.0.0+1` — matches pubspec's version+build format, and the shape the
+  /// server expects for RunSummary.source.app_version (docs/WEB-PLAN.md
+  /// §5.3). Cached: it can't change while the app is running.
+  Future<String> _appVersion() async {
+    final cached = _cachedAppVersion;
+    if (cached != null) return cached;
+    final info = await PackageInfo.fromPlatform();
+    final version = '${info.version}+${info.buildNumber}';
+    _cachedAppVersion = version;
+    return version;
   }
 
   double? _fallbackSpeed(TrackPoint point) {

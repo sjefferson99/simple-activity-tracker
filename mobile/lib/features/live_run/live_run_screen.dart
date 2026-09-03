@@ -6,9 +6,11 @@ import '../../core/units/units.dart';
 import '../../domain/models/live_metrics.dart';
 import '../../domain/tracking/run_phase.dart';
 import '../export_help/export_help_screen.dart';
+import '../settings/settings_screen.dart';
 import 'live_run_controller.dart';
 import 'live_run_state.dart';
 import 'metric_spec.dart';
+import 'run_insights.dart';
 
 class _UseKmhNotifier extends Notifier<bool> {
   @override
@@ -40,16 +42,24 @@ class LiveRunScreen extends ConsumerWidget {
       body: SafeArea(
         child: Column(
           children: [
-            Align(
-              alignment: Alignment.topRight,
-              child: showsReadout
-                  ? TextButton(
-                      onPressed: ref.read(_useKmhProvider.notifier).toggle,
-                      child: Text(useKmh ? 'km/h' : 'min/km'),
-                    )
-                  // Holds the row's height so the content below doesn't
-                  // shift up when the toggle appears on starting a run.
-                  : const SizedBox(height: 48),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                  ),
+                  icon: const Icon(Icons.settings_outlined),
+                ),
+                showsReadout
+                    ? TextButton(
+                        onPressed: ref.read(_useKmhProvider.notifier).toggle,
+                        child: Text(useKmh ? 'km/h' : 'min/km'),
+                      )
+                    // Holds the row's height so the content below doesn't
+                    // shift up when the toggle appears on starting a run.
+                    : const SizedBox(height: 48),
+              ],
             ),
             Expanded(
               child: LayoutBuilder(
@@ -329,9 +339,10 @@ class _Controls extends StatelessWidget {
           style: FilledButton.styleFrom(minimumSize: const Size(160, 56)),
           child: const Text('Start'),
         ),
-      LiveRunFinished(:final exportedTo) => Column(
+      LiveRunFinished(:final exportedTo, :final clientRunId) => Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (clientRunId != null) RunSyncSection(clientRunId: clientRunId),
             FilledButton(
               onPressed: controller.startNewRun,
               style: FilledButton.styleFrom(minimumSize: const Size(160, 56)),
