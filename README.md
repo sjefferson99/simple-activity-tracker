@@ -8,6 +8,8 @@ A cross-platform running app in Flutter: live GPS speed and pace, distance, kilo
 - [docs/deploy-guide.md](docs/deploy-guide.md) — step-by-step instructions for building this app from source and installing it on your own iPhone or Android phone, written for non-developers.
 - [docs/PLAN.md](docs/PLAN.md) — the phased implementation plan for the mobile app, verified machine setup, and per-phase acceptance criteria.
 - [docs/WEB-PLAN.md](docs/WEB-PLAN.md) — the plan for the web app, API and phone-to-server sync.
+- [docs/SERVER-PRODUCTION-PLAN.md](docs/SERVER-PRODUCTION-PLAN.md) — review findings and the action plan to run the server in production behind a reverse proxy.
+- [docs/MOBILE-QUALITY-PLAN.md](docs/MOBILE-QUALITY-PLAN.md) — review findings and the action plan to bring the mobile app to internal-testing code quality.
 - [CLAUDE.md](CLAUDE.md) — current build status and toolchain notes for anyone (human or otherwise) working on the codebase.
 
 ## Commands
