@@ -4,13 +4,22 @@ from app.analysis.analyzer import AnalysisResult
 from app.analysis.geo_math import haversine_distance_meters, speed_mps_between
 from app.analysis.track import Point, Track
 
-ANALYSIS_VERSION = 1
+ANALYSIS_VERSION = 2
 
 _MAX_IMPLIED_SPEED_MPS = 12.5  # ~2:08 min/km; faster than that is treated as a GPS jump
 _MOVING_SPEED_THRESHOLD_MPS = 0.5
 _SPLIT_METERS = 1000.0
 _SERIES_MAX_SAMPLES = 300
 _BEST_EFFORT_DISTANCES_METERS = (1000.0, 5000.0, 10000.0)
+
+# Matches mobile MetricsEngine's _currentSpeedWindow: a per-step instant
+# speed (distance / dt between two consecutive fixes ~0.5-1.5s apart) is
+# dominated by GPS position jitter at that timescale, since the noise is
+# comparable in size to the actual distance covered per step. A time-based
+# displacement window smooths that out — and unlike summing per-step
+# distances, straight-line displacement over the window also cancels out
+# small back-and-forth wobble instead of accumulating it.
+_SPEED_WINDOW_SECONDS = 3.0
 
 
 @dataclass
@@ -189,8 +198,32 @@ def _best_efforts(steps: list[_Step]) -> list[dict[str, object]]:
     return results
 
 
+def _windowed_speeds(steps: list[_Step], first_point: Point) -> list[float | None]:
+    """Speed at each step, smoothed the same way mobile MetricsEngine smooths
+    its live current-speed reading (see _SPEED_WINDOW_SECONDS): displacement
+    over the last ~3s of steps, not the single-step instant speed. Returns
+    one value per step (same length/order as `steps`), None where fewer than
+    2 points fall in the window (only possible for the very first step)."""
+    if not steps:
+        return []
+
+    result: list[float | None] = []
+    start = 0  # index into steps of the oldest step still inside the window
+    for end in range(len(steps)):
+        while (
+            start < end and steps[end].cum_time_s - steps[start].cum_time_s > _SPEED_WINDOW_SECONDS
+        ):
+            start += 1
+        window_start_point = first_point if start == 0 else steps[start - 1].point
+        result.append(speed_mps_between(window_start_point, steps[end].point))
+    return result
+
+
 def _series(
-    steps: list[_Step], smoothed: list[float | None], first_point: Point
+    steps: list[_Step],
+    smoothed: list[float | None],
+    windowed_speeds: list[float | None],
+    first_point: Point,
 ) -> list[dict[str, object]]:
     """t_s is accumulated moving time (cum_time_s), not wall-clock elapsed —
     it never advances across a gap between segments (a pause, or a stretch
@@ -220,17 +253,18 @@ def _series(
             {
                 "t_s": step.cum_time_s,
                 "dist_m": step.cum_distance_m,
-                "speed_mps": step.speed_mps,
+                "speed_mps": windowed_speeds[i],
                 "ele_m": smoothed[i + 1] if i + 1 < len(smoothed) else step.point.ele,
             }
         )
     if samples[-1]["t_s"] != steps[-1].cum_time_s:
-        last = steps[-1]
+        last_index = len(steps) - 1
+        last = steps[last_index]
         samples.append(
             {
                 "t_s": last.cum_time_s,
                 "dist_m": last.cum_distance_m,
-                "speed_mps": last.speed_mps,
+                "speed_mps": windowed_speeds[last_index],
                 "ele_m": smoothed[-1] if smoothed else last.point.ele,
             }
         )
@@ -261,6 +295,7 @@ class AnalyzerV1:
 
         steps = _build_steps(track)
         smoothed = _smoothed_elevations(all_points)
+        windowed_speeds = _windowed_speeds(steps, all_points[0])
 
         total_distance_m = steps[-1].cum_distance_m if steps else 0.0
         elapsed_s = (all_points[-1].time - all_points[0].time).total_seconds()
@@ -280,7 +315,7 @@ class AnalyzerV1:
             "elevation": _elevation_stats(smoothed),
             "splits": _compute_splits(steps, all_points[0]),
             "best_efforts": _best_efforts(steps),
-            "series": _series(steps, smoothed, all_points[0]),
+            "series": _series(steps, smoothed, windowed_speeds, all_points[0]),
             "bounds": _bounds(track),
             "point_count": track.point_count,
             "segment_count": len(track.segments),

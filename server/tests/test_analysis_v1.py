@@ -1,8 +1,10 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from app.analysis.gpx_parser import parse_gpx
+from app.analysis.track import Point, Segment, Track
 from app.analysis.v1 import AnalyzerV1
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "sample_run.gpx"
@@ -76,6 +78,54 @@ def test_series_is_bounded_and_spans_the_whole_run() -> None:
     # wall-clock elapsed — the 90s segment gap contributes no t_s, the same
     # way it contributes no moving_seconds.
     assert series[-1]["t_s"] == pytest.approx(_EXPECTED_MOVING_S, abs=1.0)
+
+
+def _zigzag_track(
+    *, n_points: int = 60, forward_step_m: float = 2.0, jitter_m: float = 3.0
+) -> Track:
+    """A track moving steadily east at one degree of longitude per
+    111195m (matches the mobile MetricsEngine test fixture's convention),
+    with every other point offset south then back — real GPS jitter at a
+    ~1s sample rate is comparable in size to the actual distance covered
+    per step, exactly what this shape reproduces. The average speed over
+    any few-second window should still read close to forward_step_m/1s,
+    even though consecutive single steps swing wildly positive and
+    negative as the path zig-zags."""
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    points = []
+    lon_per_meter = 1 / 111195
+    for i in range(n_points):
+        lon = i * forward_step_m * lon_per_meter
+        lat = (jitter_m * lon_per_meter) if i % 2 else 0.0
+        points.append(Point(lat=lat, lon=lon, ele=100.0, time=start + timedelta(seconds=i)))
+    return Track(segments=[Segment(points=points)])
+
+
+def test_series_speed_is_smoothed_over_a_time_window_not_per_step() -> None:
+    """Regression for a real finding: the series' speed_mps used to be each
+    step's raw instant speed (distance over ~1s between two consecutive
+    fixes), which is dominated by GPS jitter at that timescale and made the
+    pace chart's line far noisier than the underlying pace actually was —
+    visibly worse than the elevation line, which already got smoothing.
+    Windowing it the same way mobile MetricsEngine smooths current speed
+    (displacement over the last few seconds, not a single step) should keep
+    the series close to the true average pace despite per-step jitter, once
+    the window has enough history to span a full jitter cycle — only the
+    very first sample or two (window too short) can still show the swing.
+
+    On this fixture, every single *raw* per-step speed reads ~3.6 m/s (the
+    zig-zag's Pythagorean hop distance), never the true ~2 m/s forward
+    pace — so a tight per-sample bound here only holds if speeds are
+    actually windowed, not per-step."""
+    track = _zigzag_track(forward_step_m=2.0, jitter_m=3.0)
+    result = AnalyzerV1().analyze(track)
+
+    speeds = [s["speed_mps"] for s in result["series"] if s["speed_mps"] is not None]
+    assert len(speeds) > 5, "expected several non-null speeds in the series"
+    # Skip the startup transient (the window can't smooth before it has
+    # enough history) and check the rest sits tightly on the true pace.
+    for speed in speeds[2:]:
+        assert speed == pytest.approx(2.0, abs=0.3)
 
 
 def test_bounds_and_counts_are_populated() -> None:
