@@ -92,11 +92,17 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
 
 
 def run() -> None:
-    """migrate -> bootstrap admin -> serve."""
+    """validate config -> migrate -> bootstrap admin -> serve."""
     import uvicorn
+    from pydantic import ValidationError
 
     from app.auth.bootstrap import bootstrap_admin_if_needed
     from app.db import get_session_factory
+
+    try:
+        get_settings()
+    except ValidationError as exc:
+        sys.exit(f"Invalid configuration: {exc}")
 
     migrate()
 

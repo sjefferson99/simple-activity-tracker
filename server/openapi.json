@@ -215,10 +215,13 @@
         "additionalProperties": false,
         "properties": {
           "display_name": {
+            "maxLength": 200,
+            "minLength": 1,
             "title": "Display Name",
             "type": "string"
           },
           "email": {
+            "maxLength": 320,
             "title": "Email",
             "type": "string"
           },
@@ -257,6 +260,7 @@
           "display_name": {
             "anyOf": [
               {
+                "maxLength": 200,
                 "type": "string"
               },
               {
@@ -404,6 +408,7 @@
         "additionalProperties": false,
         "properties": {
           "current_password": {
+            "maxLength": 256,
             "title": "Current Password",
             "type": "string"
           },
@@ -473,6 +478,8 @@
         "additionalProperties": false,
         "properties": {
           "device_name": {
+            "maxLength": 200,
+            "minLength": 1,
             "title": "Device Name",
             "type": "string"
           },
@@ -481,6 +488,7 @@
             "type": "string"
           },
           "password": {
+            "maxLength": 256,
             "title": "Password",
             "type": "string"
           }

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth.passwords import hash_password, verify_password
 from app.deps import db_session
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
+from app.validation import ValidationFailed, validate_password
 from app.web.deps import WebUser, require_htmx_header
 from app.web.login import set_session_cookie
 from app.web.templating import templates
@@ -33,6 +34,16 @@ def change_password(
             "partials/change_password_form.html",
             {"user": user, "error": "Current password is incorrect"},
             status_code=401,
+        )
+
+    try:
+        new_password = validate_password(new_password)
+    except ValidationFailed as exc:
+        return templates.TemplateResponse(
+            request,
+            "partials/change_password_form.html",
+            {"user": user, "error": str(exc)},
+            status_code=400,
         )
 
     user.password_hash = hash_password(new_password)

@@ -53,7 +53,7 @@ jobs:
           mkdir -p /tmp/sr-smoke-data
           chmod 777 /tmp/sr-smoke-data
           docker run -d --name smoke -p 8000:8000 \
-            -e SR_SECRET_KEY=ci-smoke-test-key \
+            -e SR_SECRET_KEY=ci-smoke-test-key-not-a-real-secret-32chars \
             -v /tmp/sr-smoke-data:/data \
             ${{ env.IMAGE_NAME }}:smoke-test
           for i in $(seq 1 15); do

@@ -1,6 +1,8 @@
 import json
 from datetime import UTC
 
+import pytest
+
 from tests.conftest import make_summary, upload_sample_activity
 
 
@@ -124,6 +126,36 @@ def test_upload_with_malformed_summary_is_rejected(
         "/api/v1/activities",
         headers=auth_headers,
         data={"summary": "{not valid json"},
+        files={"gpx": ("activity.gpx", sample_gpx_bytes, "application/gpx+xml")},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_summary"
+
+
+def test_upload_with_too_many_splits_is_rejected(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    summary = make_summary()
+    summary["splits"] = [
+        {"index": i, "duration_seconds": 60.0, "avg_speed_mps": 3.0} for i in range(1, 2002)
+    ]
+    response = app_client.post(
+        "/api/v1/activities",
+        headers=auth_headers,
+        data={"summary": json.dumps(summary)},
+        files={"gpx": ("activity.gpx", sample_gpx_bytes, "application/gpx+xml")},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_summary"
+
+
+def test_upload_with_oversized_summary_is_rejected(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    response = app_client.post(
+        "/api/v1/activities",
+        headers=auth_headers,
+        data={"summary": "x" * (256 * 1024 + 1)},
         files={"gpx": ("activity.gpx", sample_gpx_bytes, "application/gpx+xml")},
     )
     assert response.status_code == 400
@@ -265,3 +297,18 @@ def test_pagination_cursor_pages_through_results(
         cursor = page["next_cursor"]
 
     assert len(seen_ids) == 5
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        "garbage",  # invalid base64 padding
+        "Zm9v",  # valid base64, not JSON
+        "WyJub3QtYS1kYXRlIiwieCJd",  # valid JSON list, non-ISO date
+        "WzFd",  # valid JSON list, wrong length
+    ],
+)
+def test_malformed_cursor_returns_400(app_client, auth_headers, cursor) -> None:
+    response = app_client.get("/api/v1/activities", headers=auth_headers, params={"cursor": cursor})
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_cursor"

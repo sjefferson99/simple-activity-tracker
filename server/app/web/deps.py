@@ -27,7 +27,7 @@ def get_web_user(
     if sr_session is None:
         raise _REDIRECT_TO_LOGIN
 
-    payload = read_session_cookie(get_settings().secret_key or "", sr_session)
+    payload = read_session_cookie(get_settings().secret_key, sr_session)
     if payload is None:
         raise _REDIRECT_TO_LOGIN
 

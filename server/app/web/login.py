@@ -19,7 +19,7 @@ _INVALID_CREDENTIALS = "Invalid email or password"
 
 def set_session_cookie(response: Response, user_id: str) -> None:
     settings = get_settings()
-    cookie_value = create_session_cookie(settings.secret_key or "", user_id)
+    cookie_value = create_session_cookie(settings.secret_key, user_id)
     response.set_cookie(
         SESSION_COOKIE_NAME,
         cookie_value,

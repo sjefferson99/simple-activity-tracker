@@ -53,7 +53,7 @@ def get_current_user(
         return user
 
     if sr_session is not None:
-        payload = read_session_cookie(get_settings().secret_key or "", sr_session)
+        payload = read_session_cookie(get_settings().secret_key, sr_session)
         if payload is None:
             raise _UNAUTHORIZED
         user = users.get_by_id(payload.user_id)

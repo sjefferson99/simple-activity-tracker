@@ -26,9 +26,10 @@ from app.config import get_settings
 from app.deps import db_session
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
-from app.repositories.activities import SqlAlchemyActivityRepository
+from app.repositories.activities import InvalidCursor, SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.storage.blob_store import LocalFileBlobStore
+from app.validation import SUMMARY_MAX_BYTES
 
 router = APIRouter(prefix="/api/v1/activities", tags=["activities"])
 
@@ -70,7 +71,12 @@ def list_activities(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: str | None = None,
 ) -> ActivityListResponse:
-    page = SqlAlchemyActivityRepository(session).list_for_user(user.id, limit=limit, cursor=cursor)
+    try:
+        page = SqlAlchemyActivityRepository(session).list_for_user(
+            user.id, limit=limit, cursor=cursor
+        )
+    except InvalidCursor as exc:
+        raise api_error(400, "invalid_cursor", str(exc)) from exc
     items = [
         ActivityListItem(
             id=activity.id,
@@ -94,6 +100,10 @@ def upload_activity(
     summary: Annotated[str, Form()],
     gpx: Annotated[UploadFile, File()],
 ) -> ActivityOut:
+    if len(summary.encode()) > SUMMARY_MAX_BYTES:
+        raise api_error(
+            400, "invalid_summary", f"summary exceeds the {SUMMARY_MAX_BYTES}-byte limit"
+        )
     try:
         summary_model = ActivitySummary.model_validate_json(summary)
     except ValidationError as exc:

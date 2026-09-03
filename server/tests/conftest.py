@@ -27,7 +27,7 @@ def app_client(tmp_path, monkeypatch) -> Generator:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     monkeypatch.setenv("SR_DATABASE_URL", f"sqlite:///{db_path}")
-    monkeypatch.setenv("SR_SECRET_KEY", "test-secret")
+    monkeypatch.setenv("SR_SECRET_KEY", "test-secret-key-not-a-real-one-32chars")
     monkeypatch.setenv("SR_DATA_DIR", str(data_dir))
     # TestClient talks plain http://testserver — a Secure cookie set over
     # that would be silently dropped by the client's cookie jar (per RFC,
