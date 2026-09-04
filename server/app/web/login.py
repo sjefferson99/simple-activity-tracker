@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Cookie, Depends, Form, Request, Response
 from sqlalchemy.orm import Session
 
+from app.audit import log_audit_event
 from app.auth.passwords import verify_password
 from app.auth.rate_limit import login_rate_limiter
 from app.auth.sessions import SESSION_COOKIE_NAME, create_session_cookie, read_session_cookie
@@ -72,6 +73,8 @@ def login_submit(
         or user.disabled_at is not None
         or not verify_password(password, user.password_hash)
     ):
+        if not rate_limited:
+            log_audit_event("login.failure", client_ip=client_ip, email=email.lower())
         return templates.TemplateResponse(
             request,
             "login.html",
@@ -86,6 +89,7 @@ def login_submit(
             status_code=401,
         )
 
+    log_audit_event("login.success", actor_id=user.id, client_ip=client_ip)
     response = Response(status_code=200, headers={"HX-Redirect": "/"})
     set_session_cookie(
         response, session, user_id=user.id, user_agent=request.headers.get("user-agent")
@@ -95,6 +99,7 @@ def login_submit(
 
 @router.post("/logout", dependencies=[Depends(require_htmx_header)])
 def logout(
+    request: Request,
     session: Annotated[Session, Depends(db_session)],
     sr_session: Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)] = None,
 ) -> Response:
@@ -104,8 +109,14 @@ def logout(
         payload = read_session_cookie(settings.secret_key, sr_session)
         if payload is not None:
             row = SqlAlchemyWebSessionRepository(session).get_by_id(payload.session_id)
-            if row is not None:
+            if row is not None and row.revoked_at is None:
                 row.revoked_at = datetime.now(UTC)
+                log_audit_event(
+                    "session.revoked",
+                    actor_id=row.user_id,
+                    target_id=row.id,
+                    client_ip=request.client.host if request.client else "unknown",
+                )
     out.delete_cookie(
         SESSION_COOKIE_NAME,
         httponly=True,

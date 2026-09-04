@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, Request, Response
 from sqlalchemy.orm import Session
 
+from app.audit import log_audit_event
 from app.auth.passwords import hash_password, verify_password
 from app.deps import db_session
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
@@ -53,6 +54,12 @@ def revoke_session(
     row = SqlAlchemyWebSessionRepository(session).get_active_for_user(user.id, session_id)
     if row is not None:
         SqlAlchemyWebSessionRepository(session).revoke(row)
+        log_audit_event(
+            "session.revoked",
+            actor_id=user.id,
+            target_id=row.id,
+            client_ip=request.client.host if request.client else "unknown",
+        )
 
     context = {"user": user, **_session_list_context(session, user.id, current_session_id)}
     return templates.TemplateResponse(request, "partials/session_list.html", context)
@@ -92,6 +99,12 @@ def change_password(
     # the sessions_invalidated_at bump above) rather than trying to spare the
     # old row, so there's never a stale row left active alongside the new one.
     SqlAlchemyWebSessionRepository(session).revoke_all_for_user(user.id)
+    log_audit_event(
+        "user.password_reset",
+        actor_id=user.id,
+        target_id=user.id,
+        client_ip=request.client.host if request.client else "unknown",
+    )
 
     response = templates.TemplateResponse(
         request, "partials/change_password_form.html", {"user": user, "success": True}

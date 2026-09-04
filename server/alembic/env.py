@@ -11,10 +11,14 @@ from app.models.base import Base
 # access to the values within the .ini file in use.
 config = context.config
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
+# Interpret the config file for Python logging. disable_existing_loggers
+# defaults to True, which would silently disable any app logger already
+# configured before this runs (e.g. the app.audit logger set up by
+# app.audit.configure_logging() in cli.run(), which calls migrate() right
+# after) — every logger not explicitly listed in alembic.ini's config
+# would otherwise go dead for the rest of the process.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # The real URL comes from app.config.settings (SR_DATABASE_URL), not alembic.ini,
 # so there's one source of truth shared with the running app.

@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 
+from app.audit import log_audit_event
 from app.deps import db_session
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
 from app.web.deps import WebUser, require_htmx_header
@@ -32,8 +33,14 @@ def revoke_device(
 ) -> Response:
     tokens = SqlAlchemyDeviceTokenRepository(session)
     token_row = tokens.get_for_user(user.id, device_id)
-    if token_row is not None:
+    if token_row is not None and token_row.revoked_at is None:
         token_row.revoked_at = datetime.now(UTC)
+        log_audit_event(
+            "token.revoked",
+            actor_id=user.id,
+            target_id=token_row.id,
+            client_ip=request.client.host if request.client else "unknown",
+        )
     devices = tokens.list_for_user(user.id)
     return templates.TemplateResponse(
         request, "partials/device_list.html", {"user": user, "devices": devices}

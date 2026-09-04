@@ -2,9 +2,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Form, Header, Request, Response
+from fastapi import APIRouter, Depends, Form, Request, Response
 from sqlalchemy.orm import Session
 
+from app.audit import log_audit_event
 from app.auth.passwords import hash_password
 from app.config import get_settings
 from app.deps import db_session
@@ -47,6 +48,10 @@ def _invalidate_sessions_and_tokens(session: Session, target: User) -> None:
     target.sessions_invalidated_at = datetime.now(UTC)
     SqlAlchemyDeviceTokenRepository(session).revoke_all_for_user(target.id)
     SqlAlchemyWebSessionRepository(session).revoke_all_for_user(target.id)
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 
 @router.get("/users")
@@ -99,6 +104,9 @@ def admin_create_user(
     )
     repo.add(user)
     session.flush()
+    log_audit_event(
+        "user.created", actor_id=admin.id, target_id=user.id, client_ip=_client_ip(request)
+    )
     return templates.TemplateResponse(request, "admin_users.html", _list_context(repo, admin))
 
 
@@ -120,7 +128,9 @@ def admin_patch_user(
     want_disabled = disabled == "true" if disabled is not None else None
 
     is_self = target.id == admin.id
+    will_promote = want_admin is True and not target.is_admin
     will_demote = want_admin is False and target.is_admin
+    will_enable = want_disabled is False and target.disabled_at is not None
     will_disable = want_disabled is True and target.disabled_at is None
 
     # Guards mirror app/api/v1/admin.py:patch_user — see that module's
@@ -149,9 +159,57 @@ def admin_patch_user(
     if will_disable:
         _invalidate_sessions_and_tokens(session, target)
 
+    client_ip = _client_ip(request)
+    if will_promote:
+        log_audit_event(
+            "user.promoted", actor_id=admin.id, target_id=target.id, client_ip=client_ip
+        )
+    if will_demote:
+        log_audit_event("user.demoted", actor_id=admin.id, target_id=target.id, client_ip=client_ip)
+    if will_enable:
+        log_audit_event("user.enabled", actor_id=admin.id, target_id=target.id, client_ip=client_ip)
+    if will_disable:
+        log_audit_event(
+            "user.disabled", actor_id=admin.id, target_id=target.id, client_ip=client_ip
+        )
+
     session.flush()
     return templates.TemplateResponse(
         request, "partials/admin_user_list.html", _list_context(repo, admin)
+    )
+
+
+@router.get("/users/{user_id}/password-form")
+def admin_password_form(
+    user_id: str,
+    request: Request,
+    admin: WebAdmin,
+    session: Annotated[Session, Depends(db_session)],
+) -> Response:
+    repo = SqlAlchemyUserRepository(session)
+    target = repo.get_by_id(user_id)
+    if target is None:
+        return Response(status_code=404)
+    return templates.TemplateResponse(
+        request, "partials/admin_user_password_form.html", {"u": _user_row(repo, target)}
+    )
+
+
+@router.get("/users/{user_id}/password-form/cancel")
+def admin_password_form_cancel(
+    user_id: str,
+    request: Request,
+    admin: WebAdmin,
+    session: Annotated[Session, Depends(db_session)],
+) -> Response:
+    repo = SqlAlchemyUserRepository(session)
+    target = repo.get_by_id(user_id)
+    if target is None:
+        return Response(status_code=404)
+    return templates.TemplateResponse(
+        request,
+        "partials/admin_user_row.html",
+        {"u": _user_row(repo, target), "current_admin_id": admin.id},
     )
 
 
@@ -161,7 +219,7 @@ def admin_reset_password(
     request: Request,
     admin: WebAdmin,
     session: Annotated[Session, Depends(db_session)],
-    hx_prompt: Annotated[str | None, Header()] = None,
+    new_password: Annotated[str, Form()],
 ) -> Response:
     repo = SqlAlchemyUserRepository(session)
     target = repo.get_by_id(user_id)
@@ -169,17 +227,20 @@ def admin_reset_password(
         return Response(status_code=404)
 
     try:
-        new_password = validate_password(hx_prompt or "")
+        new_password = validate_password(new_password)
     except ValidationFailed as exc:
         return templates.TemplateResponse(
             request,
-            "partials/admin_user_list.html",
-            _list_context(repo, admin, error=str(exc)),
+            "partials/admin_user_password_form.html",
+            {"u": _user_row(repo, target), "error": str(exc)},
             status_code=400,
         )
 
     target.password_hash = hash_password(new_password)
     _invalidate_sessions_and_tokens(session, target)
+    log_audit_event(
+        "user.password_reset", actor_id=admin.id, target_id=target.id, client_ip=_client_ip(request)
+    )
     return templates.TemplateResponse(
         request, "partials/admin_user_list.html", _list_context(repo, admin)
     )
@@ -196,6 +257,7 @@ def admin_delete_user(
     target = repo.get_by_id(user_id)
     if target is None:
         return Response(status_code=404)
+    target_id = target.id
 
     if target.id == admin.id:
         return templates.TemplateResponse(
@@ -241,6 +303,9 @@ def admin_delete_user(
     # response context first, since it re-queries the user list and must
     # see the deletion, then delete the now-safely-orphaned blobs.
     session.commit()
+    log_audit_event(
+        "user.deleted", actor_id=admin.id, target_id=target_id, client_ip=_client_ip(request)
+    )
     response = templates.TemplateResponse(
         request, "partials/admin_user_list.html", _list_context(repo, admin)
     )
