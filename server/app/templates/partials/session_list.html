@@ -1,0 +1,26 @@
+{% if sessions %}
+<table>
+  <thead><tr><th>Signed in</th><th>Last seen</th><th>Browser</th><th></th></tr></thead>
+  <tbody>
+    {% for s in sessions %}
+    <tr>
+      <td>{{ s.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{{ s.last_seen_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{{ s.user_agent or "unknown" }}{% if s.id == current_session_id %} <span class="badge">this device</span>{% endif %}</td>
+      <td class="text-right">
+        {% if s.id != current_session_id %}
+        <button class="secondary"
+                hx-delete="/settings/sessions/{{ s.id }}"
+                hx-target="#session-list"
+                hx-confirm="Sign out this session?">
+          Sign out
+        </button>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No other active sessions.</p>
+{% endif %}

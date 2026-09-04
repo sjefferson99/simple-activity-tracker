@@ -4,12 +4,15 @@ from datetime import UTC, datetime
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 SESSION_COOKIE_NAME = "sr_session"
+# Absolute lifetime for the signed cookie itself — the underlying WebSession
+# row additionally enforces its own absolute lifetime and idle timeout (see
+# app/auth/web_sessions.py), so this is a coarse outer bound, not the only check.
 _SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
 
 @dataclass(frozen=True)
 class SessionPayload:
-    user_id: str
+    session_id: str
     issued_at: datetime
 
 
@@ -17,9 +20,9 @@ def _serializer(secret_key: str) -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(secret_key, salt="sr-session")
 
 
-def create_session_cookie(secret_key: str, user_id: str) -> str:
+def create_session_cookie(secret_key: str, session_id: str) -> str:
     issued_at = datetime.now(UTC)
-    payload = {"user_id": user_id, "issued_at": issued_at.isoformat()}
+    payload = {"session_id": session_id, "issued_at": issued_at.isoformat()}
     result: str = _serializer(secret_key).dumps(payload)
     return result
 
@@ -33,7 +36,7 @@ def read_session_cookie(secret_key: str, cookie_value: str) -> SessionPayload | 
         return None
     try:
         return SessionPayload(
-            user_id=payload["user_id"],
+            session_id=payload["session_id"],
             issued_at=datetime.fromisoformat(payload["issued_at"]),
         )
     except (KeyError, ValueError):

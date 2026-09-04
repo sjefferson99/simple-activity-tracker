@@ -8,4 +8,11 @@
     {% include "partials/change_password_form.html" %}
   </div>
 </div>
+<div class="card">
+  <h2>Sessions</h2>
+  <p class="muted">Browsers currently signed in to your account.</p>
+  <div id="session-list">
+    {% include "partials/session_list.html" %}
+  </div>
+</div>
 {% endblock %}

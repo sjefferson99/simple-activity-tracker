@@ -4,10 +4,12 @@ from fastapi import Cookie, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth.sessions import SESSION_COOKIE_NAME, read_session_cookie
+from app.auth.web_sessions import resolve_web_session
 from app.config import get_settings
 from app.deps import db_session
 from app.models.user import User
 from app.repositories.users import SqlAlchemyUserRepository
+from app.repositories.web_sessions import SqlAlchemyWebSessionRepository
 
 HTMX_HEADER_NAME = "X-Requested-With"
 HTMX_HEADER_VALUE = "htmx"
@@ -31,11 +33,15 @@ def get_web_user(
     if payload is None:
         raise _REDIRECT_TO_LOGIN
 
+    session_row = resolve_web_session(SqlAlchemyWebSessionRepository(session), payload.session_id)
+    if session_row is None:
+        raise _REDIRECT_TO_LOGIN
+
     users = SqlAlchemyUserRepository(session)
-    user = users.get_by_id(payload.user_id)
+    user = users.get_by_id(session_row.user_id)
     if user is None or user.disabled_at is not None:
         raise _REDIRECT_TO_LOGIN
-    if payload.issued_at < user.sessions_invalidated_at:
+    if session_row.created_at < user.sessions_invalidated_at:
         raise _REDIRECT_TO_LOGIN
     return user
 
@@ -52,6 +58,23 @@ def get_web_admin(user: WebUser) -> User:
 
 
 WebAdmin = Annotated[User, Depends(get_web_admin)]
+
+
+def get_current_web_session_id(
+    _user: WebUser,
+    sr_session: Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)] = None,
+) -> str | None:
+    """The signed-in browser's own WebSession id, for routes that need to
+    tell "this session" apart from the user's other active ones (the
+    Sessions list on /settings). Depending on WebUser first guarantees the
+    cookie has already been validated — this just re-reads its payload."""
+    if sr_session is None:
+        return None
+    payload = read_session_cookie(get_settings().secret_key, sr_session)
+    return payload.session_id if payload is not None else None
+
+
+CurrentWebSessionId = Annotated[str | None, Depends(get_current_web_session_id)]
 
 
 def require_htmx_header(request: Request) -> None:

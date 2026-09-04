@@ -85,5 +85,7 @@ def register_submit(
     session.flush()
 
     response = Response(status_code=200, headers={"HX-Redirect": "/"})
-    set_session_cookie(response, user.id)
+    set_session_cookie(
+        response, session, user_id=user.id, user_agent=request.headers.get("user-agent")
+    )
     return response

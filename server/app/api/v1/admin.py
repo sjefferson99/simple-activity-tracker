@@ -21,6 +21,7 @@ from app.repositories.activities import SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
 from app.repositories.users import SqlAlchemyUserRepository
+from app.repositories.web_sessions import SqlAlchemyWebSessionRepository
 from app.storage.blob_store import LocalFileBlobStore
 
 router = APIRouter(prefix="/api/v1/admin/users", tags=["admin"])
@@ -42,6 +43,7 @@ def _user_out(repo: SqlAlchemyUserRepository, user: User) -> AdminUserOut:
 def _invalidate_sessions_and_tokens(session: Session, user: User) -> None:
     user.sessions_invalidated_at = datetime.now(UTC)
     SqlAlchemyDeviceTokenRepository(session).revoke_all_for_user(user.id)
+    SqlAlchemyWebSessionRepository(session).revoke_all_for_user(user.id)
 
 
 @router.get("", response_model=list[AdminUserOut])
@@ -175,6 +177,7 @@ def delete_user(
         cursor = page.next_cursor
 
     SqlAlchemyDeviceTokenRepository(session).delete_all_for_user(target.id)
+    SqlAlchemyWebSessionRepository(session).delete_all_for_user(target.id)
     session.flush()
 
     repo.delete(target)

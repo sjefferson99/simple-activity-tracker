@@ -1,14 +1,17 @@
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Request, Response
+from fastapi import APIRouter, Cookie, Depends, Form, Request, Response
 from sqlalchemy.orm import Session
 
 from app.auth.passwords import verify_password
 from app.auth.rate_limit import login_rate_limiter
-from app.auth.sessions import SESSION_COOKIE_NAME, create_session_cookie
+from app.auth.sessions import SESSION_COOKIE_NAME, create_session_cookie, read_session_cookie
+from app.auth.web_sessions import create_web_session
 from app.config import get_settings
 from app.deps import db_session
 from app.repositories.users import SqlAlchemyUserRepository
+from app.repositories.web_sessions import SqlAlchemyWebSessionRepository
 from app.web.deps import require_htmx_header
 from app.web.templating import templates
 
@@ -17,9 +20,18 @@ router = APIRouter(tags=["web"], include_in_schema=False)
 _INVALID_CREDENTIALS = "Invalid email or password"
 
 
-def set_session_cookie(response: Response, user_id: str) -> None:
+def set_session_cookie(
+    response: Response, session: Session, *, user_id: str, user_agent: str | None
+) -> None:
+    """Creates a new WebSession row for this sign-in and signs a cookie
+    against its id — the row is what logout/idle-timeout/"sign out other
+    browsers" actually act on; the cookie alone is just a bearer of the id."""
     settings = get_settings()
-    cookie_value = create_session_cookie(settings.secret_key, user_id)
+    session_row = create_web_session(
+        SqlAlchemyWebSessionRepository(session), user_id=user_id, user_agent=user_agent
+    )
+    session.flush()
+    cookie_value = create_session_cookie(settings.secret_key, session_row.id)
     response.set_cookie(
         SESSION_COOKIE_NAME,
         cookie_value,
@@ -75,12 +87,29 @@ def login_submit(
         )
 
     response = Response(status_code=200, headers={"HX-Redirect": "/"})
-    set_session_cookie(response, user.id)
+    set_session_cookie(
+        response, session, user_id=user.id, user_agent=request.headers.get("user-agent")
+    )
     return response
 
 
 @router.post("/logout", dependencies=[Depends(require_htmx_header)])
-def logout() -> Response:
+def logout(
+    session: Annotated[Session, Depends(db_session)],
+    sr_session: Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)] = None,
+) -> Response:
     out = Response(status_code=200, headers={"HX-Redirect": "/login"})
-    out.delete_cookie(SESSION_COOKIE_NAME)
+    settings = get_settings()
+    if sr_session is not None:
+        payload = read_session_cookie(settings.secret_key, sr_session)
+        if payload is not None:
+            row = SqlAlchemyWebSessionRepository(session).get_by_id(payload.session_id)
+            if row is not None:
+                row.revoked_at = datetime.now(UTC)
+    out.delete_cookie(
+        SESSION_COOKIE_NAME,
+        httponly=True,
+        secure=settings.secure_cookies,
+        samesite="lax",
+    )
     return out
