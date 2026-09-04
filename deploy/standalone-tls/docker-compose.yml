@@ -20,6 +20,8 @@ services:
       - "8000"                 # reached by `proxy` over the compose network only — not published to the host
     env_file:
       - .env
+    secrets:
+      - SR_SECRET_KEY
     volumes:
       - ./data:/data
     read_only: true             # the app only ever writes under /data (bind-mounted above) or /tmp
@@ -80,3 +82,7 @@ services:
       start_period: 10s
       retries: 3
     restart: unless-stopped
+
+secrets:
+  SR_SECRET_KEY:
+    file: ./secrets/secret_key.txt

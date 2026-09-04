@@ -41,3 +41,4 @@ deploy/standalone-tls/.env
 deploy/standalone-tls/data/
 deploy/standalone-tls/certs/*.pem
 deploy/standalone-tls/backups/
+deploy/standalone-tls/secrets/
