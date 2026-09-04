@@ -28,6 +28,31 @@ To trust the cert instead of clicking through the warning every time, install
 the same one CI pushes on every merge to `main`) — to update to the latest
 version later: `docker compose pull app && docker compose up -d`.
 
+## Updating and rolling back
+
+`app` tracks `:latest`, so `docker compose pull app && docker compose up -d`
+always picks up the newest build from `main`. `docker compose ps` should show
+both services `healthy` within a few seconds; if not, `docker compose logs app`
+first (migrations run at startup and fail loudly on a real problem).
+
+To roll back, every merge to `main` also gets an immutable `sha-<commit>` tag
+on the same image (see `.github/workflows/container.yml`) — find the last
+known-good commit (`git log --oneline server/`), then:
+
+```bash
+docker pull ghcr.io/sjefferson99/simple-runner-server:sha-<commit>
+docker compose stop app
+docker run --rm --env-file .env -v ./data:/data \
+  ghcr.io/sjefferson99/simple-runner-server:sha-<commit> --help  # sanity check the tag exists/pulls
+```
+
+then temporarily point `app.image` in `docker-compose.yml` at that
+`sha-<commit>` tag and `docker compose up -d` — switch it back to `:latest`
+once you're ready to move forward again. There's no automatic downgrade path
+for the database itself (migrations only run forward); rolling back the image
+after a migration has already run against your data is not supported by this
+setup — restore from a backup instead if that ever happens.
+
 ## Ports
 
 - `proxy` publishes **80** (redirects to 443) and **443** (TLS) — these are
