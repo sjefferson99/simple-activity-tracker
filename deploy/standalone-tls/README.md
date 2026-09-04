@@ -53,6 +53,47 @@ for the database itself (migrations only run forward); rolling back the image
 after a migration has already run against your data is not supported by this
 setup — restore from a backup instead if that ever happens.
 
+## Secrets
+
+By default `SR_SECRET_KEY` and `SR_ADMIN_PASSWORD` live in `.env`, which
+Compose injects as plain environment variables — visible to anyone who can
+run `docker inspect` on the container. For a shared/multi-user host, prefer
+Docker Compose's `secrets:` block instead, which mounts each value as a file
+under `/run/secrets/` and keeps it out of the environment entirely:
+
+```yaml
+services:
+  app:
+    secrets:
+      - SR_SECRET_KEY
+      - SR_ADMIN_PASSWORD
+    # ...
+
+secrets:
+  SR_SECRET_KEY:
+    file: ./secrets/secret_key.txt        # gitignored — contains the raw value, no quotes/newline
+  SR_ADMIN_PASSWORD:
+    file: ./secrets/admin_password.txt
+```
+
+The mounted filename must match the setting's env var name exactly (e.g.
+`/run/secrets/SR_SECRET_KEY`) — the app checks `/run/secrets/` automatically
+for every setting, not just these two, and an env var of the same name always
+wins if both are set. `SR_ADMIN_PASSWORD` only does anything on the very
+first startup with an empty database (see "First-boot admin bootstrap" in
+`.env.example`) — the app logs a warning at startup if it's still set once
+users already exist, as a nudge to remove it.
+
+**Rotating `SR_SECRET_KEY`**: generate a new one
+(`python -c "import secrets; print(secrets.token_urlsafe(32))"`), update it
+wherever it's stored (`.env` or the secrets file), then `docker compose up -d`.
+It's only used to sign the browser's session cookie, so every signed-in
+browser gets logged out and has to sign in again — phone-app device tokens
+are unaffected (they're opaque, independently generated values checked
+against the database, not signed with this key) and keep working. Nothing
+else breaks: no data is re-encrypted or affected, since the key never
+encrypts anything at rest.
+
 ## Ports
 
 - `proxy` publishes **80** (redirects to 443) and **443** (TLS) — these are

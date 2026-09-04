@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
@@ -7,17 +8,32 @@ from app.config import get_settings
 from app.models.user import User
 from app.repositories.users import SqlAlchemyUserRepository
 
+_logger = logging.getLogger("app.bootstrap")
+
 
 def bootstrap_admin_if_needed(session: Session) -> None:
     """If SR_ADMIN_EMAIL/SR_ADMIN_PASSWORD are set and no users exist yet,
     creates that first admin. Silent no-op otherwise — this runs on every
-    startup, so it must never touch an already-populated users table."""
+    startup, so it must never touch an already-populated users table.
+
+    SR_ADMIN_PASSWORD only ever does anything on that first, empty-database
+    run — see docs/SERVER-PRODUCTION-PLAN.md D3. Once at least one user
+    exists, leaving it set in the deployment's env just means the plaintext
+    password sits there indefinitely for no further effect, so we warn once
+    per startup rather than silently ignoring it."""
     settings = get_settings()
-    if not settings.admin_email or not settings.admin_password:
+    users = SqlAlchemyUserRepository(session)
+    existing_users = users.list_all()
+
+    if existing_users:
+        if settings.admin_password:
+            _logger.warning(
+                "SR_ADMIN_PASSWORD is set but users already exist — it has no effect after "
+                "the first startup and can be removed from this deployment's configuration."
+            )
         return
 
-    users = SqlAlchemyUserRepository(session)
-    if users.list_all():
+    if not settings.admin_email or not settings.admin_password:
         return
 
     now = datetime.now(UTC)
