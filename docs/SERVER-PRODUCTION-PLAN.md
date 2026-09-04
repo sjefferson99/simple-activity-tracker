@@ -476,18 +476,18 @@ status, then **propose the commit and wait**.
 
 ## 7. "Production behind a reverse proxy" acceptance checklist
 
-- [ ] Startup refuses a missing/weak `SR_SECRET_KEY` (S1)
-- [ ] All user-supplied strings validated server-side on both API and web (S2)
-- [ ] No 5xx reachable from crafted query/body input in the test suite (S3, R6)
+- [x] Startup refuses a missing/weak `SR_SECRET_KEY` (S1) — #8
+- [x] All user-supplied strings validated server-side on both API and web (S2) — #10
+- [x] No 5xx reachable from crafted query/body input in the test suite (S3; R6 not started) — #9
 - [ ] Logout and idle timeout actually end a web session (S4)
-- [ ] CSP + HSTS + nosniff + frame-ancestors + no-store present; map and chart still render (S5)
+- [x] CSP + HSTS + nosniff + frame-ancestors + no-store present; map and chart still render (S5) — #11
 - [ ] Login/register/password routes rate-limited and timing-neutral (S6)
 - [ ] API docs off by default (S7)
 - [ ] Blob writes atomic, deletes after commit, `gc` command exists (R1)
 - [ ] `busy_timeout` set; no per-request writes on read paths (R2)
 - [ ] Backup + restore documented and tested; pre-migration backup (R4, D6)
 - [ ] Structured logs + audit events; no secrets in logs (R5)
-- [ ] nginx hardened; compose pinned, read-only, cap-dropped, health-checked (D1, D2)
+- [x] nginx hardened (D1) — #11; compose pinned/read-only/cap-dropped/health-checked (D2) not started
 - [ ] Secrets via files supported; admin password removable after bootstrap (D3)
 - [ ] Dependabot + dependency audit + image scan in CI; actions SHA-pinned (D5)
 - [ ] Verified end-to-end on a Pi (or any Linux host) with a real phone upload over `https://` — this was still outstanding at W4 sign-off
