@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import Cookie, Depends, HTTPException, Request, status
@@ -18,6 +18,13 @@ _UNAUTHORIZED = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
     detail={"error": {"code": "unauthorized", "message": "Not authenticated"}},
 )
+
+# last_used_at was previously written on every authenticated bearer request,
+# turning every read into a write transaction — only bump it if it's null or
+# staler than this (same tradeoff app/auth/web_sessions.py's
+# _LAST_SEEN_BUMP_INTERVAL already makes for web sessions; see R2 in
+# docs/SERVER-PRODUCTION-PLAN.md).
+_LAST_USED_BUMP_INTERVAL = timedelta(seconds=60)
 
 
 def _user_is_usable(user: User) -> bool:
@@ -51,7 +58,13 @@ def get_current_user(
         user = users.get_by_id(token_row.user_id)
         if user is None or not _user_is_usable(user):
             raise _UNAUTHORIZED
-        token_row.last_used_at = datetime.now(UTC)
+        now = datetime.now(UTC)
+        stale = (
+            token_row.last_used_at is None
+            or now - token_row.last_used_at > _LAST_USED_BUMP_INTERVAL
+        )
+        if stale:
+            token_row.last_used_at = now
         return user
 
     if sr_session is not None:
