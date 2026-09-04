@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -22,6 +22,7 @@ from app.api.v1.schemas import (
     TrackOut,
     TrackPointOut,
 )
+from app.audit import log_audit_event
 from app.auth.current_user import CurrentUser
 from app.config import get_settings
 from app.deps import db_session
@@ -237,7 +238,10 @@ def patch_activity(
 
 @router.delete("/{activity_id}", status_code=204)
 def delete_activity(
-    activity_id: str, user: CurrentUser, session: Annotated[Session, Depends(db_session)]
+    activity_id: str,
+    request: Request,
+    user: CurrentUser,
+    session: Annotated[Session, Depends(db_session)],
 ) -> None:
     activities = SqlAlchemyActivityRepository(session)
     activity = activities.get_by_id_for_user(user.id, activity_id)
@@ -254,6 +258,7 @@ def delete_activity(
         session.flush()
 
     blob_key = activity.gpx_blob_key
+    activity_id_for_audit = activity.id
     activities.delete(activity)
     # Commit explicitly here rather than relying on db_session's post-return
     # commit — a Starlette BackgroundTask runs as part of sending the
@@ -264,6 +269,12 @@ def delete_activity(
     # fails, the exception propagates and the blob is correctly left in
     # place (orphan-with-no-row is safe; row-with-no-blob is not).
     session.commit()
+    log_audit_event(
+        "activity.deleted",
+        actor_id=user.id,
+        target_id=activity_id_for_audit,
+        client_ip=request.client.host if request.client else "unknown",
+    )
     _blob_store().delete(blob_key)
 
 

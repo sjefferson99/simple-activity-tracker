@@ -137,6 +137,7 @@ def run() -> None:
     import uvicorn
     from pydantic import ValidationError
 
+    from app.audit import configure_logging
     from app.auth.bootstrap import bootstrap_admin_if_needed
     from app.db import get_session_factory
 
@@ -145,6 +146,7 @@ def run() -> None:
     except ValidationError as exc:
         sys.exit(f"Invalid configuration: {exc}")
 
+    configure_logging(get_settings().log_level)
     migrate()
 
     with get_session_factory()() as session:

@@ -380,3 +380,82 @@ def test_disabling_user_kills_session_and_device_token(app_client, auth_headers)
         "/", headers={"Cookie": f"sr_session={member_cookie}"}, follow_redirects=False
     )
     assert stale_session_check.status_code == 303
+
+
+def _create_member(
+    app_client, auth_headers, email="member3@example.com", password="member3-password-123"
+):
+    response = app_client.post(
+        "/api/v1/admin/users",
+        headers=auth_headers,
+        json={"email": email, "display_name": "Member", "password": password},
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def test_admin_password_form_renders_inline(app_client, auth_headers):
+    member = _create_member(app_client, auth_headers)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get(f"/admin/users/{member['id']}/password-form")
+    assert response.status_code == 200
+    assert f"admin-user-row-{member['id']}" in response.text
+    assert 'name="new_password"' in response.text
+
+
+def test_admin_password_form_cancel_restores_the_row(app_client, auth_headers):
+    member = _create_member(app_client, auth_headers)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get(f"/admin/users/{member['id']}/password-form/cancel")
+    assert response.status_code == 200
+    assert "Reset password" in response.text
+    assert 'name="new_password"' not in response.text
+
+
+def test_admin_reset_password_via_inline_form_updates_the_password(app_client, auth_headers):
+    member = _create_member(app_client, auth_headers, "member4@example.com", "member4-password-123")
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.post(
+        f"/admin/users/{member['id']}/password",
+        headers=HTMX_HEADERS,
+        data={"new_password": "a-brand-new-password"},
+    )
+    assert response.status_code == 200
+    assert member["email"] in response.text
+
+    login = app_client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "member4@example.com",
+            "password": "a-brand-new-password",
+            "device_name": "x",
+        },
+    )
+    assert login.status_code == 200
+
+
+def test_admin_reset_password_via_inline_form_rejects_short_password(app_client, auth_headers):
+    member = _create_member(app_client, auth_headers, "member5@example.com", "member5-password-123")
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.post(
+        f"/admin/users/{member['id']}/password",
+        headers=HTMX_HEADERS,
+        data={"new_password": "short"},
+    )
+    assert response.status_code == 400
+    assert f"admin-user-row-{member['id']}" in response.text
+    assert 'name="new_password"' in response.text
+
+
+def test_admin_password_form_without_htmx_header_is_403(app_client, auth_headers):
+    member = _create_member(app_client, auth_headers, "member6@example.com", "member6-password-123")
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.post(
+        f"/admin/users/{member['id']}/password", data={"new_password": "a-brand-new-password"}
+    )
+    assert response.status_code == 403

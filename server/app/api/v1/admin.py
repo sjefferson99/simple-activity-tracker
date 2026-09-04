@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.api.v1.errors import api_error
@@ -12,6 +12,7 @@ from app.api.v1.schemas import (
     AdminSetPasswordRequest,
     AdminUserOut,
 )
+from app.audit import log_audit_event
 from app.auth.current_user import CurrentAdmin
 from app.auth.passwords import hash_password
 from app.config import get_settings
@@ -46,6 +47,10 @@ def _invalidate_sessions_and_tokens(session: Session, user: User) -> None:
     SqlAlchemyWebSessionRepository(session).revoke_all_for_user(user.id)
 
 
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
 @router.get("", response_model=list[AdminUserOut])
 def list_users(
     admin: CurrentAdmin, session: Annotated[Session, Depends(db_session)]
@@ -57,6 +62,7 @@ def list_users(
 @router.post("", response_model=AdminUserOut, status_code=201)
 def create_user(
     body: AdminCreateUserRequest,
+    request: Request,
     admin: CurrentAdmin,
     session: Annotated[Session, Depends(db_session)],
 ) -> AdminUserOut:
@@ -75,6 +81,9 @@ def create_user(
     )
     repo.add(user)
     session.flush()
+    log_audit_event(
+        "user.created", actor_id=admin.id, target_id=user.id, client_ip=_client_ip(request)
+    )
     return _user_out(repo, user)
 
 
@@ -82,6 +91,7 @@ def create_user(
 def patch_user(
     user_id: str,
     body: AdminPatchUserRequest,
+    request: Request,
     admin: CurrentAdmin,
     session: Annotated[Session, Depends(db_session)],
 ) -> AdminUserOut:
@@ -91,7 +101,9 @@ def patch_user(
         raise api_error(404, "not_found", "User not found")
 
     is_self = target.id == admin.id
+    will_promote = body.is_admin is True and not target.is_admin
     will_demote = body.is_admin is False and target.is_admin
+    will_enable = body.disabled is False and target.disabled_at is not None
     will_disable = body.disabled is True and target.disabled_at is None
 
     if is_self and (will_demote or will_disable):
@@ -115,6 +127,20 @@ def patch_user(
     if will_disable:
         _invalidate_sessions_and_tokens(session, target)
 
+    client_ip = _client_ip(request)
+    if will_promote:
+        log_audit_event(
+            "user.promoted", actor_id=admin.id, target_id=target.id, client_ip=client_ip
+        )
+    if will_demote:
+        log_audit_event("user.demoted", actor_id=admin.id, target_id=target.id, client_ip=client_ip)
+    if will_enable:
+        log_audit_event("user.enabled", actor_id=admin.id, target_id=target.id, client_ip=client_ip)
+    if will_disable:
+        log_audit_event(
+            "user.disabled", actor_id=admin.id, target_id=target.id, client_ip=client_ip
+        )
+
     session.flush()
     return _user_out(repo, target)
 
@@ -123,6 +149,7 @@ def patch_user(
 def reset_password(
     user_id: str,
     body: AdminSetPasswordRequest,
+    request: Request,
     admin: CurrentAdmin,
     session: Annotated[Session, Depends(db_session)],
 ) -> None:
@@ -133,11 +160,15 @@ def reset_password(
 
     target.password_hash = hash_password(body.new_password)
     _invalidate_sessions_and_tokens(session, target)
+    log_audit_event(
+        "user.password_reset", actor_id=admin.id, target_id=target.id, client_ip=_client_ip(request)
+    )
 
 
 @router.delete("/{user_id}", status_code=204)
 def delete_user(
     user_id: str,
+    request: Request,
     admin: CurrentAdmin,
     session: Annotated[Session, Depends(db_session)],
 ) -> None:
@@ -145,6 +176,7 @@ def delete_user(
     target = repo.get_by_id(user_id)
     if target is None:
         raise api_error(404, "not_found", "User not found")
+    target_id = target.id
 
     if target.id == admin.id:
         raise api_error(400, "cannot_modify_self", "You cannot delete your own account")
@@ -187,5 +219,8 @@ def delete_user(
     # blobs are removed synchronously, so they're only deleted once every
     # row deletion above is durable.
     session.commit()
+    log_audit_event(
+        "user.deleted", actor_id=admin.id, target_id=target_id, client_ip=_client_ip(request)
+    )
     for blob_key in blob_keys:
         blob_store.delete(blob_key)

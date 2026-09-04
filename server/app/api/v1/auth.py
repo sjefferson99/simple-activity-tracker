@@ -12,6 +12,7 @@ from app.api.v1.schemas import (
     LoginResponse,
     UserOut,
 )
+from app.audit import log_audit_event
 from app.auth.current_user import CurrentUser, bearer_token_from_header
 from app.auth.device_tokens import generate_device_token, hash_device_token
 from app.auth.passwords import hash_password, verify_password
@@ -27,13 +28,17 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 _INVALID_CREDENTIALS = "Invalid email or password"
 
 
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
 @router.post("/login", response_model=LoginResponse)
 def login(
     body: LoginRequest,
     request: Request,
     session: Annotated[Session, Depends(db_session)],
 ) -> LoginResponse:
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _client_ip(request)
     if not login_rate_limiter.allow(f"ip:{client_ip}") or not login_rate_limiter.allow(
         f"email:{body.email.lower()}"
     ):
@@ -42,10 +47,13 @@ def login(
     users = SqlAlchemyUserRepository(session)
     user = users.get_by_email(body.email)
     if user is None or user.disabled_at is not None:
+        log_audit_event("login.failure", client_ip=client_ip, email=body.email.lower())
         raise api_error(401, "invalid_credentials", _INVALID_CREDENTIALS)
     if not verify_password(body.password, user.password_hash):
+        log_audit_event("login.failure", client_ip=client_ip, email=body.email.lower())
         raise api_error(401, "invalid_credentials", _INVALID_CREDENTIALS)
 
+    log_audit_event("login.success", actor_id=user.id, client_ip=client_ip)
     secret = generate_device_token()
     now = datetime.now(UTC)
     token_row = DeviceToken(
@@ -80,6 +88,12 @@ def logout(request: Request, session: Annotated[Session, Depends(db_session)]) -
     token_row = tokens.get_by_hash(hash_device_token(bearer))
     if token_row is not None and token_row.revoked_at is None:
         token_row.revoked_at = datetime.now(UTC)
+        log_audit_event(
+            "token.revoked",
+            actor_id=token_row.user_id,
+            target_id=token_row.id,
+            client_ip=_client_ip(request),
+        )
 
 
 me_router = APIRouter(prefix="/api/v1/me", tags=["me"])
@@ -106,6 +120,7 @@ def list_devices(
 @me_router.delete("/devices/{device_id}", status_code=204)
 def revoke_device(
     device_id: str,
+    request: Request,
     user: CurrentUser,
     session: Annotated[Session, Depends(db_session)],
 ) -> None:
@@ -114,6 +129,9 @@ def revoke_device(
     if token_row is None:
         raise api_error(404, "not_found", "Device not found")
     token_row.revoked_at = datetime.now(UTC)
+    log_audit_event(
+        "token.revoked", actor_id=user.id, target_id=token_row.id, client_ip=_client_ip(request)
+    )
 
 
 @me_router.put("/password", status_code=204)
@@ -142,3 +160,6 @@ def change_password(
     # No "presenting web session" concept from a bearer-authenticated
     # request — a password change via the phone app signs every browser out.
     SqlAlchemyWebSessionRepository(session).revoke_all_for_user(user.id)
+    log_audit_event(
+        "user.password_reset", actor_id=user.id, target_id=user.id, client_ip=_client_ip(request)
+    )

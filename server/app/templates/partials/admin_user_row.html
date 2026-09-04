@@ -1,0 +1,39 @@
+<tr id="admin-user-row-{{ u.id }}">
+  <td>{{ u.display_name }}</td>
+  <td>{{ u.email }}</td>
+  <td>{{ u.activity_count }}</td>
+  <td>{{ u.last_activity_at.strftime('%Y-%m-%d') if u.last_activity_at else "—" }}</td>
+  <td>
+    {% if u.is_admin %}<span class="badge admin">Admin</span>{% endif %}
+    {% if u.disabled %}<span class="badge disabled">Disabled</span>{% endif %}
+  </td>
+  <td class="text-right">
+    {% if u.id != current_admin_id %}
+    <button class="secondary"
+            hx-patch="/admin/users/{{ u.id }}"
+            hx-vals='{"is_admin": "{{ (not u.is_admin) | lower }}"}'
+            hx-target="#admin-user-list" hx-select="#admin-user-list" hx-swap="outerHTML">
+      {{ "Demote" if u.is_admin else "Promote" }}
+    </button>
+    <button class="secondary"
+            hx-patch="/admin/users/{{ u.id }}"
+            hx-vals='{"disabled": "{{ (not u.disabled) | lower }}"}'
+            hx-target="#admin-user-list" hx-select="#admin-user-list" hx-swap="outerHTML">
+      {{ "Enable" if u.disabled else "Disable" }}
+    </button>
+    <button class="secondary"
+            hx-get="/admin/users/{{ u.id }}/password-form"
+            hx-target="#admin-user-row-{{ u.id }}" hx-swap="outerHTML">
+      Reset password
+    </button>
+    <button class="danger"
+            hx-delete="/admin/users/{{ u.id }}"
+            hx-confirm="Delete {{ u.email }}? This permanently removes their account and all {{ u.activity_count }} activity(ies)."
+            hx-target="#admin-user-list" hx-select="#admin-user-list" hx-swap="outerHTML">
+      Delete
+    </button>
+    {% else %}
+    <span class="muted">(you)</span>
+    {% endif %}
+  </td>
+</tr>

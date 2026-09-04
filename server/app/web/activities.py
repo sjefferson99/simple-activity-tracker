@@ -5,6 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Form, Request, Response
 from sqlalchemy.orm import Session
 
+from app.audit import log_audit_event
 from app.config import get_settings
 from app.deps import db_session
 from app.models.activity import Activity
@@ -110,6 +111,7 @@ def activity_patch(
 @router.delete("/activities/{activity_id}", dependencies=[Depends(require_htmx_header)])
 def activity_delete(
     activity_id: str,
+    request: Request,
     user: WebUser,
     session: Annotated[Session, Depends(db_session)],
 ) -> Response:
@@ -127,6 +129,7 @@ def activity_delete(
         session.flush()
 
     blob_key = activity.gpx_blob_key
+    activity_id_for_audit = activity.id
     activities.delete(activity)
     # See app/api/v1/activities.py:delete_activity — committed explicitly
     # (rather than relying on db_session's post-return commit) before the
@@ -134,5 +137,11 @@ def activity_delete(
     # sending the response, which happens before db_session's dependency
     # cleanup/commit — not after.
     session.commit()
+    log_audit_event(
+        "activity.deleted",
+        actor_id=user.id,
+        target_id=activity_id_for_audit,
+        client_ip=request.client.host if request.client else "unknown",
+    )
     LocalFileBlobStore(Path(get_settings().data_dir)).delete(blob_key)
     return Response(status_code=200, headers={"HX-Redirect": "/"})
