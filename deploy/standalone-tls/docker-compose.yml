@@ -22,10 +22,24 @@ services:
       - .env
     volumes:
       - ./data:/data
+    read_only: true             # the app only ever writes under /data (bind-mounted above) or /tmp
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
+    # Healthcheck is baked into the image (server/Dockerfile) — no override needed here.
 
   proxy:
-    image: nginx:alpine
+    image: nginx:1.27-alpine
     ports:
       - "443:443"
       - "80:80"                 # plain-http → https redirect only, see nginx.conf
@@ -33,5 +47,36 @@ services:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./certs:/etc/nginx/certs:ro
     depends_on:
-      - app
+      app:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # nginx's master process starts as root (to bind 80/443) then drops
+    # privilege to the "nginx" worker user and chowns its cache dirs under
+    # /var/cache/nginx — cap_drop: ALL alone breaks startup with
+    # "chown(...) Operation not permitted"; these four are the minimum
+    # re-added to let it do that.
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - NET_BIND_SERVICE
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      # --no-check-certificate: the cert is self-signed (see generate-cert.sh);
+      # this only proves nginx is up and proxying to app, not that the cert
+      # chain validates. /healthz (not /) so the check doesn't depend on
+      # BusyBox wget's default of following redirects out to some other host.
+      test: ["CMD", "wget", "--no-check-certificate", "-qO-", "https://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     restart: unless-stopped
