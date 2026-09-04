@@ -483,7 +483,7 @@ status, then **propose the commit and wait**.
 - [x] CSP + HSTS + nosniff + frame-ancestors + no-store present; map and chart still render (S5) — #11
 - [ ] Login/register/password routes rate-limited and timing-neutral (S6)
 - [ ] API docs off by default (S7)
-- [ ] Blob writes atomic, deletes after commit, `gc` command exists (R1)
+- [x] Blob writes atomic, deletes after commit, `gc` command exists (R1) — #13
 - [ ] `busy_timeout` set; no per-request writes on read paths (R2)
 - [ ] Backup + restore documented and tested; pre-migration backup (R4, D6)
 - [ ] Structured logs + audit events; no secrets in logs (R5)
