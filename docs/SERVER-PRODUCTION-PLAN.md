@@ -479,7 +479,7 @@ status, then **propose the commit and wait**.
 - [x] Startup refuses a missing/weak `SR_SECRET_KEY` (S1) — #8
 - [x] All user-supplied strings validated server-side on both API and web (S2) — #10
 - [x] No 5xx reachable from crafted query/body input in the test suite (S3; R6 not started) — #9
-- [ ] Logout and idle timeout actually end a web session (S4)
+- [x] Logout and idle timeout actually end a web session (S4) — #12
 - [x] CSP + HSTS + nosniff + frame-ancestors + no-store present; map and chart still render (S5) — #11
 - [ ] Login/register/password routes rate-limited and timing-neutral (S6)
 - [ ] API docs off by default (S7)
