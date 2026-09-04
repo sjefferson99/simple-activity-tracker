@@ -5,8 +5,8 @@
     {% for device in devices %}
     <tr>
       <td>{{ device.name }}</td>
-      <td>{{ device.created_at.strftime('%Y-%m-%d') }}</td>
-      <td>{{ device.last_used_at.strftime('%Y-%m-%d %H:%M') if device.last_used_at else "never" }}</td>
+      <td><time datetime="{{ device.created_at.isoformat() }}" class="local-time" data-format="date">{{ device.created_at.isoformat() }}</time></td>
+      <td>{% if device.last_used_at %}<time datetime="{{ device.last_used_at.isoformat() }}" class="local-time" data-format="date-time">{{ device.last_used_at.isoformat() }}</time>{% else %}never{% endif %}</td>
       <td class="text-right">
         <button class="secondary"
                 hx-delete="/devices/{{ device.id }}"

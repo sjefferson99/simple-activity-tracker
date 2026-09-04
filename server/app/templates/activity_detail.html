@@ -8,19 +8,19 @@
 
 <div class="card">
   <h1>{{ activity.title or "Activity" }} <span class="badge type-{{ activity.activity_type }}">{{ "Cycle" if activity.activity_type == "cycling" else "Run" }}</span></h1>
-  <p class="muted">{{ activity.started_at.strftime('%A %d %B %Y, %H:%M') }}</p>
+  <p class="muted"><time datetime="{{ activity.started_at.isoformat() }}" class="local-time" data-format="date-time">{{ activity.started_at.isoformat() }}</time></p>
 
   <div class="stat-grid">
     <div class="stat">
-      <div class="value">{{ activity.client_summary.distance_meters | distance_km }}</div>
+      <div class="value">{{ activity.client_summary.get('distance_meters') | distance_km }}</div>
       <div class="label">Distance (phone)</div>
     </div>
     <div class="stat">
-      <div class="value">{{ activity.client_summary.moving_seconds | duration }}</div>
+      <div class="value">{{ activity.client_summary.get('moving_seconds') | duration }}</div>
       <div class="label">Moving time (phone)</div>
     </div>
     <div class="stat">
-      <div class="value">{{ activity.client_summary.avg_speed_mps | kmh }}</div>
+      <div class="value">{{ activity.client_summary.get('avg_speed_mps') | kmh }}</div>
       <div class="label">Avg speed (phone)</div>
     </div>
   </div>

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Error — Simple Activity Tracker{% endblock %}
+{% block content %}
+<div class="card empty-state">
+  <p>Something went wrong.</p>
+  {% if correlation_id %}<p class="muted">Reference: {{ correlation_id }}</p>{% endif %}
+  <p><a href="/">Back to activities</a></p>
+</div>
+{% endblock %}

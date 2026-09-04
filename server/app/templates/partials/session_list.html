@@ -4,8 +4,8 @@
   <tbody>
     {% for s in sessions %}
     <tr>
-      <td>{{ s.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-      <td>{{ s.last_seen_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td><time datetime="{{ s.created_at.isoformat() }}" class="local-time" data-format="date-time">{{ s.created_at.isoformat() }}</time></td>
+      <td><time datetime="{{ s.last_seen_at.isoformat() }}" class="local-time" data-format="date-time">{{ s.last_seen_at.isoformat() }}</time></td>
       <td>{{ s.user_agent or "unknown" }}{% if s.id == current_session_id %} <span class="badge">this device</span>{% endif %}</td>
       <td class="text-right">
         {% if s.id != current_session_id %}
