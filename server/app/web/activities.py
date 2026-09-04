@@ -126,6 +126,13 @@ def activity_delete(
         # means the analysis delete must be flushed before the activity delete.
         session.flush()
 
-    LocalFileBlobStore(Path(get_settings().data_dir)).delete(activity.gpx_blob_key)
+    blob_key = activity.gpx_blob_key
     activities.delete(activity)
+    # See app/api/v1/activities.py:delete_activity — committed explicitly
+    # (rather than relying on db_session's post-return commit) before the
+    # synchronous blob delete, since a BackgroundTask runs as part of
+    # sending the response, which happens before db_session's dependency
+    # cleanup/commit — not after.
+    session.commit()
+    LocalFileBlobStore(Path(get_settings().data_dir)).delete(blob_key)
     return Response(status_code=200, headers={"HX-Redirect": "/"})

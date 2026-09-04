@@ -216,6 +216,7 @@ def admin_delete_user(
     analyses_repo = SqlAlchemyActivityAnalysisRepository(session)
     blob_store = LocalFileBlobStore(Path(get_settings().data_dir))
 
+    blob_keys: list[str] = []
     cursor: str | None = None
     while True:
         page = activities_repo.list_for_user(target.id, limit=200, cursor=cursor)
@@ -224,7 +225,7 @@ def admin_delete_user(
             if analysis is not None:
                 analyses_repo.delete(analysis)
                 session.flush()
-            blob_store.delete(activity.gpx_blob_key)
+            blob_keys.append(activity.gpx_blob_key)
             activities_repo.delete(activity)
         if page.next_cursor is None:
             break
@@ -235,6 +236,14 @@ def admin_delete_user(
     session.flush()
     repo.delete(target)
 
-    return templates.TemplateResponse(
+    # Committed explicitly (see app/api/v1/activities.py:delete_activity for
+    # why a BackgroundTask can't be used for this ordering) — build the
+    # response context first, since it re-queries the user list and must
+    # see the deletion, then delete the now-safely-orphaned blobs.
+    session.commit()
+    response = templates.TemplateResponse(
         request, "partials/admin_user_list.html", _list_context(repo, admin)
     )
+    for blob_key in blob_keys:
+        blob_store.delete(blob_key)
+    return response

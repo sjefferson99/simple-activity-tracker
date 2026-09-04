@@ -1,3 +1,4 @@
+import os
 import uuid
 from pathlib import Path
 from typing import Protocol
@@ -24,7 +25,19 @@ class LocalFileBlobStore:
         blob_key = f"{user_id}/{uuid.uuid4()}.gpx"
         path = self._path_for(blob_key)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+        # Write to a sibling temp file and fsync + atomically rename into
+        # place, so a crash mid-write can never leave a committed DB row
+        # pointing at a truncated blob (the tmp file is simply orphaned).
+        tmp_path = path.with_name(f"{path.name}.{uuid.uuid4()}.tmp")
+        try:
+            with tmp_path.open("wb") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
         return blob_key
 
     def get(self, blob_key: str) -> bytes:
