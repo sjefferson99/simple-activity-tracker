@@ -11,6 +11,16 @@ def _enable_sqlite_pragmas(dbapi_connection: object, _connection_record: object)
     cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA foreign_keys=ON")
+    # Without this, two connections racing a write (e.g. a phone upload and a
+    # browser action landing at the same moment) fail immediately with
+    # "database is locked" instead of one waiting briefly for the other's
+    # transaction to finish (see R2 in docs/SERVER-PRODUCTION-PLAN.md).
+    cursor.execute("PRAGMA busy_timeout=5000")
+    # Safe with WAL: fsyncs only at checkpoints, not every commit, trading a
+    # small durability window (a handful of the most recent commits could be
+    # lost in an OS crash/power loss, not an application crash) for less
+    # per-write I/O — an acceptable trade for a self-hosted single-instance app.
+    cursor.execute("PRAGMA synchronous=NORMAL")
     cursor.close()
 
 

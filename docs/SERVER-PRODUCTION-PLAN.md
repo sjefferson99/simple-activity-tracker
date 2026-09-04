@@ -484,7 +484,7 @@ status, then **propose the commit and wait**.
 - [ ] Login/register/password routes rate-limited and timing-neutral (S6)
 - [ ] API docs off by default (S7)
 - [x] Blob writes atomic, deletes after commit, `gc` command exists (R1) — #13
-- [ ] `busy_timeout` set; no per-request writes on read paths (R2)
+- [x] `busy_timeout` set; no per-request writes on read paths (R2) — #14
 - [ ] Backup + restore documented and tested; pre-migration backup (R4, D6)
 - [ ] Structured logs + audit events; no secrets in logs (R5)
 - [x] nginx hardened (D1) — #11; compose pinned/read-only/cap-dropped/health-checked (D2) not started
