@@ -11,6 +11,7 @@ from app.api.v1 import admin as admin_api
 from app.api.v1 import auth as auth_api
 from app.config import get_settings
 from app.db import check_db_connection
+from app.security_headers import SecurityHeadersMiddleware
 from app.web import activities as activities_web
 from app.web import admin as admin_web
 from app.web import devices as devices_web
@@ -27,7 +28,7 @@ except importlib.metadata.PackageNotFoundError:
 
 def create_app() -> FastAPI:
     try:
-        get_settings()
+        settings = get_settings()
     except ValidationError as exc:
         sys.exit(f"Invalid configuration: {exc}")
 
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
     )
+    app.add_middleware(SecurityHeadersMiddleware, settings=settings)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:

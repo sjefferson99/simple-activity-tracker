@@ -24,7 +24,7 @@
     {% block content %}{% endblock %}
   </main>
   <script src="/static/vendor/htmx/htmx.min.js"></script>
-  <script>
+  <script nonce="{{ csp_nonce(request) }}">
     // Login/register/settings/admin forms render an error fragment with a
     // non-2xx status (401/400/409) so a real page load shows the right HTTP
     // status too — but htmx's default responseHandling only swaps 2xx/3xx,
@@ -34,6 +34,10 @@
       { code: "[23]..", swap: true },
       { code: "[45]..", swap: true, error: false },
     ];
+    // Nothing uses hx-on/eval-style attributes — disable eval outright so
+    // the CSP's script-src nonce can't be worked around via htmx internals.
+    htmx.config.allowEval = false;
+    htmx.config.inlineScriptNonce = "{{ csp_nonce(request) }}";
   </script>
   {% block scripts %}{% endblock %}
 </body>

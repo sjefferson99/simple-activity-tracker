@@ -131,7 +131,7 @@
 {% block scripts %}
 <script src="/static/vendor/leaflet/leaflet.js"></script>
 <script src="/static/vendor/uplot/uPlot.iife.min.js"></script>
-<script>
+<script nonce="{{ csp_nonce(request) }}">
   (function () {
     const activityId = {{ activity.id | tojson }};
     const map = L.map('map');
