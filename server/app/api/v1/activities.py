@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.analysis.gpx_parser import GpxParseError, parse_gpx
@@ -129,7 +130,8 @@ def upload_activity(
     except GpxParseError as exc:
         raise api_error(400, "invalid_gpx", str(exc)) from exc
 
-    blob_key = _blob_store().put(user.id, gpx_bytes)
+    blob_store = _blob_store()
+    blob_key = blob_store.put(user.id, gpx_bytes)
 
     now = datetime.now(UTC)
     activity = Activity(
@@ -148,7 +150,28 @@ def upload_activity(
         updated_at=now,
     )
     activities.add(activity)
-    session.flush()
+    try:
+        # A concurrent retry of the same client_activity_id (the phone's
+        # timeout-then-retry path) can race the get_by_client_activity_id()
+        # check above: both requests see "no existing row" and both insert.
+        # The loser hits uq_activities_user_client_activity_id here — roll
+        # back just this insert (not the whole transaction), discard its
+        # now-orphaned blob, and return the winner's row as if this request
+        # had seen it as a duplicate from the start.
+        with session.begin_nested():
+            session.flush()
+    except IntegrityError:
+        # begin_nested() only rolls back to the SAVEPOINT; the Session itself
+        # is left in a "rollback required" state until this runs, or the
+        # very next statement (the lookup below) raises PendingRollbackError
+        # instead of the IntegrityError we actually want to handle.
+        session.rollback()
+        blob_store.delete(blob_key)
+        winner = activities.get_by_client_activity_id(user.id, summary_model.client_activity_id)
+        if winner is None:  # pragma: no cover - defensive, should be unreachable
+            raise
+        response.status_code = 200
+        return _activity_out(winner, analyses.get_by_activity_id(winner.id))
 
     try:
         result = AnalyzerV1().analyze(track)
@@ -168,7 +191,16 @@ def upload_activity(
             computed_at=datetime.now(UTC),
         )
     analyses.add(analysis)
-    session.flush()
+    try:
+        session.flush()
+    except Exception:
+        # A failure here (e.g. the analysis flush) leaves the blob written
+        # but the activity row rolled back by db_session's outer except —
+        # clean it up rather than orphaning it. This path re-raises (no
+        # response is ever returned), so a BackgroundTask would never run;
+        # delete synchronously instead.
+        blob_store.delete(blob_key)
+        raise
 
     return _activity_out(activity, analysis)
 
@@ -221,8 +253,18 @@ def delete_activity(
         # flush — flushing the analysis delete now guarantees it happens first.
         session.flush()
 
-    _blob_store().delete(activity.gpx_blob_key)
+    blob_key = activity.gpx_blob_key
     activities.delete(activity)
+    # Commit explicitly here rather than relying on db_session's post-return
+    # commit — a Starlette BackgroundTask runs as part of sending the
+    # response, which happens *before* db_session's dependency cleanup
+    # (and therefore before its commit), so a background-task delete would
+    # race an uncommitted transaction. Committing now, then deleting the
+    # blob synchronously, guarantees the row is durable first: if the commit
+    # fails, the exception propagates and the blob is correctly left in
+    # place (orphan-with-no-row is safe; row-with-no-blob is not).
+    session.commit()
+    _blob_store().delete(blob_key)
 
 
 @router.get("/{activity_id}/gpx")

@@ -91,6 +91,47 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
         session.commit()
 
 
+def gc(*, apply: bool) -> None:
+    """Finds blobs on disk with no Activity row pointing at them (orphans
+    from an interrupted upload/delete, or a leftover *.tmp from a crash
+    mid-write) and rows whose blob is missing from disk. Orphan blobs are
+    deleted only when --apply is passed; otherwise this is a dry run that
+    only reports what it found. Rows with a missing blob are always just
+    reported (there's no safe automatic fix — see docs/SERVER-PRODUCTION-PLAN.md R1).
+    """
+    from sqlalchemy import select
+
+    from app.db import get_session_factory
+    from app.models.activity import Activity
+
+    data_dir = Path(get_settings().data_dir)
+    gpx_dir = data_dir / "gpx"
+
+    with get_session_factory()() as session:
+        rows = list(session.execute(select(Activity.gpx_blob_key)).scalars())
+    referenced = {data_dir / "gpx" / key for key in rows}
+
+    on_disk = {p for p in gpx_dir.rglob("*") if p.is_file()} if gpx_dir.exists() else set()
+    orphans = sorted(p for p in on_disk if p not in referenced)
+    missing = sorted(p for p in referenced if p not in on_disk)
+
+    if missing:
+        print(f"{len(missing)} activity row(s) reference a missing blob:")
+        for path in missing:
+            print(f"  MISSING: {path}")
+    if orphans:
+        verb = "Deleting" if apply else "Would delete"
+        print(f"{len(orphans)} orphan blob(s) with no activity row ({verb.lower()}):")
+        for path in orphans:
+            print(f"  {verb}: {path}")
+            if apply:
+                path.unlink(missing_ok=True)
+    if not missing and not orphans:
+        print("No orphan blobs or missing blobs found.")
+    elif orphans and not apply:
+        print("Re-run with --apply to delete the orphan blob(s) listed above.")
+
+
 def run() -> None:
     """validate config -> migrate -> bootstrap admin -> serve."""
     import uvicorn
@@ -142,6 +183,15 @@ def main() -> None:
         ),
     )
 
+    gc_parser = subparsers.add_parser(
+        "gc", help="Find (and optionally delete) GPX blobs with no activity row."
+    )
+    gc_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Actually delete orphan blobs (default is a dry run that only reports them).",
+    )
+
     args = parser.parse_args()
     if args.command == "run":
         run()
@@ -149,6 +199,8 @@ def main() -> None:
         migrate()
     elif args.command == "reanalyze":
         reanalyze(activity_id=args.activity, all_activities=args.all)
+    elif args.command == "gc":
+        gc(apply=args.apply)
     else:  # pragma: no cover - argparse enforces this
         sys.exit(f"Unknown command: {args.command}")
 
