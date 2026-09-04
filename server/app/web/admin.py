@@ -13,6 +13,7 @@ from app.repositories.activities import SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
 from app.repositories.users import SqlAlchemyUserRepository
+from app.repositories.web_sessions import SqlAlchemyWebSessionRepository
 from app.storage.blob_store import LocalFileBlobStore
 from app.validation import ValidationFailed, normalize_email, validate_name, validate_password
 from app.web.deps import WebAdmin, require_htmx_header
@@ -45,6 +46,7 @@ def _list_context(repo: SqlAlchemyUserRepository, admin: User, **extra: Any) -> 
 def _invalidate_sessions_and_tokens(session: Session, target: User) -> None:
     target.sessions_invalidated_at = datetime.now(UTC)
     SqlAlchemyDeviceTokenRepository(session).revoke_all_for_user(target.id)
+    SqlAlchemyWebSessionRepository(session).revoke_all_for_user(target.id)
 
 
 @router.get("/users")
@@ -229,6 +231,7 @@ def admin_delete_user(
         cursor = page.next_cursor
 
     SqlAlchemyDeviceTokenRepository(session).delete_all_for_user(target.id)
+    SqlAlchemyWebSessionRepository(session).delete_all_for_user(target.id)
     session.flush()
     repo.delete(target)
 

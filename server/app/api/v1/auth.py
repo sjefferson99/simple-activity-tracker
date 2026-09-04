@@ -20,6 +20,7 @@ from app.deps import db_session
 from app.models.device_token import DeviceToken
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
 from app.repositories.users import SqlAlchemyUserRepository
+from app.repositories.web_sessions import SqlAlchemyWebSessionRepository
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -138,3 +139,6 @@ def change_password(
     SqlAlchemyDeviceTokenRepository(session).revoke_all_for_user(
         user.id, except_id=presenting_token_id
     )
+    # No "presenting web session" concept from a bearer-authenticated
+    # request — a password change via the phone app signs every browser out.
+    SqlAlchemyWebSessionRepository(session).revoke_all_for_user(user.id)

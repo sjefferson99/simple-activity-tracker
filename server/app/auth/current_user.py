@@ -6,11 +6,13 @@ from sqlalchemy.orm import Session
 
 from app.auth.device_tokens import hash_device_token
 from app.auth.sessions import SESSION_COOKIE_NAME, read_session_cookie
+from app.auth.web_sessions import resolve_web_session
 from app.config import get_settings
 from app.deps import db_session
 from app.models.user import User
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
 from app.repositories.users import SqlAlchemyUserRepository
+from app.repositories.web_sessions import SqlAlchemyWebSessionRepository
 
 _UNAUTHORIZED = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -56,10 +58,15 @@ def get_current_user(
         payload = read_session_cookie(get_settings().secret_key, sr_session)
         if payload is None:
             raise _UNAUTHORIZED
-        user = users.get_by_id(payload.user_id)
+        session_row = resolve_web_session(
+            SqlAlchemyWebSessionRepository(session), payload.session_id
+        )
+        if session_row is None:
+            raise _UNAUTHORIZED
+        user = users.get_by_id(session_row.user_id)
         if user is None or not _user_is_usable(user):
             raise _UNAUTHORIZED
-        if payload.issued_at < user.sessions_invalidated_at:
+        if session_row.created_at < user.sessions_invalidated_at:
             raise _UNAUTHORIZED
         return user
 
