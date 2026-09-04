@@ -2,7 +2,7 @@
   <td>{{ u.display_name }}</td>
   <td>{{ u.email }}</td>
   <td>{{ u.activity_count }}</td>
-  <td>{{ u.last_activity_at.strftime('%Y-%m-%d') if u.last_activity_at else "—" }}</td>
+  <td>{% if u.last_activity_at %}<time datetime="{{ u.last_activity_at.isoformat() }}" class="local-time" data-format="date">{{ u.last_activity_at.isoformat() }}</time>{% else %}—{% endif %}</td>
   <td>
     {% if u.is_admin %}<span class="badge admin">Admin</span>{% endif %}
     {% if u.disabled %}<span class="badge disabled">Disabled</span>{% endif %}

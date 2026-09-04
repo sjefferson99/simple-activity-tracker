@@ -38,6 +38,26 @@
     // the CSP's script-src nonce can't be worked around via htmx internals.
     htmx.config.allowEval = false;
     htmx.config.inlineScriptNonce = "{{ csp_nonce(request) }}";
+
+    // Server-rendered timestamps are UTC ISO strings in <time datetime="…">;
+    // format them in the viewer's own timezone rather than showing UTC — see
+    // R7 in docs/SERVER-PRODUCTION-PLAN.md. Runs on load and again after any
+    // htmx swap, since partials (device/session/admin-user lists) bring in
+    // their own <time> elements.
+    function formatLocalTimes(root) {
+      root.querySelectorAll("time.local-time[datetime]").forEach((el) => {
+        const date = new Date(el.getAttribute("datetime"));
+        if (isNaN(date.getTime())) return;
+        const dateOpts = { year: "numeric", month: "short", day: "numeric" };
+        const timeOpts = { hour: "2-digit", minute: "2-digit" };
+        el.textContent =
+          el.dataset.format === "date"
+            ? date.toLocaleDateString(undefined, dateOpts)
+            : `${date.toLocaleDateString(undefined, dateOpts)}, ${date.toLocaleTimeString(undefined, timeOpts)}`;
+      });
+    }
+    formatLocalTimes(document);
+    document.body.addEventListener("htmx:afterSettle", (event) => formatLocalTimes(event.target));
   </script>
   {% block scripts %}{% endblock %}
 </body>
