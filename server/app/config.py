@@ -1,7 +1,15 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Docker Compose's `secrets:` block mounts files here by default. Only passed
+# to SettingsConfigDict when the directory actually exists — pydantic-settings
+# unconditionally warns ("directory ... does not exist") otherwise, which
+# would fire on every single Settings() construction for the (common) case of
+# a deployment that isn't using Docker secrets at all.
+_SECRETS_DIR = "/run/secrets"
 
 # Placeholder/example values that must never be accepted as a real secret —
 # each one is either shipped in a committed .env.example or is an obvious
@@ -23,9 +31,18 @@ class SecretKeyNotConfigured(ValueError):
 
 
 class Settings(BaseSettings):
-    """All configuration is env vars prefixed SR_ — see docs/WEB-PLAN.md §5.5."""
+    """All configuration is env vars prefixed SR_ — see docs/WEB-PLAN.md §5.5.
 
-    model_config = SettingsConfigDict(env_prefix="SR_")
+    Any setting can also come from a file under /run/secrets/, named exactly
+    SR_<FIELD> (e.g. /run/secrets/SR_SECRET_KEY) — Docker Compose's `secrets:`
+    block mounts files there by default, keeping the value out of the
+    container's environment (and so out of `docker inspect`). An env var of
+    the same name still wins if both are set — see docs/SERVER-PRODUCTION-PLAN.md D3.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="SR_", secrets_dir=_SECRETS_DIR if Path(_SECRETS_DIR).is_dir() else None
+    )
 
     database_url: str = "sqlite:////data/simple_runner.db"
     data_dir: str = "/data"
