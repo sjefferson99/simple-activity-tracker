@@ -4,6 +4,17 @@ from datetime import UTC, datetime
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 SESSION_COOKIE_NAME = "sr_session"
+# The __Host- prefix is a browser-enforced guarantee that a cookie was set
+# with Secure, no Domain, and Path=/ — exactly what this cookie already uses
+# whenever secure_cookies is true (see docs/SERVER-PRODUCTION-PLAN.md S8). It
+# can only be used when Secure, so plain-http deployments keep the bare name.
+SESSION_COOKIE_NAME_SECURE = "__Host-" + SESSION_COOKIE_NAME
+
+
+def session_cookie_name(*, secure_cookies: bool) -> str:
+    return SESSION_COOKIE_NAME_SECURE if secure_cookies else SESSION_COOKIE_NAME
+
+
 # Absolute lifetime for the signed cookie itself — the underlying WebSession
 # row additionally enforces its own absolute lifetime and idle timeout (see
 # app/auth/web_sessions.py), so this is a coarse outer bound, not the only check.
