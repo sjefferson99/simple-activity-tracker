@@ -22,6 +22,14 @@ def parse_gpx(data: bytes) -> Track:
     except UnicodeDecodeError as exc:
         raise GpxParseError("GPX file is not valid UTF-8") from exc
 
+    # GPX never legitimately needs a DOCTYPE or a custom entity declaration —
+    # reject both outright rather than relying solely on the stdlib expat
+    # parser's own protections (billion-laughs is blocked in modern Python,
+    # but external entity resolution history is worth not depending on). See
+    # R8 in docs/SERVER-PRODUCTION-PLAN.md.
+    if "<!DOCTYPE" in text or "<!ENTITY" in text:
+        raise GpxParseError("GPX file must not contain a DOCTYPE or ENTITY declaration")
+
     try:
         gpx = gpxpy.parse(text)
     except Exception as exc:  # gpxpy raises its own GPXException plus XML errors

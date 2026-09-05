@@ -273,6 +273,64 @@ def test_track_endpoint_returns_downsampled_points(
         assert len(segment) <= 52  # max_points + a small stride-rounding allowance
 
 
+def test_track_endpoint_at_default_max_points_serves_the_cached_track(
+    app_client, auth_headers, sample_gpx_bytes, monkeypatch
+) -> None:
+    """R8 in docs/SERVER-PRODUCTION-PLAN.md: a request at the default
+    max_points must be served from the cached track computed at upload
+    time, without re-reading/re-parsing the GPX blob."""
+    created = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
+
+    from app.storage.blob_store import LocalFileBlobStore
+
+    def _fail_if_called(self, blob_key: str) -> bytes:
+        raise AssertionError("blob should not be read when the cached track is available")
+
+    monkeypatch.setattr(LocalFileBlobStore, "get", _fail_if_called)
+
+    response = app_client.get(f"/api/v1/activities/{created['id']}/track", headers=auth_headers)
+    assert response.status_code == 200
+    segments = response.json()["segments"]
+    assert len(segments) == 2
+    assert all(len(segment) > 0 for segment in segments)
+
+
+def test_track_endpoint_at_non_default_max_points_reparses(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    created = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
+    default_response = app_client.get(
+        f"/api/v1/activities/{created['id']}/track", headers=auth_headers
+    )
+    custom_response = app_client.get(
+        f"/api/v1/activities/{created['id']}/track",
+        headers=auth_headers,
+        params={"max_points": 10},
+    )
+    assert default_response.status_code == custom_response.status_code == 200
+    default_lengths = [len(s) for s in default_response.json()["segments"]]
+    custom_lengths = [len(s) for s in custom_response.json()["segments"]]
+    assert custom_lengths != default_lengths
+
+
+def test_upload_rejects_gpx_with_doctype(app_client, auth_headers) -> None:
+    malicious_gpx = (
+        b'<?xml version="1.0"?>'
+        b'<!DOCTYPE gpx [<!ENTITY xxe "test">]>'
+        b'<gpx version="1.1"><trk><trkseg>'
+        b'<trkpt lat="0" lon="0"><time>2026-01-01T00:00:00Z</time></trkpt>'
+        b"</trkseg></trk></gpx>"
+    )
+    response = app_client.post(
+        "/api/v1/activities",
+        headers=auth_headers,
+        data={"summary": json.dumps(make_summary())},
+        files={"gpx": ("activity.gpx", malicious_gpx, "application/gpx+xml")},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_gpx"
+
+
 def test_pagination_cursor_pages_through_results(
     app_client, auth_headers, sample_gpx_bytes
 ) -> None:
