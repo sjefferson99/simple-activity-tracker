@@ -144,6 +144,7 @@ class ActivityOut(BaseModel):
     ended_at: datetime
     title: str | None
     notes: str | None
+    device_name: str | None
     client_summary: dict[str, Any]
     source_platform: str
     source_app_version: str
@@ -157,6 +158,7 @@ class ActivityPatchRequest(BaseModel):
 
     title: str | None = Field(default=None, max_length=TITLE_MAX_LENGTH)
     notes: str | None = Field(default=None, max_length=NOTES_MAX_LENGTH)
+    device_name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
 
 
 class TrackPointOut(BaseModel):
@@ -188,6 +190,7 @@ class ExportManifestEntry(BaseModel):
     ended_at: datetime
     title: str | None
     notes: str | None
+    device_name: str | None = None
     client_summary: dict[str, Any]
     source_platform: str
     source_app_version: str

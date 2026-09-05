@@ -112,6 +112,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "device_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Name"
+          },
           "ended_at": {
             "format": "date-time",
             "title": "Ended At",
@@ -170,6 +181,7 @@
           "ended_at",
           "title",
           "notes",
+          "device_name",
           "client_summary",
           "source_platform",
           "source_app_version",
@@ -183,6 +195,18 @@
       "ActivityPatchRequest": {
         "additionalProperties": false,
         "properties": {
+          "device_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Name"
+          },
           "notes": {
             "anyOf": [
               {

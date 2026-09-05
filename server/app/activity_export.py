@@ -81,6 +81,7 @@ def build_export_archive(activities: list[Activity], gpx_by_activity_id: dict[st
                 ended_at=activity.ended_at,
                 title=activity.title,
                 notes=activity.notes,
+                device_name=activity.device_name,
                 client_summary=activity.client_summary,
                 source_platform=activity.source_platform,
                 source_app_version=activity.source_app_version,

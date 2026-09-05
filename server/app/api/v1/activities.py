@@ -34,7 +34,7 @@ from app.api.v1.schemas import (
     TrackOut,
 )
 from app.audit import log_audit_event
-from app.auth.current_user import CurrentUser
+from app.auth.current_user import CurrentDeviceName, CurrentUser
 from app.config import get_settings
 from app.deps import db_session
 from app.models.activity import Activity
@@ -60,6 +60,7 @@ def _activity_out(activity: Activity, analysis: ActivityAnalysis | None) -> Acti
         ended_at=activity.ended_at,
         title=activity.title,
         notes=activity.notes,
+        device_name=activity.device_name,
         client_summary=activity.client_summary,
         source_platform=activity.source_platform,
         source_app_version=activity.source_app_version,
@@ -116,6 +117,7 @@ class _NewActivity:
     source_app_version: str
     title: str | None = None
     notes: str | None = None
+    device_name: str | None = None
 
 
 def _insert_activity_with_gpx(
@@ -154,6 +156,7 @@ def _insert_activity_with_gpx(
         ended_at=new_activity.ended_at,
         title=new_activity.title,
         notes=new_activity.notes,
+        device_name=new_activity.device_name,
         client_summary=new_activity.client_summary,
         gpx_blob_key=blob_key,
         gpx_sha256=hashlib.sha256(gpx_bytes).hexdigest(),
@@ -230,6 +233,7 @@ def _insert_from_manifest_entry(
             source_app_version=entry.source_app_version,
             title=entry.title,
             notes=entry.notes,
+            device_name=entry.device_name,
         ),
         gpx_bytes,
     )
@@ -239,6 +243,7 @@ def _insert_from_manifest_entry(
 @router.post("", response_model=ActivityOut, status_code=201)
 def upload_activity(
     user: CurrentUser,
+    device_name: CurrentDeviceName,
     session: Annotated[Session, Depends(db_session)],
     response: Response,
     summary: Annotated[str, Form()],
@@ -271,6 +276,7 @@ def upload_activity(
             client_summary=json.loads(summary),
             source_platform=summary_model.source.platform,
             source_app_version=summary_model.source.app_version,
+            device_name=device_name,
         ),
         gpx_bytes,
     )
@@ -304,6 +310,8 @@ def patch_activity(
         activity.title = body.title
     if body.notes is not None:
         activity.notes = body.notes
+    if body.device_name is not None:
+        activity.device_name = body.device_name
     activity.updated_at = datetime.now(UTC)
     analysis = SqlAlchemyActivityAnalysisRepository(session).get_by_activity_id(activity.id)
     return _activity_out(activity, analysis)

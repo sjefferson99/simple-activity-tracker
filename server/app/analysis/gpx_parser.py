@@ -59,3 +59,29 @@ def parse_gpx(data: bytes) -> Track:
 
 def _as_utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def guess_device_name(data: bytes) -> str | None:
+    """Best-effort device name for a manually-uploaded GPX, read from the
+    root <gpx creator="..."> attribute (what Garmin/most standalone trackers
+    set — e.g. "Foretrex 401") or the <metadata><author><name> as a fallback.
+    Never raises: this is only ever used to prefill an editable form field,
+    so a file gpxpy can't even parse just yields no suggestion rather than
+    failing the whole upload (parse_gpx already does the real validation).
+    """
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if "<!DOCTYPE" in text or "<!ENTITY" in text:
+        return None
+    try:
+        gpx = gpxpy.parse(text)
+    except Exception:
+        return None
+
+    creator = (gpx.creator or "").strip()
+    if creator:
+        return creator
+    author = (gpx.author_name or "").strip()
+    return author or None

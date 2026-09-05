@@ -18,6 +18,14 @@ def test_upload_creates_an_activity_with_analysis(
     assert body["activity_type"] == "running"
 
 
+def test_upload_records_device_name_from_the_authenticating_token(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    response = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    assert response.status_code == 201
+    assert response.json()["device_name"] == "test"
+
+
 def test_upload_with_cycling_type_is_stored_and_returned(
     app_client, auth_headers, sample_gpx_bytes
 ) -> None:
@@ -219,6 +227,18 @@ def test_patch_updates_title_and_notes(app_client, auth_headers, sample_gpx_byte
     assert response.status_code == 200
     assert response.json()["title"] == "Morning run"
     assert response.json()["notes"] == "Felt great"
+
+
+def test_patch_updates_device_name(app_client, auth_headers, sample_gpx_bytes) -> None:
+    created = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
+    assert created["device_name"] == "test"
+    response = app_client.patch(
+        f"/api/v1/activities/{created['id']}",
+        headers=auth_headers,
+        json={"device_name": "Garmin Forerunner 245"},
+    )
+    assert response.status_code == 200
+    assert response.json()["device_name"] == "Garmin Forerunner 245"
 
 
 def test_patch_rejects_unknown_fields(app_client, auth_headers, sample_gpx_bytes) -> None:
