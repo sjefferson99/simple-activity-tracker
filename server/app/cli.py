@@ -97,7 +97,7 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
             if not activities:
                 sys.exit(f"No activity found with id {activity_id}")
         else:
-            assert all_activities  # enforced by main()'s mutually-exclusive group
+            assert all_activities  # noqa: S101 -- enforced by main()'s mutually-exclusive group
             stmt = (
                 select(Activity)
                 .outerjoin(ActivityAnalysis, ActivityAnalysis.activity_id == Activity.id)
@@ -222,7 +222,7 @@ def run() -> None:
     forwarded_allow_ips = settings.trusted_proxies or None
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
+        host="0.0.0.0",  # noqa: S104 -- must bind all interfaces inside the container to be reachable
         port=8000,
         log_level=settings.log_level,
         proxy_headers=bool(forwarded_allow_ips),

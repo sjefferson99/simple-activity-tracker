@@ -16,7 +16,7 @@ from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
 from app.repositories.users import SqlAlchemyUserRepository
 from app.repositories.web_sessions import SqlAlchemyWebSessionRepository
 from app.storage.blob_store import LocalFileBlobStore
-from app.validation import ValidationFailed, normalize_email, validate_name, validate_password
+from app.validation import ValidationFailedError, normalize_email, validate_name, validate_password
 from app.web.deps import WebAdmin, require_htmx_header
 from app.web.templating import templates
 
@@ -77,7 +77,7 @@ def admin_create_user(
         email = normalize_email(email)
         display_name = validate_name(display_name, field="Display name")
         password = validate_password(password)
-    except ValidationFailed as exc:
+    except ValidationFailedError as exc:
         return templates.TemplateResponse(
             request,
             "admin_users.html",
@@ -142,14 +142,13 @@ def admin_patch_user(
             _list_context(repo, admin, error="You cannot demote or disable your own account"),
             status_code=400,
         )
-    if will_demote or (will_disable and target.is_admin):
-        if repo.count_admins_enabled() <= 1:
-            return templates.TemplateResponse(
-                request,
-                "partials/admin_user_list.html",
-                _list_context(repo, admin, error="Cannot remove the last enabled admin"),
-                status_code=400,
-            )
+    if (will_demote or (will_disable and target.is_admin)) and repo.count_admins_enabled() <= 1:
+        return templates.TemplateResponse(
+            request,
+            "partials/admin_user_list.html",
+            _list_context(repo, admin, error="Cannot remove the last enabled admin"),
+            status_code=400,
+        )
 
     if want_admin is not None:
         target.is_admin = want_admin
@@ -228,7 +227,7 @@ def admin_reset_password(
 
     try:
         new_password = validate_password(new_password)
-    except ValidationFailed as exc:
+    except ValidationFailedError as exc:
         return templates.TemplateResponse(
             request,
             "partials/admin_user_password_form.html",

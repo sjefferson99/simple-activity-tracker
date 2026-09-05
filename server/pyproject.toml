@@ -34,7 +34,14 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["E", "F", "I", "UP", "B", "S", "SIM", "N", "RUF", "PTH"]
+
+[tool.ruff.lint.per-file-ignores]
+# assert is normal pytest style (S101 exists for stripped-under-`-O`
+# production asserts); test fixtures also use literal passwords freely
+# (S105/S106/S107) — see the "hardcoded password" note in
+# docs/SERVER-PRODUCTION-PLAN.md and CLAUDE.md's Snyk baseline.
+"tests/**" = ["S101", "S105", "S106", "S107"]
 
 [tool.mypy]
 python_version = "3.12"

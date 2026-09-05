@@ -63,6 +63,7 @@ def test_hsts_present_when_cookies_secure(tmp_path, monkeypatch):
     from app.config import get_settings
     from app.db import get_engine
     from app.main import create_app
+    from tests.conftest import run_migrations
 
     db_path = tmp_path / "secure.db"
     data_dir = tmp_path / "data"
@@ -74,16 +75,7 @@ def test_hsts_present_when_cookies_secure(tmp_path, monkeypatch):
     get_settings.cache_clear()
     get_engine.cache_clear()
 
-    import os
-
-    from alembic.config import Config
-
-    from alembic import command
-
-    server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    alembic_cfg = Config(os.path.join(server_dir, "alembic.ini"))
-    alembic_cfg.set_main_option("script_location", os.path.join(server_dir, "alembic"))
-    command.upgrade(alembic_cfg, "head")
+    run_migrations()
 
     try:
         with TestClient(create_app()) as client:

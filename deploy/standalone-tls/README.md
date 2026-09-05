@@ -183,3 +183,56 @@ always been out of scope for the container itself (docs/WEB-PLAN.md §5.6):
    network your proxy uses, and set the equivalent of `loadbalancer.server.port`).
 3. Remove `app`'s `expose:` if the new proxy needs a different network layout.
 4. Point `SR_TRUSTED_PROXIES` at the new proxy's network range.
+
+### Contract any reverse proxy must satisfy
+
+Whatever you put in front of `app`, it must:
+
+- **Forward `Host`, `X-Forwarded-Proto`, and `X-Forwarded-For`.** The app trusts
+  these only from `SR_TRUSTED_PROXIES` and uses them to build absolute URLs,
+  decide whether a request is "real HTTPS" (for `Secure` cookies and HSTS —
+  see S5 in docs/SERVER-PRODUCTION-PLAN.md), and log/rate-limit by client IP.
+  Without them, every request looks like plain HTTP from the proxy's own IP.
+- **Set `SR_TRUSTED_PROXIES` to the proxy's exact subnet, not a broad default.**
+  The bundled `nginx.conf` setup uses the Docker default bridge range
+  (`172.16.0.0/12`) because it's the only thing on that network, but that
+  range trusts every container on the host, not just your proxy — narrow it
+  (`docker network inspect <network>` to find the real subnet) if your proxy
+  shares a network with anything else.
+- **Allow a request body of at least `SR_MAX_GPX_BYTES`** (default 20 MB) —
+  most reverse proxies cap request size well below that by default (e.g.
+  nginx's `client_max_body_size`, Traefik's none-by-default-but-check-your-
+  middleware, Caddy's none-by-default). A cap set lower than this silently
+  turns every large GPX upload into a proxy-level 413 the app never sees.
+- **Never rely on the app to redirect `http://` to `https://` itself** — it
+  doesn't, on purpose (TLS termination and any http→https redirect are the
+  proxy's job, per docs/WEB-PLAN.md §5.6). If you want that redirect, your
+  proxy has to do it, the way `nginx.conf` does here.
+- **No websocket support needed.** Nothing in this app uses WebSockets — the
+  live map/chart pages poll or load data once, they don't hold an open
+  connection — so there's nothing extra to configure for that.
+
+### Caddyfile example
+
+A minimal `Caddyfile` doing the same job as this repo's bundled nginx config
+(HTTPS termination, forwarding the required headers, no size cap below the
+app's own limit):
+
+```
+your.domain.example {
+	reverse_proxy app:8000 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-For {remote_host}
+		header_up Host {host}
+	}
+	request_body {
+		max_size 25MB
+	}
+}
+```
+
+Caddy handles ACME certificate provisioning and the http→https redirect
+automatically for a real domain name — there's no self-signed-cert step to
+replicate. Set `SR_TRUSTED_PROXIES` to wherever this Caddy instance's traffic
+actually originates from (its container's subnet, or `127.0.0.1` if it runs
+on the same host outside Docker).

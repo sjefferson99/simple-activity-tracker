@@ -28,7 +28,7 @@ from app.config import get_settings
 from app.deps import db_session
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
-from app.repositories.activities import InvalidCursor, SqlAlchemyActivityRepository
+from app.repositories.activities import InvalidCursorError, SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.storage.blob_store import LocalFileBlobStore
 from app.validation import SUMMARY_MAX_BYTES
@@ -77,7 +77,7 @@ def list_activities(
         page = SqlAlchemyActivityRepository(session).list_for_user(
             user.id, limit=limit, cursor=cursor
         )
-    except InvalidCursor as exc:
+    except InvalidCursorError as exc:
         raise api_error(400, "invalid_cursor", str(exc)) from exc
     items = [
         ActivityListItem(

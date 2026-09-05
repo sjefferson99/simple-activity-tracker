@@ -43,8 +43,8 @@ def _offset_point(distance_m: float) -> tuple[float, float]:
 def _jitter_meters() -> tuple[float, float]:
     """A small random offset (lat_m, lon_m), each within +/-_JITTER_METERS."""
     return (
-        random.uniform(-_JITTER_METERS, _JITTER_METERS),
-        random.uniform(-_JITTER_METERS, _JITTER_METERS),
+        random.uniform(-_JITTER_METERS, _JITTER_METERS),  # noqa: S311 -- deterministic fixture, not security-sensitive
+        random.uniform(-_JITTER_METERS, _JITTER_METERS),  # noqa: S311 -- deterministic fixture, not security-sensitive
     )
 
 

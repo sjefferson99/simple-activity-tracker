@@ -10,7 +10,7 @@ from app.config import get_settings
 from app.deps import db_session
 from app.models.user import User
 from app.repositories.users import SqlAlchemyUserRepository
-from app.validation import ValidationFailed, normalize_email, validate_name, validate_password
+from app.validation import ValidationFailedError, normalize_email, validate_name, validate_password
 from app.web.deps import require_htmx_header
 from app.web.login import set_session_cookie
 from app.web.templating import templates
@@ -57,7 +57,7 @@ def register_submit(
         email = normalize_email(email)
         display_name = validate_name(display_name, field="Display name")
         password = validate_password(password)
-    except ValidationFailed as exc:
+    except ValidationFailedError as exc:
         return templates.TemplateResponse(
             request,
             "register.html",

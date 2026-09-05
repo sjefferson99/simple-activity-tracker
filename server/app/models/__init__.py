@@ -6,11 +6,11 @@ from app.models.user import User
 from app.models.web_session import WebSession
 
 __all__ = [
-    "Base",
-    "DeviceToken",
     "Activity",
     "ActivityAnalysis",
     "AnalysisStatus",
+    "Base",
+    "DeviceToken",
     "User",
     "WebSession",
 ]

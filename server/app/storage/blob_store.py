@@ -34,7 +34,7 @@ class LocalFileBlobStore:
                 f.write(data)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp_path, path)
+            tmp_path.replace(path)
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise

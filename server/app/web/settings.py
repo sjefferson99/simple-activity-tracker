@@ -10,7 +10,7 @@ from app.auth.rate_limit import account_action_rate_limiter
 from app.deps import db_session
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
 from app.repositories.web_sessions import SqlAlchemyWebSessionRepository
-from app.validation import ValidationFailed, validate_password
+from app.validation import ValidationFailedError, validate_password
 from app.web.deps import CurrentWebSessionId, WebUser, require_htmx_header
 from app.web.login import set_session_cookie
 from app.web.templating import templates
@@ -93,7 +93,7 @@ def change_password(
 
     try:
         new_password = validate_password(new_password)
-    except ValidationFailed as exc:
+    except ValidationFailedError as exc:
         return templates.TemplateResponse(
             request,
             "partials/change_password_form.html",

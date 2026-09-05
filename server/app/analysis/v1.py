@@ -1,3 +1,4 @@
+import itertools
 from dataclasses import dataclass, field
 
 from app.analysis.analyzer import AnalysisResult
@@ -143,7 +144,7 @@ def _elevation_stats(smoothed: list[float | None]) -> dict[str, float | None]:
 
     gain = 0.0
     loss = 0.0
-    for prev, curr in zip(values, values[1:], strict=False):
+    for prev, curr in itertools.pairwise(values):
         delta = curr - prev
         if delta > 0:
             gain += delta

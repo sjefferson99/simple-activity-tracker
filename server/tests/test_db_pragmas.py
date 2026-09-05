@@ -21,23 +21,23 @@ def test_concurrent_writers_do_not_raise_database_is_locked(tmp_path) -> None:
     from sqlalchemy.orm import declarative_base, sessionmaker
 
     engine = create_db_engine(f"sqlite:///{tmp_path / 'concurrent.db'}")
-    Base = declarative_base()
+    base = declarative_base()
 
-    class T(Base):
+    class T(base):
         __tablename__ = "t"
         id = Column(Integer, primary_key=True)
 
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
     errors: list[Exception] = []
 
     def write(value: int) -> None:
         try:
-            with Session() as session:
+            with session_factory() as session:
                 session.add(T(id=value))
                 session.commit()
-        except Exception as exc:  # noqa: BLE001 - captured for the assertion below
+        except Exception as exc:
             errors.append(exc)
 
     threads = [threading.Thread(target=write, args=(i,)) for i in range(1, 11)]
@@ -47,5 +47,5 @@ def test_concurrent_writers_do_not_raise_database_is_locked(tmp_path) -> None:
         thread.join()
 
     assert errors == []
-    with Session() as session:
+    with session_factory() as session:
         assert session.query(T).count() == 10

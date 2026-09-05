@@ -10,7 +10,7 @@ from app.validation import (
     PASSWORD_MAX_LENGTH,
     SPLITS_MAX_COUNT,
     TITLE_MAX_LENGTH,
-    ValidationFailed,
+    ValidationFailedError,
     normalize_email,
     validate_name,
     validate_password,
@@ -109,7 +109,7 @@ class ChangePasswordRequest(BaseModel):
     def _validate_new_password(cls, value: str) -> str:
         try:
             return validate_password(value)
-        except ValidationFailed as exc:
+        except ValidationFailedError as exc:
             raise ValueError(str(exc)) from exc
 
 
@@ -197,7 +197,7 @@ class AdminCreateUserRequest(BaseModel):
     def _normalize_email(cls, value: str) -> str:
         try:
             return normalize_email(value)
-        except ValidationFailed as exc:
+        except ValidationFailedError as exc:
             raise ValueError(str(exc)) from exc
 
     @field_validator("display_name")
@@ -205,7 +205,7 @@ class AdminCreateUserRequest(BaseModel):
     def _strip_display_name(cls, value: str) -> str:
         try:
             return validate_name(value, field="Display name")
-        except ValidationFailed as exc:
+        except ValidationFailedError as exc:
             raise ValueError(str(exc)) from exc
 
     @field_validator("password")
@@ -213,7 +213,7 @@ class AdminCreateUserRequest(BaseModel):
     def _validate_password(cls, value: str) -> str:
         try:
             return validate_password(value)
-        except ValidationFailed as exc:
+        except ValidationFailedError as exc:
             raise ValueError(str(exc)) from exc
 
 
@@ -231,7 +231,7 @@ class AdminPatchUserRequest(BaseModel):
             return None
         try:
             return validate_name(value, field="Display name")
-        except ValidationFailed as exc:
+        except ValidationFailedError as exc:
             raise ValueError(str(exc)) from exc
 
 
@@ -245,7 +245,7 @@ class AdminSetPasswordRequest(BaseModel):
     def _validate_new_password(cls, value: str) -> str:
         try:
             return validate_password(value)
-        except ValidationFailed as exc:
+        except ValidationFailedError as exc:
             raise ValueError(str(exc)) from exc
 
 

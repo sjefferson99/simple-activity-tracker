@@ -18,7 +18,7 @@ def format_distance_km(meters: float | None) -> str:
 def format_duration(seconds: float | None) -> str:
     if seconds is None or seconds < 0:
         return "—"
-    total = int(round(seconds))
+    total = round(seconds)
     hours, remainder = divmod(total, 3600)
     minutes, secs = divmod(remainder, 60)
     if hours:
@@ -31,5 +31,5 @@ def format_pace(speed_mps: float | None) -> str:
     if speed_mps is None or speed_mps <= 0:
         return "—"
     seconds_per_km = 1000 / speed_mps
-    minutes, secs = divmod(int(round(seconds_per_km)), 60)
+    minutes, secs = divmod(round(seconds_per_km), 60)
     return f"{minutes}:{secs:02d} /km"
