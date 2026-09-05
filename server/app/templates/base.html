@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Simple Activity Tracker{% endblock %}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
   {% block head %}{% endblock %}
 </head>
@@ -16,6 +17,7 @@
       <a href="/devices">Devices</a>
       <a href="/settings">Settings</a>
       {% if user.is_admin %}<a href="/admin/users">Admin</a>{% endif %}
+      <span class="current-user">{{ user.display_name }}</span>
       <button class="link-button" hx-post="/logout" hx-target="body">Sign out</button>
     </nav>
     {% endif %}

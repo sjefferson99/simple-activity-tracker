@@ -75,6 +75,25 @@ def test_activity_list_empty_state(app_client, auth_headers):
     assert "No activities yet" in response.text
 
 
+def test_header_shows_signed_in_user_display_name(app_client, auth_headers):
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+    response = app_client.get("/")
+    assert response.status_code == 200
+    assert '<span class="current-user">Admin</span>' in response.text
+
+
+def test_login_page_has_favicon_link(app_client):
+    response = app_client.get("/login")
+    assert response.status_code == 200
+    assert '<link rel="icon" href="/static/favicon.svg"' in response.text
+
+
+def test_favicon_is_served(app_client):
+    response = app_client.get("/static/favicon.svg")
+    assert response.status_code == 200
+    assert "svg" in response.headers["content-type"]
+
+
 def test_activity_list_with_malformed_cursor_falls_back_to_first_page(
     app_client, sample_gpx_bytes, auth_headers
 ):

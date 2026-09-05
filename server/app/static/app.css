@@ -38,6 +38,7 @@ a:hover { color: var(--accent-hover); }
 .brand { font-weight: 600; font-size: 1.1rem; color: var(--text); }
 
 .topnav { display: flex; gap: 1.25rem; align-items: center; }
+.current-user { color: var(--text-muted); font-size: 0.85rem; }
 
 .content {
   max-width: 960px;
@@ -116,7 +117,7 @@ button.secondary { background: transparent; border: 1px solid var(--border); col
   padding: 0;
   cursor: pointer;
 }
-.link-button:hover { color: var(--accent-hover); text-decoration: underline; }
+.link-button:hover { background: none; color: var(--accent-hover); text-decoration: underline; }
 
 .error-banner {
   background: rgba(194, 65, 12, 0.1);
