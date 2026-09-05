@@ -26,7 +26,7 @@ _DENYLISTED_SECRET_KEYS = {
 }
 
 
-class SecretKeyNotConfigured(ValueError):
+class SecretKeyNotConfiguredError(ValueError):
     """Raised when SR_SECRET_KEY is missing, too short, or a known placeholder."""
 
 
@@ -63,12 +63,12 @@ class Settings(BaseSettings):
     @classmethod
     def _validate_secret_key(cls, value: str) -> str:
         if len(value) < 32:
-            raise SecretKeyNotConfigured(
+            raise SecretKeyNotConfiguredError(
                 "SR_SECRET_KEY must be at least 32 characters. Generate one with: "
                 'python -c "import secrets; print(secrets.token_urlsafe(32))"'
             )
         if value.strip().lower() in _DENYLISTED_SECRET_KEYS:
-            raise SecretKeyNotConfigured(
+            raise SecretKeyNotConfiguredError(
                 f"SR_SECRET_KEY is set to a placeholder value ({value!r}) — generate a real "
                 'one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
             )

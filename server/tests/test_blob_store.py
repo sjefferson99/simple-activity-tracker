@@ -1,3 +1,5 @@
+import contextlib
+
 from app.storage.blob_store import LocalFileBlobStore
 
 
@@ -19,10 +21,8 @@ def test_put_failure_leaves_no_partial_file(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr("app.storage.blob_store.os.replace", failing_replace)
     try:
-        try:
+        with contextlib.suppress(OSError):
             store.put("user-1", b"hello")
-        except OSError:
-            pass
     finally:
         monkeypatch.setattr("app.storage.blob_store.os.replace", real_replace)
 

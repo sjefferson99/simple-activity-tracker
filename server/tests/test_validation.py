@@ -1,7 +1,7 @@
 import pytest
 
 from app.validation import (
-    ValidationFailed,
+    ValidationFailedError,
     normalize_email,
     validate_name,
     validate_password,
@@ -9,12 +9,12 @@ from app.validation import (
 
 
 def test_validate_password_rejects_too_short():
-    with pytest.raises(ValidationFailed, match="at least 8"):
+    with pytest.raises(ValidationFailedError, match="at least 8"):
         validate_password("short")
 
 
 def test_validate_password_rejects_too_long():
-    with pytest.raises(ValidationFailed, match="at most 256"):
+    with pytest.raises(ValidationFailedError, match="at most 256"):
         validate_password("x" * 257)
 
 
@@ -27,7 +27,7 @@ def test_validate_password_accepts_valid():
     ["not-an-email", "missing-domain@", "@missing-local.com", "no-at-sign.com", "  "],
 )
 def test_normalize_email_rejects_invalid(value):
-    with pytest.raises(ValidationFailed):
+    with pytest.raises(ValidationFailedError):
         normalize_email(value)
 
 
@@ -36,12 +36,12 @@ def test_normalize_email_trims_and_lowercases():
 
 
 def test_validate_name_rejects_blank():
-    with pytest.raises(ValidationFailed, match="required"):
+    with pytest.raises(ValidationFailedError, match="required"):
         validate_name("   ")
 
 
 def test_validate_name_rejects_too_long():
-    with pytest.raises(ValidationFailed, match="at most 200"):
+    with pytest.raises(ValidationFailedError, match="at most 200"):
         validate_name("x" * 201)
 
 

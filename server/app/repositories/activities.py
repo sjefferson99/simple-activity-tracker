@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.activity import Activity
 
 
-class InvalidCursor(ValueError):
+class InvalidCursorError(ValueError):
     """Raised when a pagination cursor can't be decoded — either tampered
     with or from an incompatible client. Callers map this to a 400."""
 
@@ -33,7 +33,7 @@ def decode_cursor(cursor: str) -> tuple[datetime, str]:
         started_at_str, activity_id = json.loads(raw)
         return datetime.fromisoformat(started_at_str), activity_id
     except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
-        raise InvalidCursor(f"Invalid cursor: {cursor!r}") from exc
+        raise InvalidCursorError(f"Invalid cursor: {cursor!r}") from exc
 
 
 class ActivityRepository(Protocol):

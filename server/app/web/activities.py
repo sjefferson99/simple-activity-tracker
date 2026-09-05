@@ -10,7 +10,7 @@ from app.config import get_settings
 from app.deps import db_session
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
-from app.repositories.activities import InvalidCursor, SqlAlchemyActivityRepository
+from app.repositories.activities import InvalidCursorError, SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.storage.blob_store import LocalFileBlobStore
 from app.validation import NOTES_MAX_LENGTH, TITLE_MAX_LENGTH
@@ -52,7 +52,7 @@ def activity_list(
     activities = SqlAlchemyActivityRepository(session)
     try:
         page = activities.list_for_user(user.id, limit=20, cursor=cursor)
-    except InvalidCursor:
+    except InvalidCursorError:
         # A tampered or stale cursor in the URL shouldn't break the page for
         # a human browsing — fall back to the first page rather than a 400.
         page = activities.list_for_user(user.id, limit=20, cursor=None)

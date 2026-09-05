@@ -1,5 +1,4 @@
 import json
-import os
 from collections.abc import Generator
 from datetime import UTC
 from pathlib import Path
@@ -7,6 +6,20 @@ from pathlib import Path
 import pytest
 
 _FIXTURE_DIR = Path(__file__).parent / "fixtures"
+_SERVER_DIR = Path(__file__).parent.parent
+
+
+def run_migrations() -> None:
+    """Runs Alembic migrations against whatever SR_DATABASE_URL is currently
+    set to — shared by every fixture/test that spins up its own TestClient
+    against a fresh tmp DB instead of using the app_client fixture."""
+    from alembic.config import Config
+
+    from alembic import command
+
+    alembic_cfg = Config(str(_SERVER_DIR / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(_SERVER_DIR / "alembic"))
+    command.upgrade(alembic_cfg, "head")
 
 
 @pytest.fixture
@@ -43,16 +56,11 @@ def app_client(tmp_path, monkeypatch) -> Generator:
     login_rate_limiter.reset()
     account_action_rate_limiter.reset()
 
-    from alembic.config import Config
     from fastapi.testclient import TestClient
 
-    from alembic import command
     from app.main import create_app
 
-    server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    alembic_cfg = Config(os.path.join(server_dir, "alembic.ini"))
-    alembic_cfg.set_main_option("script_location", os.path.join(server_dir, "alembic"))
-    command.upgrade(alembic_cfg, "head")
+    run_migrations()
 
     with TestClient(create_app()) as client:
         yield client

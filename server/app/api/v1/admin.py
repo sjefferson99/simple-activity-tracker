@@ -113,9 +113,8 @@ def patch_user(
     # "the last enabled admin" is that admin itself), so this can't
     # currently be reached — kept in case a future route lets one admin
     # target another while only one admin remains (e.g. a superadmin role).
-    if will_demote or (will_disable and target.is_admin):
-        if repo.count_admins_enabled() <= 1:
-            raise api_error(400, "last_admin", "Cannot remove the last enabled admin")
+    if (will_demote or (will_disable and target.is_admin)) and repo.count_admins_enabled() <= 1:
+        raise api_error(400, "last_admin", "Cannot remove the last enabled admin")
 
     if body.display_name is not None:
         target.display_name = body.display_name

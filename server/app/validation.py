@@ -22,30 +22,30 @@ SPLITS_MAX_COUNT = 2000
 SUMMARY_MAX_BYTES = 256 * 1024
 
 
-class ValidationFailed(ValueError):
+class ValidationFailedError(ValueError):
     """A human-readable validation error — callers decide how to surface it
     (a 400/422 JSON error, or a form partial re-rendered with `error`)."""
 
 
 def validate_password(password: str) -> str:
     if len(password) < PASSWORD_MIN_LENGTH:
-        raise ValidationFailed(f"Password must be at least {PASSWORD_MIN_LENGTH} characters")
+        raise ValidationFailedError(f"Password must be at least {PASSWORD_MIN_LENGTH} characters")
     if len(password) > PASSWORD_MAX_LENGTH:
-        raise ValidationFailed(f"Password must be at most {PASSWORD_MAX_LENGTH} characters")
+        raise ValidationFailedError(f"Password must be at most {PASSWORD_MAX_LENGTH} characters")
     return password
 
 
 def normalize_email(email: str) -> str:
     candidate = email.strip().lower()
     if not candidate or len(candidate) > EMAIL_MAX_LENGTH or not _EMAIL_RE.match(candidate):
-        raise ValidationFailed("Enter a valid email address")
+        raise ValidationFailedError("Enter a valid email address")
     return candidate
 
 
 def validate_name(name: str, *, field: str = "Name") -> str:
     candidate = name.strip()
     if not candidate:
-        raise ValidationFailed(f"{field} is required")
+        raise ValidationFailedError(f"{field} is required")
     if len(candidate) > NAME_MAX_LENGTH:
-        raise ValidationFailed(f"{field} must be at most {NAME_MAX_LENGTH} characters")
+        raise ValidationFailedError(f"{field} must be at most {NAME_MAX_LENGTH} characters")
     return candidate
