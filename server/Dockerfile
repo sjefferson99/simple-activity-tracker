@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS build
+FROM python:3.14-slim AS build
 
 COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /uvx /usr/local/bin/
 
@@ -14,7 +14,7 @@ COPY alembic ./alembic
 COPY alembic.ini ./alembic.ini
 RUN uv sync --frozen --no-dev
 
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin app
 
