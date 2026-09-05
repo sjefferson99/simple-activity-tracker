@@ -1,11 +1,11 @@
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import Cookie, Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth.device_tokens import hash_device_token
-from app.auth.sessions import SESSION_COOKIE_NAME, read_session_cookie
+from app.auth.sessions import read_session_cookie, session_cookie_name
 from app.auth.web_sessions import resolve_web_session
 from app.config import get_settings
 from app.deps import db_session
@@ -41,7 +41,6 @@ def bearer_token_from_header(request: Request) -> str | None:
 def get_current_user(
     request: Request,
     session: Annotated[Session, Depends(db_session)],
-    sr_session: Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)] = None,
 ) -> User:
     """Resolves the current user from a bearer token or the session cookie.
     Disabled users, revoked device tokens, and sessions issued before the
@@ -67,8 +66,10 @@ def get_current_user(
             token_row.last_used_at = now
         return user
 
+    settings = get_settings()
+    sr_session = request.cookies.get(session_cookie_name(secure_cookies=settings.secure_cookies))
     if sr_session is not None:
-        payload = read_session_cookie(get_settings().secret_key, sr_session)
+        payload = read_session_cookie(settings.secret_key, sr_session)
         if payload is None:
             raise _UNAUTHORIZED
         session_row = resolve_web_session(

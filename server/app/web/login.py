@@ -1,13 +1,17 @@
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, Form, Request, Response
+from fastapi import APIRouter, Depends, Form, Request, Response
 from sqlalchemy.orm import Session
 
 from app.audit import log_audit_event
 from app.auth.passwords import verify_or_burn
 from app.auth.rate_limit import login_rate_limiter
-from app.auth.sessions import SESSION_COOKIE_NAME, create_session_cookie, read_session_cookie
+from app.auth.sessions import (
+    create_session_cookie,
+    read_session_cookie,
+    session_cookie_name,
+)
 from app.auth.web_sessions import create_web_session
 from app.config import get_settings
 from app.deps import db_session
@@ -34,7 +38,7 @@ def set_session_cookie(
     session.flush()
     cookie_value = create_session_cookie(settings.secret_key, session_row.id)
     response.set_cookie(
-        SESSION_COOKIE_NAME,
+        session_cookie_name(secure_cookies=settings.secure_cookies),
         cookie_value,
         httponly=True,
         secure=settings.secure_cookies,
@@ -107,10 +111,11 @@ def login_submit(
 def logout(
     request: Request,
     session: Annotated[Session, Depends(db_session)],
-    sr_session: Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)] = None,
 ) -> Response:
     out = Response(status_code=200, headers={"HX-Redirect": "/login"})
     settings = get_settings()
+    cookie_name = session_cookie_name(secure_cookies=settings.secure_cookies)
+    sr_session = request.cookies.get(cookie_name)
     if sr_session is not None:
         payload = read_session_cookie(settings.secret_key, sr_session)
         if payload is not None:
@@ -124,7 +129,7 @@ def logout(
                     client_ip=request.client.host if request.client else "unknown",
                 )
     out.delete_cookie(
-        SESSION_COOKIE_NAME,
+        cookie_name,
         httponly=True,
         secure=settings.secure_cookies,
         samesite="lax",

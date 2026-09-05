@@ -683,22 +683,6 @@
               ],
               "title": "Cursor"
             }
-          },
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
-            }
           }
         ],
         "responses": {
@@ -730,24 +714,6 @@
       },
       "post": {
         "operationId": "upload_activity_api_v1_activities_post",
-        "parameters": [
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "multipart/form-data": {
@@ -798,22 +764,6 @@
               "title": "Activity Id",
               "type": "string"
             }
-          },
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
-            }
           }
         ],
         "responses": {
@@ -846,22 +796,6 @@
             "schema": {
               "title": "Activity Id",
               "type": "string"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
             }
           }
         ],
@@ -902,22 +836,6 @@
             "schema": {
               "title": "Activity Id",
               "type": "string"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
             }
           }
         ],
@@ -971,22 +889,6 @@
               "title": "Activity Id",
               "type": "string"
             }
-          },
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
-            }
           }
         ],
         "responses": {
@@ -1028,22 +930,6 @@
             "schema": {
               "title": "Activity Id",
               "type": "string"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
             }
           }
         ],
@@ -1097,22 +983,6 @@
               "title": "Max Points",
               "type": "integer"
             }
-          },
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
-            }
           }
         ],
         "responses": {
@@ -1146,24 +1016,6 @@
     "/api/v1/admin/users": {
       "get": {
         "operationId": "list_users_api_v1_admin_users_get",
-        "parameters": [
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -1178,16 +1030,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "List Users",
@@ -1197,24 +1039,6 @@
       },
       "post": {
         "operationId": "create_user_api_v1_admin_users_post",
-        "parameters": [
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -1265,22 +1089,6 @@
               "title": "User Id",
               "type": "string"
             }
-          },
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
-            }
           }
         ],
         "responses": {
@@ -1313,22 +1121,6 @@
             "schema": {
               "title": "User Id",
               "type": "string"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
             }
           }
         ],
@@ -1381,22 +1173,6 @@
             "schema": {
               "title": "User Id",
               "type": "string"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
             }
           }
         ],
@@ -1489,24 +1265,6 @@
     "/api/v1/me": {
       "get": {
         "operationId": "get_me_api_v1_me_get",
-        "parameters": [
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -1517,16 +1275,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "Get Me",
@@ -1538,24 +1286,6 @@
     "/api/v1/me/devices": {
       "get": {
         "operationId": "list_devices_api_v1_me_devices_get",
-        "parameters": [
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -1570,16 +1300,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "List Devices",
@@ -1599,22 +1319,6 @@
             "schema": {
               "title": "Device Id",
               "type": "string"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
             }
           }
         ],
@@ -1642,24 +1346,6 @@
     "/api/v1/me/password": {
       "put": {
         "operationId": "change_password_api_v1_me_password_put",
-        "parameters": [
-          {
-            "in": "cookie",
-            "name": "sr_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Sr Session"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
