@@ -11,4 +11,5 @@ services:
       - .env
     volumes:
       - ./data:/data
+      - ./backups:/backups
     restart: unless-stopped

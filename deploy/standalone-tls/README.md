@@ -13,8 +13,17 @@ management (see "Using a different reverse proxy" below).
 cd deploy/standalone-tls
 cp .env.example .env            # fill in SR_SECRET_KEY, SR_ADMIN_EMAIL, SR_ADMIN_PASSWORD
 ./generate-cert.sh <your-LAN-IP-or-hostname>
+mkdir -p data backups && sudo chown -R 1000:1000 data backups
 docker compose up -d
 ```
+
+The `chown` matters on a real Linux host: the container runs as a non-root
+uid-1000 user, but if `data`/`backups` don't already exist, Docker creates
+them owned by **root** the moment `docker compose up` tries to bind-mount
+them — and the app then fails to start at all (`unable to open database
+file`). Creating the folders and fixing ownership yourself first avoids
+this. (Not needed on Windows/Docker Desktop, whose bind-mount layer doesn't
+enforce uid ownership the same way — this is a real-Linux-host-only step.)
 
 Browse to `https://<host>/` — you'll get a certificate warning (expected,
 it's self-signed); accept it to continue. The phone app can point at the same
@@ -51,7 +60,8 @@ then temporarily point `app.image` in `docker-compose.yml` at that
 once you're ready to move forward again. There's no automatic downgrade path
 for the database itself (migrations only run forward); rolling back the image
 after a migration has already run against your data is not supported by this
-setup — restore from a backup instead if that ever happens.
+setup — restore from a backup instead if that ever happens (see "Backups and
+migration safety" below).
 
 ## Secrets
 
@@ -93,6 +103,53 @@ are unaffected (they're opaque, independently generated values checked
 against the database, not signed with this key) and keep working. Nothing
 else breaks: no data is re-encrypted or affected, since the key never
 encrypts anything at rest.
+
+## Backups and migration safety
+
+`run` (the app's default startup command) automatically backs up the
+database and GPX blobs to `./backups/` before applying any pending
+migrations, then migrates and starts. This is on by default
+(`SR_BACKUP_BEFORE_MIGRATE=true`); disable it with
+`SR_BACKUP_BEFORE_MIGRATE=false` if you'd rather manage backups entirely
+yourself.
+
+To take a manual backup at any time (the container doesn't need to be
+stopped — it uses SQLite's `VACUUM INTO`, a consistent snapshot even against
+a live WAL-mode database):
+
+```bash
+docker compose run --rm app simple-activity-tracker-server backup /backups
+```
+
+Each run creates a new timestamped subdirectory under `./backups/`
+(`backup-<UTC-timestamp>/`) containing the database file and a copy of the
+`gpx/` blob tree — self-contained, so copying that one subdirectory
+elsewhere (another disk, off-site storage) is a complete backup.
+
+**To restore:**
+
+```bash
+docker compose stop app
+rm -rf data/*                                  # or move aside if you want to keep it around
+cp -r backups/backup-<timestamp>/simple_activity_tracker.db data/
+cp -r backups/backup-<timestamp>/gpx data/
+docker compose up -d
+```
+
+There's no automatic downgrade path for the database itself (migrations only
+run forward) — restoring a backup taken before a migration ran is the way to
+undo one if it caused a problem.
+
+**`SR_AUTO_MIGRATE`** (default `true`) controls whether `run` applies pending
+migrations automatically at startup. Set to `false` for a deployment where
+you'd rather apply migrations deliberately and out-of-band — with it false,
+`run` refuses to start at all if the database isn't already at the latest
+migration:
+
+```bash
+docker compose run --rm app simple-activity-tracker-server migrate
+docker compose up -d
+```
 
 ## Ports
 

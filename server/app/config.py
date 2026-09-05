@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     secure_cookies: bool = True
     trusted_proxies: str = ""
     log_level: str = "info"
+    auto_migrate: bool = True
+    backup_before_migrate: bool = True
+    backup_dir: str = "/backups"
 
     @field_validator("secret_key")
     @classmethod
