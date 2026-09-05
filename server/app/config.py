@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     allow_registration: bool = False
     enable_api_docs: bool = False
     max_gpx_bytes: int = 20 * 1024 * 1024
+    max_import_bytes: int = 200 * 1024 * 1024
     secure_cookies: bool = True
     trusted_proxies: str = ""
     log_level: str = "info"

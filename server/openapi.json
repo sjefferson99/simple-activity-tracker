@@ -385,6 +385,20 @@
         "title": "AnalysisOut",
         "type": "object"
       },
+      "Body_import_activities_api_v1_activities_import_post": {
+        "properties": {
+          "archive": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Archive",
+            "type": "string"
+          }
+        },
+        "required": [
+          "archive"
+        ],
+        "title": "Body_import_activities_api_v1_activities_import_post",
+        "type": "object"
+      },
       "Body_upload_activity_api_v1_activities_post": {
         "properties": {
           "gpx": {
@@ -461,6 +475,27 @@
         "title": "DeviceOut",
         "type": "object"
       },
+      "ExportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity Ids"
+          }
+        },
+        "title": "ExportRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -472,6 +507,71 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ImportResult": {
+        "properties": {
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "imported": {
+            "title": "Imported",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImportResultItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "imported",
+          "skipped",
+          "failed",
+          "items"
+        ],
+        "title": "ImportResult",
+        "type": "object"
+      },
+      "ImportResultItem": {
+        "properties": {
+          "client_activity_id": {
+            "title": "Client Activity Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "enum": [
+              "imported",
+              "skipped",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_activity_id",
+          "status"
+        ],
+        "title": "ImportResultItem",
         "type": "object"
       },
       "LoginRequest": {
@@ -747,6 +847,86 @@
           }
         },
         "summary": "Upload Activity",
+        "tags": [
+          "activities"
+        ]
+      }
+    },
+    "/api/v1/activities/export": {
+      "post": {
+        "operationId": "export_activities_api_v1_activities_export_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Activities",
+        "tags": [
+          "activities"
+        ]
+      }
+    },
+    "/api/v1/activities/import": {
+      "post": {
+        "operationId": "import_activities_api_v1_activities_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_activities_api_v1_activities_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Activities",
         "tags": [
           "activities"
         ]

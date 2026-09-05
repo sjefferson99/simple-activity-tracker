@@ -1,0 +1,18 @@
+{% if error %}
+<div class="error-banner">{{ error }}</div>
+{% else %}
+<p style="color: var(--ok);">Imported {{ imported }}, skipped {{ skipped }}, failed {{ failed }}.</p>
+{% if items %}
+<table>
+  <thead><tr><th>Activity</th><th>Result</th></tr></thead>
+  <tbody>
+    {% for item in items %}
+    <tr>
+      <td>{{ item.client_activity_id }}</td>
+      <td>{{ item.status }}{% if item.reason %} — {{ item.reason }}{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endif %}

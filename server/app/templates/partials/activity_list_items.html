@@ -1,9 +1,12 @@
 {% for activity in activities %}
 <div class="activity-list-item">
-  <div>
-    <a href="/activities/{{ activity.id }}">{{ activity.title or activity.started_at.isoformat() }}</a>
-    <span class="badge type-{{ activity.activity_type }}">{{ "Cycle" if activity.activity_type == "cycling" else "Run" }}</span>
-    <div class="muted"><time datetime="{{ activity.started_at.isoformat() }}" class="local-time" data-format="date-time">{{ activity.started_at.isoformat() }}</time></div>
+  <div class="activity-select-row">
+    <input type="checkbox" class="activity-select" name="activity_ids" value="{{ activity.id }}" form="export-form">
+    <div>
+      <a href="/activities/{{ activity.id }}">{{ activity.title or activity.started_at.isoformat() }}</a>
+      <span class="badge type-{{ activity.activity_type }}">{{ "Cycle" if activity.activity_type == "cycling" else "Run" }}</span>
+      <div class="muted"><time datetime="{{ activity.started_at.isoformat() }}" class="local-time" data-format="date-time">{{ activity.started_at.isoformat() }}</time></div>
+    </div>
   </div>
   <div class="text-right">
     <div>{{ activity.client_summary.get('distance_meters') | distance_km }}</div>

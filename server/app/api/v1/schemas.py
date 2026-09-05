@@ -170,6 +170,47 @@ class TrackOut(BaseModel):
     segments: list[list[TrackPointOut]]
 
 
+class ExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # None means "export every activity the caller owns".
+    activity_ids: list[str] | None = None
+
+
+class ExportManifestEntry(BaseModel):
+    """One activity's metadata inside an export archive's manifest.json —
+    deliberately excludes server-assigned fields (id, gpx_sha256/bytes,
+    created_at/updated_at) since import re-derives all of those."""
+
+    client_activity_id: str
+    activity_type: Literal["running", "cycling"]
+    started_at: datetime
+    ended_at: datetime
+    title: str | None
+    notes: str | None
+    client_summary: dict[str, Any]
+    source_platform: str
+    source_app_version: str
+    gpx_filename: str
+
+
+class ExportManifest(BaseModel):
+    activities: list[ExportManifestEntry]
+
+
+class ImportResultItem(BaseModel):
+    client_activity_id: str
+    status: Literal["imported", "skipped", "failed"]
+    reason: str | None = None
+
+
+class ImportResult(BaseModel):
+    imported: int
+    skipped: int
+    failed: int
+    items: list[ImportResultItem]
+
+
 # --- Admin ---
 
 

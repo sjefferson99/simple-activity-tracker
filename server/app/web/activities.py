@@ -2,9 +2,26 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Form, Request, Response
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from sqlalchemy.orm import Session
 
+from app.activity_export import (
+    ImportArchiveError,
+    export_activities_archive,
+    read_import_archive,
+    run_import,
+)
+from app.api.v1.activities import _insert_from_manifest_entry
 from app.audit import log_audit_event
 from app.config import get_settings
 from app.deps import db_session
@@ -145,3 +162,107 @@ def activity_delete(
     )
     LocalFileBlobStore(Path(get_settings().data_dir)).delete(blob_key)
     return Response(status_code=200, headers={"HX-Redirect": "/"})
+
+
+@router.get("/export")
+def export_activities(
+    user: WebUser,
+    session: Annotated[Session, Depends(db_session)],
+    activity_ids: Annotated[list[str] | None, Query()] = None,
+    selection: Annotated[str | None, Query()] = None,
+) -> Response:
+    """A plain GET (not htmx, no CSRF header) so a native <a>/<form method="get">
+    submission triggers a real browser file download — matches the existing
+    GPX-download link, and GET is exempt from require_htmx_header the same
+    way every other read-only route already is.
+
+    `selection=1` is a hidden field on #export-form (activities_list.html) —
+    its only purpose is telling "the Export-selected form submitted with
+    every checkbox unchecked" (no activity_ids at all) apart from "the plain
+    Export-all link" (also no activity_ids). Without it, both cases look
+    identical to this route and an empty selection would silently export
+    every activity instead of the empty set the user actually asked for.
+
+    Unlike the API's export_activities, an unknown/foreign id here is
+    silently dropped rather than 404ing the whole request — the ids in this
+    query string only ever come from checkboxes rendered on the page itself
+    (see partials/activity_list_items.html), so one going stale (e.g. the
+    activity was deleted in another tab between page load and submit) should
+    just shrink the export, not error the button out entirely."""
+    if selection is not None and not activity_ids:
+        raise HTTPException(status_code=400, detail="Select at least one activity to export")
+
+    if activity_ids is not None:
+        activities_repo = SqlAlchemyActivityRepository(session)
+        activity_ids = [
+            activity_id
+            for activity_id in activity_ids
+            if activities_repo.get_by_id_for_user(user.id, activity_id) is not None
+        ]
+    blob_store = LocalFileBlobStore(Path(get_settings().data_dir))
+    archive_bytes = export_activities_archive(session, blob_store, user.id, activity_ids)
+
+    filename = f"simple-activity-tracker-export-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.zip"
+    return Response(
+        content=archive_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/import", dependencies=[Depends(require_htmx_header)])
+def import_activities(
+    request: Request,
+    user: WebUser,
+    session: Annotated[Session, Depends(db_session)],
+    archive: Annotated[UploadFile, File()],
+) -> Response:
+    settings = get_settings()
+    data = archive.file.read(settings.max_import_bytes + 1)
+    if len(data) > settings.max_import_bytes:
+        return templates.TemplateResponse(
+            request,
+            "partials/import_result.html",
+            {"user": user, "error": f"Archive exceeds the {settings.max_import_bytes}-byte limit"},
+            status_code=413,
+        )
+
+    try:
+        manifest, zip_archive = read_import_archive(data, settings.max_import_bytes)
+    except ImportArchiveError as exc:
+        return templates.TemplateResponse(
+            request,
+            "partials/import_result.html",
+            {"user": user, "error": str(exc)},
+            status_code=400,
+        )
+
+    with zip_archive:
+        summary = run_import(
+            session,
+            user.id,
+            manifest,
+            zip_archive,
+            settings.max_gpx_bytes,
+            _insert_from_manifest_entry,
+        )
+
+    if summary.imported:
+        log_audit_event(
+            "activity.imported",
+            actor_id=user.id,
+            client_ip=request.client.host if request.client else "unknown",
+            count=str(summary.imported),
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "partials/import_result.html",
+        {
+            "user": user,
+            "imported": summary.imported,
+            "skipped": summary.skipped,
+            "failed": summary.failed,
+            "items": summary.items,
+        },
+    )

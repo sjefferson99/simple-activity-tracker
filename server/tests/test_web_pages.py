@@ -2,6 +2,10 @@
 criteria: render/redirect for signed-in vs signed-out, the htmx CSRF header
 rule, admin 404s for non-admins, and the self/last-admin guards."""
 
+import json
+import zipfile
+from io import BytesIO
+
 from tests.conftest import upload_sample_activity
 
 HTMX_HEADERS = {"X-Requested-With": "htmx"}
@@ -177,6 +181,119 @@ def test_activity_delete_via_web_removes_activity(app_client, sample_gpx_bytes, 
 
     check = app_client.get(f"/api/v1/activities/{activity_id}", headers=auth_headers)
     assert check.status_code == 404
+
+
+def test_web_export_all_does_not_require_htmx_header(app_client, sample_gpx_bytes, auth_headers):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/export")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+
+
+def test_web_export_selected_ids(app_client, sample_gpx_bytes, auth_headers):
+    first = upload_sample_activity(
+        app_client, auth_headers, sample_gpx_bytes, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    ).json()
+    upload_sample_activity(
+        app_client, auth_headers, sample_gpx_bytes, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    )
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/export", params={"activity_ids": [first["id"]], "selection": "1"})
+    assert response.status_code == 200
+    archive = zipfile.ZipFile(BytesIO(response.content))
+    manifest = json.loads(archive.read("manifest.json"))
+    assert len(manifest["activities"]) == 1
+
+
+def test_web_export_selected_with_nothing_checked_is_rejected_not_export_all(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """Regression test: the 'Export selected' button submits #export-form
+    (activities_list.html) via GET with no activity_ids at all when every
+    checkbox is unchecked (unchecked checkboxes are never submitted) — the
+    same wire shape as the plain 'Export all' link. The hidden `selection=1`
+    field is what lets the route tell these two cases apart; without it, an
+    empty selection silently exported everything instead of erroring."""
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/export", params={"selection": "1"})
+    assert response.status_code == 400
+
+
+def test_web_export_without_selection_marker_exports_all(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/export")
+    assert response.status_code == 200
+    archive = zipfile.ZipFile(BytesIO(response.content))
+    manifest = json.loads(archive.read("manifest.json"))
+    assert len(manifest["activities"]) == 1
+
+
+def test_activities_list_page_has_export_and_import_controls(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/")
+    assert response.status_code == 200
+    assert 'href="/export"' in response.text
+    assert 'hx-post="/import"' in response.text
+    assert 'name="activity_ids"' in response.text
+
+
+def test_web_import_requires_htmx_header(app_client, auth_headers):
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+    response = app_client.post(
+        "/import", files={"archive": ("export.zip", b"x", "application/zip")}
+    )
+    assert response.status_code == 403
+
+
+def test_web_import_round_trip(app_client, sample_gpx_bytes, auth_headers):
+    original = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
+    app_client.delete(f"/api/v1/activities/{original['id']}", headers=auth_headers)
+
+    manifest = {
+        "activities": [
+            {
+                "client_activity_id": original["client_activity_id"],
+                "activity_type": original["activity_type"],
+                "started_at": original["started_at"],
+                "ended_at": original["ended_at"],
+                "title": original["title"],
+                "notes": original["notes"],
+                "client_summary": original["client_summary"],
+                "source_platform": original["source_platform"],
+                "source_app_version": original["source_app_version"],
+                "gpx_filename": f"{original['client_activity_id']}.gpx",
+            }
+        ]
+    }
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+        archive.writestr(f"{original['client_activity_id']}.gpx", sample_gpx_bytes)
+
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+    response = app_client.post(
+        "/import",
+        headers=HTMX_HEADERS,
+        files={"archive": ("export.zip", buffer.getvalue(), "application/zip")},
+    )
+    assert response.status_code == 200
+    assert "Imported 1" in response.text
+
+    listing = app_client.get("/api/v1/activities", headers=auth_headers).json()
+    assert len(listing["activities"]) == 1
 
 
 def test_devices_page_lists_bearer_device(app_client, auth_headers):
