@@ -8,6 +8,12 @@ on:
       - ".github/workflows/container.yml"
   push:
     branches: [main]
+    tags:
+      - "v*.*.*"
+    # Applies to both branches and tags above (GitHub ANDs paths with
+    # branches/tags) — fine in practice since a release tag is only ever cut
+    # right after a merge that changed the server, so the diff always
+    # includes server/** even if the tagged commit itself is a no-op.
     paths:
       - "server/**"
       - "deploy/**"
@@ -96,22 +102,33 @@ jobs:
           docker network rm nginx-check
 
       - name: Log in to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push'
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push to GHCR (main only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Compute tags and OCI labels
+        if: github.event_name == 'push'
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Push to GHCR
+        if: github.event_name == 'push'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: server
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

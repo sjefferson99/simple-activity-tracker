@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS build
+FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS build
 
 COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /uvx /usr/local/bin/
 
@@ -14,7 +14,12 @@ COPY alembic ./alembic
 COPY alembic.ini ./alembic.ini
 RUN uv sync --frozen --no-dev
 
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
+
+# Picks up any OS package security fixes published after this base image was
+# built, without waiting for the next official python:3.12-slim release —
+# see D4 in docs/SERVER-PRODUCTION-PLAN.md.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin app
 

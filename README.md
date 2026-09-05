@@ -66,3 +66,25 @@ docker compose up --build
 `/healthz` should report `{"status": "ok", ...}` on `http://localhost:8000/healthz`. This
 plain compose file is for local iteration and the CI smoke test, not for deploying
 somewhere reachable — see Deployment above for that.
+
+### Cutting a release
+
+Every merge to `main` already publishes `ghcr.io/sjefferson99/simple-activity-tracker-server`
+as `:latest` and an immutable `sha-<short-commit>` tag — this is enough for normal use (see
+"Updating and rolling back" in [deploy/standalone-tls/README.md](deploy/standalone-tls/README.md)).
+A versioned release additionally tags the image `vX.Y.Z` and `vX.Y`, for a stable name that
+doesn't shift when `main` moves:
+
+```
+# bump version in server/pyproject.toml first, commit it, then:
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+`container.yml` builds and pushes the semver tags on any `v*.*.*` tag push (multi-arch,
+same as every other build) and stamps every image — `:latest`, `sha-*`, and semver alike —
+with OCI labels (`org.opencontainers.image.source/revision/version`) via
+[docker/metadata-action](https://github.com/docker/metadata-action), so `docker inspect`
+on any pulled image shows exactly which commit and version it came from. `:latest` only
+ever tracks `main`, not a release tag — a `v*.*.*` push produces `vX.Y.Z`/`vX.Y` alongside
+whatever `sha-<short-commit>` matches that same commit, without moving `:latest`.
