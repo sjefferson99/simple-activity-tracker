@@ -469,7 +469,7 @@ container restart-loops.
 - T3: ruff — enable `S` (bandit), `SIM`, `N`, `RUF`, `PTH` rule sets, fix or `noqa` with a
   reason; remove the unused `token_hashes_equal` or use it in `get_by_hash` callers.
 - T4: housekeeping — ~~fix `generate-cert.sh`'s comment that points at a non-existent
-  `../traefik/docker-compose.yml`~~ (done alongside D8, PR TBD); delete the stray empty
+  `../traefik/docker-compose.yml`~~ (done alongside D8, #27); delete the stray empty
   `android/` directory at the repo root (a gitignored leftover from the W0 move — confirm
   it's empty first); add a `LICENSE` and a short `SECURITY.md` (how to report, supported
   versions = `main`).
@@ -513,4 +513,4 @@ status, then **propose the commit and wait**.
 - [x] Secrets via files supported; admin password removable after bootstrap (D3) — #18
 - [x] Dependabot + dependency audit + image scan in CI; actions SHA-pinned (D5) — #19
 - [x] Verified end-to-end on a Linux Docker host (2026-09-05, R4/D6 testing) with a real phone upload over `https://` (user-confirmed) — this was still outstanding at W4 sign-off
-- [ ] `generate-cert.sh`'s key.pem readable by the proxy container on a real Linux host (D8)
+- [x] `generate-cert.sh`'s key.pem readable by the proxy container on a real Linux host (D8) — #27
