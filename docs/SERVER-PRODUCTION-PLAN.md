@@ -486,7 +486,8 @@ status, then **propose the commit and wait**.
 - [x] Blob writes atomic, deletes after commit, `gc` command exists (R1) — #13
 - [x] `busy_timeout` set; no per-request writes on read paths (R2) — #14
 - [ ] Backup + restore documented and tested; pre-migration backup (R4, D6)
-- [ ] Structured logs + audit events; no secrets in logs (R5)
+- [x] Structured logs + audit events; no secrets in logs (R5) — #15
+- [x] Error-response consistency, template robustness (R6, R7) — #16
 - [x] nginx hardened (D1) — #11; compose pinned/read-only/cap-dropped/health-checked (D2) — #17
 - [x] Secrets via files supported; admin password removable after bootstrap (D3) — #18
 - [ ] Dependabot + dependency audit + image scan in CI; actions SHA-pinned (D5)
