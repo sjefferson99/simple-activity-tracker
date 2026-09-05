@@ -436,6 +436,26 @@ requires so Traefik/Caddy users don't guess: forward `Host`, `X-Forwarded-Proto`
 `SR_MAX_GPX_BYTES`; websocket not needed; and that the app never redirects http→https
 itself. Add a Caddyfile snippet as a second worked example (no new service in the repo).
 
+### D8 (P2) — `generate-cert.sh` writes `key.pem` with permissions the proxy container can't read
+
+**Verified during R4/D6 testing (2026-09-05)** against a real Linux Docker host (not Windows/
+Docker Desktop): `generate-cert.sh` writes `certs/key.pem` at mode `600` (owner-only, whichever
+uid ran the script). The `proxy` container's nginx process runs as its own `nginx` user, distinct
+from the host uid that generated the cert — on a real Linux host (unlike Windows/Docker Desktop's
+more permissive file-sharing layer, which had been masking this) nginx fails outright at startup:
+`cannot load certificate key "/etc/nginx/certs/key.pem": ... Permission denied`, and the `proxy`
+container restart-loops.
+
+- Where: `deploy/standalone-tls/generate-cert.sh`.
+- Do: either `chmod 644 certs/key.pem` after generating it (private key readable by anyone who
+  can already read the compose files / access the host, which is the same trust level as the
+  rest of `deploy/standalone-tls/`), or have the script itself set that permission on write
+  instead of leaving OpenSSL's default. Document in README "Setup" that a manually-provided
+  cert/key pair (bring-your-own instead of `generate-cert.sh`) needs the same treatment.
+- Verify: fresh `docker compose up -d` on a real Linux host (not just Windows/Docker Desktop,
+  which didn't reproduce this) with a newly-generated cert brings `proxy` up healthy on the
+  first try, no restart loop.
+
 ---
 
 ## 5. Workstream T — Tests and code quality (P2/P3)
@@ -492,3 +512,4 @@ status, then **propose the commit and wait**.
 - [x] Secrets via files supported; admin password removable after bootstrap (D3) — #18
 - [x] Dependabot + dependency audit + image scan in CI; actions SHA-pinned (D5) — #19
 - [ ] Verified end-to-end on a Pi (or any Linux host) with a real phone upload over `https://` — this was still outstanding at W4 sign-off
+- [ ] `generate-cert.sh`'s key.pem readable by the proxy container on a real Linux host (D8)

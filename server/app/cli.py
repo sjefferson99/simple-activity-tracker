@@ -1,4 +1,6 @@
 import argparse
+import shutil
+import sqlite3
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,8 +20,55 @@ def _alembic_config() -> Config:
     return cfg
 
 
+def _database_path(database_url: str) -> Path:
+    """Extracts the filesystem path from a `sqlite:///...` URL. Backup/restore
+    only ever runs against this project's own SQLite deployments (the app has
+    no other supported database — see docs/SERVER-PRODUCTION-PLAN.md R4)."""
+    if not database_url.startswith("sqlite:///"):
+        raise ValueError(f"backup only supports sqlite:/// URLs, got: {database_url}")
+    return Path(database_url.removeprefix("sqlite:///"))
+
+
+def _is_database_at_head() -> bool:
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+
+    from app.db import get_engine
+
+    script = ScriptDirectory.from_config(_alembic_config())
+    head = script.get_current_head()
+    with get_engine().connect() as connection:
+        current = MigrationContext.configure(connection).get_current_revision()
+    return current == head
+
+
 def migrate() -> None:
     command.upgrade(_alembic_config(), "head")
+
+
+def backup(target_dir: str) -> Path:
+    """Writes a timestamped, self-contained backup: a consistent snapshot of
+    the SQLite database (`VACUUM INTO`, safe to run against a live WAL-mode
+    DB — unlike copying the .db file directly, this can't miss data still
+    sitting in the -wal file) plus a copy of the GPX blob tree, both under
+    one new subdirectory. Returns that subdirectory's path.
+    """
+    settings = get_settings()
+    db_path = _database_path(settings.database_url)
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    dest = Path(target_dir) / f"backup-{timestamp}"
+    dest.mkdir(parents=True, exist_ok=False)
+
+    db_dest = dest / db_path.name
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("VACUUM INTO ?", (str(db_dest),))
+
+    gpx_src = Path(settings.data_dir) / "gpx"
+    if gpx_src.exists():
+        shutil.copytree(gpx_src, dest / "gpx")
+
+    print(f"Backup written to {dest}")
+    return dest
 
 
 def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
@@ -133,7 +182,7 @@ def gc(*, apply: bool) -> None:
 
 
 def run() -> None:
-    """validate config -> migrate -> bootstrap admin -> serve."""
+    """validate config -> migrate (or refuse to start if behind) -> bootstrap admin -> serve."""
     import uvicorn
     from pydantic import ValidationError
 
@@ -142,12 +191,29 @@ def run() -> None:
     from app.db import get_session_factory
 
     try:
-        get_settings()
+        settings = get_settings()
     except ValidationError as exc:
         sys.exit(f"Invalid configuration: {exc}")
 
-    configure_logging(get_settings().log_level)
-    migrate()
+    configure_logging(settings.log_level)
+
+    if settings.auto_migrate:
+        if settings.backup_before_migrate and _database_path(settings.database_url).exists():
+            try:
+                backup(settings.backup_dir)
+            except OSError as exc:
+                sys.exit(
+                    f"Pre-migration backup to {settings.backup_dir!r} failed: {exc}. "
+                    "Make sure that directory is mounted and writable (see "
+                    "deploy/standalone-tls/README.md 'Backups and migration safety'), "
+                    "or set SR_BACKUP_BEFORE_MIGRATE=false to skip it (not recommended)."
+                )
+        migrate()
+    elif not _is_database_at_head():
+        sys.exit(
+            "Database is not at the latest migration and SR_AUTO_MIGRATE=false — "
+            "refusing to start. Run `simple-activity-tracker-server migrate` first."
+        )
 
     with get_session_factory()() as session:
         bootstrap_admin_if_needed(session)
@@ -194,6 +260,14 @@ def main() -> None:
         help="Actually delete orphan blobs (default is a dry run that only reports them).",
     )
 
+    backup_parser = subparsers.add_parser(
+        "backup",
+        help="Write a timestamped backup (database + GPX blobs) to the given directory.",
+    )
+    backup_parser.add_argument(
+        "directory", help="Directory the timestamped backup subdirectory is created under."
+    )
+
     args = parser.parse_args()
     if args.command == "run":
         run()
@@ -203,6 +277,8 @@ def main() -> None:
         reanalyze(activity_id=args.activity, all_activities=args.all)
     elif args.command == "gc":
         gc(apply=args.apply)
+    elif args.command == "backup":
+        backup(args.directory)
     else:  # pragma: no cover - argparse enforces this
         sys.exit(f"Unknown command: {args.command}")
 

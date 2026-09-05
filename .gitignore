@@ -36,6 +36,7 @@ __pycache__/
 # Local data volumes and secrets used by docker compose
 /data/
 deploy/data/
+deploy/backups/
 deploy/.env
 deploy/standalone-tls/.env
 deploy/standalone-tls/data/

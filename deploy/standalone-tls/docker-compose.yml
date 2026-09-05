@@ -24,7 +24,8 @@ services:
       - SR_SECRET_KEY
     volumes:
       - ./data:/data
-    read_only: true             # the app only ever writes under /data (bind-mounted above) or /tmp
+      - ./backups:/backups
+    read_only: true             # the app only ever writes under /data, /backups (both bind-mounted above), or /tmp
     tmpfs:
       - /tmp
     cap_drop:
