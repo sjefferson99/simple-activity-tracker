@@ -51,24 +51,30 @@ always picks up the newest build from `main`. `docker compose ps` should show
 both services `healthy` within a few seconds; if not, `docker compose logs app`
 first (migrations run at startup and fail loudly on a real problem).
 
-To roll back, every merge to `main` also gets an immutable `sha-<commit>` tag
-on the same image (see `.github/workflows/container.yml`) — find the last
-known-good commit (`git log --oneline server/`), then:
+To roll back, every merge to `main` also gets an immutable `sha-<short-commit>`
+tag on the same image (see `.github/workflows/container.yml`) — find the last
+known-good commit (`git log --oneline server/`, which prints the same short
+SHA the tag uses), then:
 
 ```bash
-docker pull ghcr.io/sjefferson99/simple-activity-tracker-server:sha-<commit>
+docker pull ghcr.io/sjefferson99/simple-activity-tracker-server:sha-<short-commit>
 docker compose stop app
 docker run --rm --env-file .env -v ./data:/data \
-  ghcr.io/sjefferson99/simple-activity-tracker-server:sha-<commit> --help  # sanity check the tag exists/pulls
+  ghcr.io/sjefferson99/simple-activity-tracker-server:sha-<short-commit> --help  # sanity check the tag exists/pulls
 ```
 
 then temporarily point `app.image` in `docker-compose.yml` at that
-`sha-<commit>` tag and `docker compose up -d` — switch it back to `:latest`
-once you're ready to move forward again. There's no automatic downgrade path
-for the database itself (migrations only run forward); rolling back the image
-after a migration has already run against your data is not supported by this
-setup — restore from a backup instead if that ever happens (see "Backups and
-migration safety" below).
+`sha-<short-commit>` tag and `docker compose up -d` — switch it back to
+`:latest` once you're ready to move forward again. There's no automatic
+downgrade path for the database itself (migrations only run forward); rolling
+back the image after a migration has already run against your data is not
+supported by this setup — restore from a backup instead if that ever happens
+(see "Backups and migration safety" below).
+
+A tagged release (`git tag vX.Y.Z && git push --tags`) also produces `vX.Y.Z`
+and `vX.Y` image tags for the same reason — a stable name to pin to rather
+than a commit SHA — though this project doesn't currently cut versioned
+releases on a schedule; `:latest`/`sha-<short-commit>` cover normal use.
 
 ## Secrets
 
