@@ -503,7 +503,7 @@ status, then **propose the commit and wait**.
 - [x] Logout and idle timeout actually end a web session (S4) — #12
 - [x] CSP + HSTS + nosniff + frame-ancestors + no-store present; map and chart still render (S5) — #11
 - [x] Login/register/password routes rate-limited and timing-neutral (S6) — #28
-- [ ] API docs off by default (S7)
+- [x] API docs off by default (S7) — #30
 - [x] Blob writes atomic, deletes after commit, `gc` command exists (R1) — #13
 - [x] `busy_timeout` set; no per-request writes on read paths (R2) — #14
 - [x] Backup + restore documented and tested; pre-migration backup (R4, D6) — #26
