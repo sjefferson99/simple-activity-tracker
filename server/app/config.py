@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     admin_email: str | None = None
     admin_password: str | None = None
     allow_registration: bool = False
+    enable_api_docs: bool = False
     max_gpx_bytes: int = 20 * 1024 * 1024
     secure_cookies: bool = True
     trusted_proxies: str = ""

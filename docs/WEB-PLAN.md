@@ -170,11 +170,11 @@ Timestamps are stored as UTC ISO-8601 strings in SQLite (SQLAlchemy `DateTime(ti
 add a small `TZDateTime` type decorator so naive values can never sneak in — SQLite
 silently accepts them otherwise).
 
-### 5.2 API surface (`/api/v1`, OpenAPI at `/api/openapi.json`, docs at `/api/docs`)
+### 5.2 API surface (`/api/v1`, OpenAPI at `/api/openapi.json`, docs at `/api/docs` — both gated behind `SR_ENABLE_API_DOCS`, off by default; see §5.5 and S7 in docs/SERVER-PRODUCTION-PLAN.md)
 
 | Method & path | Auth | Purpose |
 |---|---|---|
-| `GET /healthz` | none | `{status, version, db: "ok"}` — used by Docker HEALTHCHECK and the CI smoke test |
+| `GET /healthz` | none | `{status, db: "ok"}`, plus `version` only when `SR_ENABLE_API_DOCS=true` — used by Docker HEALTHCHECK and the CI smoke test |
 | `POST /api/v1/auth/login` | none | `{email, password, device_name}` → `{token, device: {...}, user: {...}}`. Token shown **once**. Rate-limited (in-memory, per IP + per email; 10/min is plenty). |
 | `POST /api/v1/auth/logout` | bearer | Revokes the presenting token |
 | `GET /api/v1/me` | any | Current user |
@@ -261,6 +261,7 @@ controller (§6.3).
 | `SR_SECURE_COOKIES` | `true` | Set `false` only for plain-http LAN testing |
 | `SR_TRUSTED_PROXIES` | `""` | Comma-separated IPs/CIDRs allowed to set `X-Forwarded-For` / `X-Forwarded-Proto`. Passed to uvicorn's `--forwarded-allow-ips`. **Must be set when behind Traefik/Caddy** (the Docker network range, e.g. `172.16.0.0/12`), or the app sees every request as `http` from the proxy's IP — `Secure` cookies then never get set and the login rate limit keys on one address. |
 | `SR_LOG_LEVEL` | `info` | |
+| `SR_ENABLE_API_DOCS` | `false` | Enables `/api/docs` + `/api/openapi.json` and includes `version` in `/healthz`. Leave off outside local debugging — see S7 in docs/SERVER-PRODUCTION-PLAN.md. |
 
 ### 5.6 Security baseline
 

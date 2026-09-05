@@ -41,18 +41,22 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Simple Activity Tracker Server",
         version=_VERSION,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        docs_url="/api/docs" if settings.enable_api_docs else None,
+        openapi_url="/api/openapi.json" if settings.enable_api_docs else None,
     )
     app.add_middleware(SecurityHeadersMiddleware, settings=settings)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
-        return {
+        body = {
             "status": "ok",
-            "version": _VERSION,
             "db": "ok" if check_db_connection() else "error",
         }
+        # Version disclosure is only useful for debugging, same as the docs —
+        # see SR_ENABLE_API_DOCS and S7 in docs/SERVER-PRODUCTION-PLAN.md.
+        if settings.enable_api_docs:
+            body["version"] = _VERSION
+        return body
 
     app.include_router(auth_api.router)
     app.include_router(auth_api.me_router)
