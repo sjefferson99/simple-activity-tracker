@@ -144,9 +144,9 @@ need to do this once.
    sign in with your Apple ID if it's not already listed. Once signed in,
    select your name from the Team dropdown.
 5. Xcode may show a red warning about the "Bundle Identifier" being taken —
-   if so, change the text `dev.sjefferson.simpleRunner` (in the **Bundle
-   Identifier** field just above Team) to something unique, like
-   `com.yourname.simplerunner`. Any unique text works.
+   if so, change the text `dev.sjefferson.simpleActivityTracker` (in the
+   **Bundle Identifier** field just above Team) to something unique, like
+   `com.yourname.simpleactivitytracker`. Any unique text works.
 6. Close Xcode (you don't need to press any build button in there — Terminal
    will do the actual building next).
 

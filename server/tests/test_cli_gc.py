@@ -1,4 +1,4 @@
-"""R1 (docs/SERVER-PRODUCTION-PLAN.md): `simple-runner-server gc` finds (and,
+"""R1 (docs/SERVER-PRODUCTION-PLAN.md): `simple-activity-tracker-server gc` finds (and,
 with --apply, deletes) orphan GPX blobs that have no Activity row pointing
 at them — leftovers from an interrupted upload/delete, or a stray *.tmp
 from a crash mid atomic-write."""

@@ -996,7 +996,7 @@ wheels = [
 ]
 
 [[package]]
-name = "simple-runner-server"
+name = "simple-activity-tracker-server"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

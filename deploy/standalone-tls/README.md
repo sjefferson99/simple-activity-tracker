@@ -24,7 +24,7 @@ encrypted even though the cert isn't from a public CA.
 To trust the cert instead of clicking through the warning every time, install
 `certs/cert.pem` as a trusted root on each client device.
 
-`app` runs the published image (`ghcr.io/sjefferson99/simple-runner-server:latest`,
+`app` runs the published image (`ghcr.io/sjefferson99/simple-activity-tracker-server:latest`,
 the same one CI pushes on every merge to `main`) — to update to the latest
 version later: `docker compose pull app && docker compose up -d`.
 
@@ -40,10 +40,10 @@ on the same image (see `.github/workflows/container.yml`) — find the last
 known-good commit (`git log --oneline server/`), then:
 
 ```bash
-docker pull ghcr.io/sjefferson99/simple-runner-server:sha-<commit>
+docker pull ghcr.io/sjefferson99/simple-activity-tracker-server:sha-<commit>
 docker compose stop app
 docker run --rm --env-file .env -v ./data:/data \
-  ghcr.io/sjefferson99/simple-runner-server:sha-<commit> --help  # sanity check the tag exists/pulls
+  ghcr.io/sjefferson99/simple-activity-tracker-server:sha-<commit> --help  # sanity check the tag exists/pulls
 ```
 
 then temporarily point `app.image` in `docker-compose.yml` at that

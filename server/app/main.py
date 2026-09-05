@@ -27,7 +27,7 @@ from app.web.templating import templates
 _logger = logging.getLogger("app.errors")
 
 try:
-    _VERSION = importlib.metadata.version("simple-runner-server") or "0.0.0-dev"
+    _VERSION = importlib.metadata.version("simple-activity-tracker-server") or "0.0.0-dev"
 except importlib.metadata.PackageNotFoundError:
     _VERSION = "0.0.0-dev"
 

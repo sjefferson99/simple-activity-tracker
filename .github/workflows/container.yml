@@ -14,7 +14,7 @@ on:
       - ".github/workflows/container.yml"
 
 env:
-  IMAGE_NAME: ghcr.io/sjefferson99/simple-runner-server
+  IMAGE_NAME: ghcr.io/sjefferson99/simple-activity-tracker-server
 
 jobs:
   build:

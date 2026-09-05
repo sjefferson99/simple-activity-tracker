@@ -1,5 +1,5 @@
 [project]
-name = "simple-runner-server"
+name = "simple-activity-tracker-server"
 version = "0.1.0"
 description = "Self-hosted web app and API for Simple Activity Tracker: stores activities, computes analysis, syncs with the mobile app."
 requires-python = ">=3.12"
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-simple-runner-server = "app.cli:main"
+simple-activity-tracker-server = "app.cli:main"
 
 [dependency-groups]
 dev = [

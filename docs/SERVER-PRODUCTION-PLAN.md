@@ -225,7 +225,7 @@ upload whose DB flush fails after `put()` leaves an orphan file.
 - Do: `put()` writes to `<path>.tmp`, `fsync`, `os.replace`; on upload, wrap so a DB
   failure after `put()` deletes the blob. For deletes, collect blob keys and remove them
   **after** commit — simplest is to have the route call `session.commit()` explicitly then
-  delete, or return a Starlette `BackgroundTask`. Add a `simple-runner-server gc` CLI that
+  delete, or return a Starlette `BackgroundTask`. Add a `simple-activity-tracker-server gc` CLI that
   lists/removes blobs with no row (and rows with no blob → mark analysis failed and log).
 - Verify: test that a failing flush after `put()` leaves no file; test that a delete
   whose commit is forced to fail leaves the blob in place; `gc` test with a planted orphan.
@@ -262,10 +262,10 @@ loser is orphaned (see R1).
 data is one SQLite file (in WAL mode — copying the `.db` alone can miss the WAL) plus the
 `gpx/` tree.
 
-- Do: `simple-runner-server backup <dir>` using `sqlite3` `VACUUM INTO` (or the
+- Do: `simple-activity-tracker-server backup <dir>` using `sqlite3` `VACUUM INTO` (or the
   connection backup API) for the DB and a copy of `data/gpx` (or `tar`), timestamped;
   `restore` documented as "stop, replace, start". Add a cron/`docker compose run --rm app
-  simple-runner-server backup /data/backups` example and a retention note to
+  simple-activity-tracker-server backup /data/backups` example and a retention note to
   `deploy/standalone-tls/README.md`. Run a backup automatically before `migrate` when
   `SR_BACKUP_BEFORE_MIGRATE=true` (default true) — ties into D6.
 - Verify: CLI test that a backup of a populated tmp DB restores to an identical row count

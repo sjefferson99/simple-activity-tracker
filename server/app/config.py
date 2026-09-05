@@ -44,7 +44,7 @@ class Settings(BaseSettings):
         env_prefix="SR_", secrets_dir=_SECRETS_DIR if Path(_SECRETS_DIR).is_dir() else None
     )
 
-    database_url: str = "sqlite:////data/simple_runner.db"
+    database_url: str = "sqlite:////data/simple_activity_tracker.db"
     data_dir: str = "/data"
     secret_key: str
     admin_email: str | None = None

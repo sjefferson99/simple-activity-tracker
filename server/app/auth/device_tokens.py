@@ -3,7 +3,11 @@ import hmac
 import secrets
 
 _TOKEN_BYTES = 32
-_TOKEN_PREFIX = "srdt_"  # simple-runner device token — lets a leaked token be grepped for
+# "satdt_" = simple-activity-tracker device token, lets a leaked token be
+# grepped for. Tokens issued before this rename kept the old "srdt_" prefix
+# (never rewritten retroactively) and still work — verification is by
+# SHA-256 hash lookup only; the prefix is just a label, never parsed.
+_TOKEN_PREFIX = "satdt_"
 
 
 def generate_device_token() -> str:

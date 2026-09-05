@@ -1,13 +1,15 @@
-# Simple Runner
+# Simple Activity Tracker
 
 Cross-platform (Android-first, iOS later) running app in **Flutter**: live GPS metrics (speed, pace, splits), GPX track logging, eventually a customizable live display.
 
 **Read [docs/PLAN.md](docs/PLAN.md) before doing any work** — it holds the phased plan, the verified machine environment, Windows-specific setup gotchas, and per-phase acceptance criteria. For the web app, API and phone-to-server sync work, **also read [docs/WEB-PLAN.md](docs/WEB-PLAN.md)** — reviewed and approved, with its own phases (W0–W4), decisions (§12) and working agreements (§13, including: prompt before installing anything on the machine).
 
-For a non-technical walkthrough of the architecture and how the live metrics are calculated (polling rate, outlier filtering, split interpolation), see [docs/how-simple-runner-works.pdf](docs/how-simple-runner-works.pdf) — source at [docs/how-simple-runner-works.html](docs/how-simple-runner-works.html). Regenerate the PDF after editing the HTML with:
+For a non-technical walkthrough of the architecture and how the live metrics are calculated (polling rate, outlier filtering, split interpolation), see [docs/how-it-works.pdf](docs/how-it-works.pdf) — source at [docs/how-it-works.html](docs/how-it-works.html). Regenerate the PDF after editing the HTML with:
 ```
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --disable-gpu --no-pdf-header-footer --print-to-pdf-no-header --print-to-pdf="docs/how-simple-runner-works.pdf" "file://$(pwd)/docs/how-simple-runner-works.html"
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --disable-gpu --no-pdf-header-footer --print-to-pdf-no-header --print-to-pdf="docs/how-it-works.pdf" "file://$(pwd)/docs/how-it-works.html"
 ```
+
+Repo: [github.com/sjefferson99/simple-activity-tracker](https://github.com/sjefferson99/simple-activity-tracker) (renamed from `simple-runner` on 2026-09-05 — GitHub redirects the old clone URL). GHCR image: `ghcr.io/sjefferson99/simple-activity-tracker-server` (the old `simple-runner-server` package is left in place, unused, not deleted).
 
 ## Current status
 
@@ -147,8 +149,8 @@ more than trivial size. One plan item (or tightly related group, e.g. "S5 + D1 t
    deployed nginx/TLS layer:
    - `git checkout main && git checkout -b integration-<short-name>-local-test && git merge --no-edit <branch-1> <branch-2> ...`
    - Run the full check suite (`ruff`/`mypy`/`pytest`/openapi diff/Snyk) on the merged tree.
-   - Build the image from that branch and tag it **exactly** `ghcr.io/sjefferson99/simple-runner-server:latest`
-     (`docker build -t ghcr.io/sjefferson99/simple-runner-server:latest server/`) so
+   - Build the image from that branch and tag it **exactly** `ghcr.io/sjefferson99/simple-activity-tracker-server:latest`
+     (`docker build -t ghcr.io/sjefferson99/simple-activity-tracker-server:latest server/`) so
      `deploy/standalone-tls/docker-compose.yml` picks it up with no file edits — this is
      the dev host's real stack (persistent, own `.env`, real self-signed cert, real
      `./data`), not a disposable one. Only tag `:latest` locally like this for a
@@ -175,7 +177,7 @@ more than trivial size. One plan item (or tightly related group, e.g. "S5 + D1 t
    manually verified in the container). Wait for the user to merge — do not merge
    server PRs automatically.
 6. **After the user merges:** `gh pr checks <n>` to confirm CI green, watch/confirm the
-   `Container` workflow pushes to GHCR, `docker pull ghcr.io/sjefferson99/simple-runner-server:latest`,
+   `Container` workflow pushes to GHCR, `docker pull ghcr.io/sjefferson99/simple-activity-tracker-server:latest`,
    restart the dev stack on the real pulled image (`docker compose up -d` in
    `deploy/standalone-tls/`), confirm healthy, and reconcile local `main` with
    `origin/main` (`git checkout main && git pull`) before starting the next batch.

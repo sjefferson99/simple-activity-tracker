@@ -165,7 +165,7 @@ def run() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="simple-runner-server")
+    parser = argparse.ArgumentParser(prog="simple-activity-tracker-server")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("run", help="Run migrations, then serve the app.")
     subparsers.add_parser("migrate", help="Run pending migrations and exit.")

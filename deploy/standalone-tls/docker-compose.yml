@@ -15,7 +15,7 @@
 
 services:
   app:
-    image: ghcr.io/sjefferson99/simple-runner-server:latest
+    image: ghcr.io/sjefferson99/simple-activity-tracker-server:latest
     expose:
       - "8000"                 # reached by `proxy` over the compose network only — not published to the host
     env_file:
