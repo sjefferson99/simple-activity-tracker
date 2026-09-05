@@ -466,16 +466,19 @@ container restart-loops.
   `db_session` rollback path (a route that raises after a write leaves no row).
 - T2: `pytest-cov` with `--cov=app --cov-fail-under=85` in `server.yml` (**ask before
   adding the dev dependency**); publish the number in the PR description.
-- T3: ruff — enable `S` (bandit), `SIM`, `N`, `RUF`, `PTH` rule sets, fix or `noqa` with a
-  reason; remove the unused `token_hashes_equal` or use it in `get_by_hash` callers.
-- T4: housekeeping — ~~fix `generate-cert.sh`'s comment that points at a non-existent
-  `../traefik/docker-compose.yml`~~ (done alongside D8, #27); delete the stray empty
+- ~~T3: ruff — enable `S` (bandit), `SIM`, `N`, `RUF`, `PTH` rule sets, fix or `noqa` with a
+  reason; remove the unused `token_hashes_equal` or use it in `get_by_hash` callers.~~
+  (done, #33)
+- ~~T4: housekeeping — fix `generate-cert.sh`'s comment that points at a non-existent
+  `../traefik/docker-compose.yml`~~ (done alongside D8, #27); ~~delete the stray empty
   `android/` directory at the repo root (a gitignored leftover from the W0 move — confirm
   it's empty first); add a `LICENSE` and a short `SECURITY.md` (how to report, supported
-  versions = `main`).
+  versions = `main`).~~ (done, #33)
 - T5: `openapi.json` — after S2/S7 changes regenerate it (`uv run python -m
   app.openapi_export > openapi.json`) and make sure the mobile DTO tests still pass
-  against the committed fixtures (`mobile/test/fixtures/*.json`).
+  against the committed fixtures (`mobile/test/fixtures/*.json`). Kept up to date as part
+  of every PR's own workflow since S2/S7 landed (S8 and R8 both regenerated and diffed
+  it); no dedicated standalone item remains here beyond that ongoing habit.
 
 ---
 
@@ -487,7 +490,10 @@ container restart-loops.
 4. R1 + R3 (blob/DB ordering) — one PR; R2 alongside or separately.
 5. R5 (logging/audit) then R6/R7 (error and template robustness).
 6. D2, D3, D5 (deployment + CI supply chain) — can run in parallel with 4–5.
-7. S6, S7, S8, R4, R8, D4, D6, D7, T-items as capacity allows; R9 last.
+7. ~~S6, S7, S8, R4, R8, D4, D6, D7, T-items as capacity allows~~ — all done (#28, #30,
+   #32, #26, #35, #36, T3/T4/D7 via #33); R9 last, deliberately deferred until other
+   in-flight feature work settles (T1/T2 test-coverage items also still open, P2/P3,
+   pick up alongside or after R9).
 
 Each PR: `ruff check . && ruff format --check . && mypy app && pytest`, regenerate
 `openapi.json` if the API changed, Snyk code scan on changed files, update CLAUDE.md
