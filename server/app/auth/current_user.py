@@ -90,6 +90,27 @@ def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+def get_current_device_name(
+    request: Request,
+    session: Annotated[Session, Depends(db_session)],
+) -> str | None:
+    """The name of the device token that authenticated this request, or None
+    for a session-cookie (web) request — the web layer never uploads
+    activities as itself, so this is only meaningful on the mobile API.
+    Deliberately tolerant: any bearer that isn't a currently-valid device
+    token resolves to None rather than raising, since get_current_user has
+    already done the real authentication/authorization for this request by
+    the time a route depends on this too."""
+    bearer = bearer_token_from_header(request)
+    if bearer is None:
+        return None
+    token_row = SqlAlchemyDeviceTokenRepository(session).get_by_hash(hash_device_token(bearer))
+    return token_row.name if token_row is not None else None
+
+
+CurrentDeviceName = Annotated[str | None, Depends(get_current_device_name)]
+
+
 def get_current_admin(user: CurrentUser) -> User:
     """Admin routes 404 rather than 403 for non-admins, so their existence
     isn't revealed to a user probing the API — see docs/WEB-PLAN.md §5.2."""

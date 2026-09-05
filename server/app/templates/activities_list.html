@@ -19,6 +19,23 @@
 {% endif %}
 
 <div class="card">
+  <h2>Upload a GPX</h2>
+  <p class="muted">Have a GPS track from another device (a Garmin, another app, etc.)? Upload the .gpx
+  file directly — it's stored and analyzed the same way as a phone upload, with no phone stats to show.</p>
+  <form id="upload-form" hx-post="/upload" hx-target="#upload-result" hx-encoding="multipart/form-data">
+    <label for="upload-gpx">GPX file</label>
+    <input type="file" id="upload-gpx" name="gpx" accept=".gpx,application/gpx+xml" required>
+    <label for="upload-activity-type">Activity type</label>
+    <select id="upload-activity-type" name="activity_type">
+      <option value="running">Running</option>
+      <option value="cycling">Cycling</option>
+    </select>
+    <button type="submit">Upload</button>
+  </form>
+  <div id="upload-result"></div>
+</div>
+
+<div class="card">
   <h2>Backup &amp; restore</h2>
   <p class="muted">Export activities to a .zip backup file, or import one from another server. Importing
   never overwrites an existing activity — anything already present is skipped.</p>

@@ -26,6 +26,11 @@ class Activity(Base):
     ended_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
     title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     notes: Mapped[str | None] = mapped_column(String(4000), nullable=True)
+    # Phone uploads: a snapshot of DeviceToken.name at upload time (not a live
+    # FK — survives the token later being revoked/deleted). Manual GPX
+    # uploads: defaulted from the file's <gpx creator="..."> if present, else
+    # blank; editable afterward either way.
+    device_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # "running" or "cycling" — mirrors mobile's ActivityMode enum values on
     # the wire (mobile/lib/domain/tracking/activity_mode.dart).
     activity_type: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
