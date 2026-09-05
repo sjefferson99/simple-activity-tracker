@@ -1,5 +1,6 @@
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -9,6 +10,13 @@ from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.activity_export import (
+    ActivityNotFoundError,
+    ImportArchiveError,
+    export_activities_archive,
+    read_import_archive,
+    run_import,
+)
 from app.analysis.gpx_parser import GpxParseError, parse_gpx
 from app.analysis.track_sampling import DEFAULT_MAX_POINTS, sample_track
 from app.analysis.v1 import ANALYSIS_VERSION, AnalyzerV1
@@ -20,6 +28,9 @@ from app.api.v1.schemas import (
     ActivityPatchRequest,
     ActivitySummary,
     AnalysisOut,
+    ExportManifestEntry,
+    ExportRequest,
+    ImportResult,
     TrackOut,
 )
 from app.audit import log_audit_event
@@ -94,37 +105,37 @@ def list_activities(
     return ActivityListResponse(activities=items, next_cursor=page.next_cursor)
 
 
-@router.post("", response_model=ActivityOut, status_code=201)
-def upload_activity(
-    user: CurrentUser,
-    session: Annotated[Session, Depends(db_session)],
-    response: Response,
-    summary: Annotated[str, Form()],
-    gpx: Annotated[UploadFile, File()],
-) -> ActivityOut:
-    if len(summary.encode()) > SUMMARY_MAX_BYTES:
-        raise api_error(
-            400, "invalid_summary", f"summary exceeds the {SUMMARY_MAX_BYTES}-byte limit"
-        )
-    try:
-        summary_model = ActivitySummary.model_validate_json(summary)
-    except ValidationError as exc:
-        raise api_error(400, "invalid_summary", str(exc)) from exc
+@dataclass
+class _NewActivity:
+    client_activity_id: str
+    activity_type: str
+    started_at: datetime
+    ended_at: datetime
+    client_summary: dict[str, object]
+    source_platform: str
+    source_app_version: str
+    title: str | None = None
+    notes: str | None = None
 
+
+def _insert_activity_with_gpx(
+    session: Session,
+    user_id: str,
+    new_activity: _NewActivity,
+    gpx_bytes: bytes,
+) -> tuple[Activity, ActivityAnalysis, bool]:
+    """Race-safe insert shared by upload and import: returns the existing row
+    unchanged (created=False) if client_activity_id already exists for this
+    user, otherwise parses+analyzes the GPX and inserts a new row+analysis
+    (created=True). See upload_activity's original inline comments for why
+    the begin_nested()/IntegrityError dance is needed — a concurrent retry of
+    the same client_activity_id can race the initial existence check."""
     activities = SqlAlchemyActivityRepository(session)
     analyses = SqlAlchemyActivityAnalysisRepository(session)
 
-    existing = activities.get_by_client_activity_id(user.id, summary_model.client_activity_id)
+    existing = activities.get_by_client_activity_id(user_id, new_activity.client_activity_id)
     if existing is not None:
-        response.status_code = 200
-        return _activity_out(existing, analyses.get_by_activity_id(existing.id))
-
-    settings = get_settings()
-    gpx_bytes = gpx.file.read(settings.max_gpx_bytes + 1)
-    if len(gpx_bytes) > settings.max_gpx_bytes:
-        raise api_error(
-            413, "gpx_too_large", f"GPX file exceeds the {settings.max_gpx_bytes}-byte limit"
-        )
+        return existing, analyses.get_by_activity_id(existing.id), False  # type: ignore[return-value]
 
     try:
         track = parse_gpx(gpx_bytes)
@@ -132,33 +143,28 @@ def upload_activity(
         raise api_error(400, "invalid_gpx", str(exc)) from exc
 
     blob_store = _blob_store()
-    blob_key = blob_store.put(user.id, gpx_bytes)
+    blob_key = blob_store.put(user_id, gpx_bytes)
 
     now = datetime.now(UTC)
     activity = Activity(
-        user_id=user.id,
-        client_activity_id=summary_model.client_activity_id,
-        activity_type=summary_model.activity_type,
-        started_at=summary_model.started_at,
-        ended_at=summary_model.ended_at,
-        client_summary=json.loads(summary),
+        user_id=user_id,
+        client_activity_id=new_activity.client_activity_id,
+        activity_type=new_activity.activity_type,
+        started_at=new_activity.started_at,
+        ended_at=new_activity.ended_at,
+        title=new_activity.title,
+        notes=new_activity.notes,
+        client_summary=new_activity.client_summary,
         gpx_blob_key=blob_key,
         gpx_sha256=hashlib.sha256(gpx_bytes).hexdigest(),
         gpx_bytes=len(gpx_bytes),
-        source_platform=summary_model.source.platform,
-        source_app_version=summary_model.source.app_version,
+        source_platform=new_activity.source_platform,
+        source_app_version=new_activity.source_app_version,
         created_at=now,
         updated_at=now,
     )
     activities.add(activity)
     try:
-        # A concurrent retry of the same client_activity_id (the phone's
-        # timeout-then-retry path) can race the get_by_client_activity_id()
-        # check above: both requests see "no existing row" and both insert.
-        # The loser hits uq_activities_user_client_activity_id here — roll
-        # back just this insert (not the whole transaction), discard its
-        # now-orphaned blob, and return the winner's row as if this request
-        # had seen it as a duplicate from the start.
         with session.begin_nested():
             session.flush()
     except IntegrityError:
@@ -168,11 +174,10 @@ def upload_activity(
         # instead of the IntegrityError we actually want to handle.
         session.rollback()
         blob_store.delete(blob_key)
-        winner = activities.get_by_client_activity_id(user.id, summary_model.client_activity_id)
+        winner = activities.get_by_client_activity_id(user_id, new_activity.client_activity_id)
         if winner is None:  # pragma: no cover - defensive, should be unreachable
             raise
-        response.status_code = 200
-        return _activity_out(winner, analyses.get_by_activity_id(winner.id))
+        return winner, analyses.get_by_activity_id(winner.id), False  # type: ignore[return-value]
 
     try:
         result = AnalyzerV1().analyze(track)
@@ -184,7 +189,7 @@ def upload_activity(
             track=sample_track(track, max_points=DEFAULT_MAX_POINTS),
             computed_at=datetime.now(UTC),
         )
-    except Exception as exc:  # analysis failure must never fail the upload
+    except Exception as exc:  # analysis failure must never fail the upload/import
         analysis = ActivityAnalysis(
             activity_id=activity.id,
             analysis_version=ANALYSIS_VERSION,
@@ -204,6 +209,73 @@ def upload_activity(
         blob_store.delete(blob_key)
         raise
 
+    return activity, analysis, True
+
+
+def _insert_from_manifest_entry(
+    session: Session, user_id: str, entry: ExportManifestEntry, gpx_bytes: bytes
+) -> bool:
+    """Adapts _insert_activity_with_gpx to the ActivityInserter shape
+    run_import() expects — see app/activity_export.py."""
+    _activity, _analysis, created = _insert_activity_with_gpx(
+        session,
+        user_id,
+        _NewActivity(
+            client_activity_id=entry.client_activity_id,
+            activity_type=entry.activity_type,
+            started_at=entry.started_at,
+            ended_at=entry.ended_at,
+            client_summary=entry.client_summary,
+            source_platform=entry.source_platform,
+            source_app_version=entry.source_app_version,
+            title=entry.title,
+            notes=entry.notes,
+        ),
+        gpx_bytes,
+    )
+    return created
+
+
+@router.post("", response_model=ActivityOut, status_code=201)
+def upload_activity(
+    user: CurrentUser,
+    session: Annotated[Session, Depends(db_session)],
+    response: Response,
+    summary: Annotated[str, Form()],
+    gpx: Annotated[UploadFile, File()],
+) -> ActivityOut:
+    if len(summary.encode()) > SUMMARY_MAX_BYTES:
+        raise api_error(
+            400, "invalid_summary", f"summary exceeds the {SUMMARY_MAX_BYTES}-byte limit"
+        )
+    try:
+        summary_model = ActivitySummary.model_validate_json(summary)
+    except ValidationError as exc:
+        raise api_error(400, "invalid_summary", str(exc)) from exc
+
+    settings = get_settings()
+    gpx_bytes = gpx.file.read(settings.max_gpx_bytes + 1)
+    if len(gpx_bytes) > settings.max_gpx_bytes:
+        raise api_error(
+            413, "gpx_too_large", f"GPX file exceeds the {settings.max_gpx_bytes}-byte limit"
+        )
+
+    activity, analysis, created = _insert_activity_with_gpx(
+        session,
+        user.id,
+        _NewActivity(
+            client_activity_id=summary_model.client_activity_id,
+            activity_type=summary_model.activity_type,
+            started_at=summary_model.started_at,
+            ended_at=summary_model.ended_at,
+            client_summary=json.loads(summary),
+            source_platform=summary_model.source.platform,
+            source_app_version=summary_model.source.app_version,
+        ),
+        gpx_bytes,
+    )
+    if not created:
+        response.status_code = 200
     return _activity_out(activity, analysis)
 
 
@@ -335,3 +407,69 @@ def get_track(
         return TrackOut(segments=[])
 
     return TrackOut.model_validate(sample_track(track, max_points=max_points))
+
+
+@router.post("/export")
+def export_activities(
+    body: ExportRequest,
+    user: CurrentUser,
+    session: Annotated[Session, Depends(db_session)],
+) -> Response:
+    try:
+        archive_bytes = export_activities_archive(
+            session, _blob_store(), user.id, body.activity_ids
+        )
+    except ActivityNotFoundError as exc:
+        raise api_error(404, "not_found", str(exc)) from exc
+
+    filename = f"simple-activity-tracker-export-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.zip"
+    return Response(
+        content=archive_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/import", response_model=ImportResult)
+def import_activities(
+    request: Request,
+    user: CurrentUser,
+    session: Annotated[Session, Depends(db_session)],
+    archive: Annotated[UploadFile, File()],
+) -> ImportResult:
+    settings = get_settings()
+    data = archive.file.read(settings.max_import_bytes + 1)
+    if len(data) > settings.max_import_bytes:
+        raise api_error(
+            413, "archive_too_large", f"Archive exceeds the {settings.max_import_bytes}-byte limit"
+        )
+
+    try:
+        manifest, zip_archive = read_import_archive(data, settings.max_import_bytes)
+    except ImportArchiveError as exc:
+        raise api_error(400, "invalid_archive", str(exc)) from exc
+
+    with zip_archive:
+        summary = run_import(
+            session,
+            user.id,
+            manifest,
+            zip_archive,
+            settings.max_gpx_bytes,
+            _insert_from_manifest_entry,
+        )
+
+    if summary.imported:
+        log_audit_event(
+            "activity.imported",
+            actor_id=user.id,
+            client_ip=request.client.host if request.client else "unknown",
+            count=str(summary.imported),
+        )
+
+    return ImportResult(
+        imported=summary.imported,
+        skipped=summary.skipped,
+        failed=summary.failed,
+        items=summary.items,
+    )

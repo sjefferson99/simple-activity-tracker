@@ -2,6 +2,10 @@
 {% block title %}Activities — Simple Activity Tracker{% endblock %}
 {% block content %}
 <h1>Activities</h1>
+
+<form id="export-form" action="/export" method="get">
+  <input type="hidden" name="selection" value="1">
+</form>
 {% if activities %}
 <div class="card" id="activity-list">
   {% include "partials/activity_list_items.html" %}
@@ -13,4 +17,20 @@
   automatically once uploaded.</p>
 </div>
 {% endif %}
+
+<div class="card">
+  <h2>Backup &amp; restore</h2>
+  <p class="muted">Export activities to a .zip backup file, or import one from another server. Importing
+  never overwrites an existing activity — anything already present is skipped.</p>
+  <div class="toolbar">
+    <a class="button secondary" href="/export">Export all</a>
+    <button type="submit" form="export-form" class="secondary">Export selected</button>
+  </div>
+  <form id="import-form" hx-post="/import" hx-target="#import-result" hx-encoding="multipart/form-data" style="margin-top:0.75rem;">
+    <label for="import-archive">Import from backup file</label>
+    <input type="file" id="import-archive" name="archive" accept=".zip,application/zip" required>
+    <button type="submit">Import</button>
+  </form>
+  <div id="import-result"></div>
+</div>
 {% endblock %}
