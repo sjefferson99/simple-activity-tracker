@@ -5,7 +5,7 @@ from fastapi import APIRouter, Cookie, Depends, Form, Request, Response
 from sqlalchemy.orm import Session
 
 from app.audit import log_audit_event
-from app.auth.passwords import verify_password
+from app.auth.passwords import verify_or_burn
 from app.auth.rate_limit import login_rate_limiter
 from app.auth.sessions import SESSION_COOKIE_NAME, create_session_cookie, read_session_cookie
 from app.auth.web_sessions import create_web_session
@@ -66,13 +66,19 @@ def login_submit(
 
     users = SqlAlchemyUserRepository(session)
     user = None if rate_limited else users.get_by_email(email)
+    valid_user = user if user is not None and user.disabled_at is None else None
 
-    if (
-        rate_limited
-        or user is None
-        or user.disabled_at is not None
-        or not verify_password(password, user.password_hash)
-    ):
+    if rate_limited:
+        password_ok = False
+    else:
+        # Always runs a real argon2 verify, even for an unknown/disabled
+        # email, so the response time can't be used to enumerate accounts —
+        # see docs/SERVER-PRODUCTION-PLAN.md S6.
+        password_ok = verify_or_burn(
+            password, valid_user.password_hash if valid_user is not None else None
+        )
+
+    if rate_limited or valid_user is None or not password_ok:
         if not rate_limited:
             log_audit_event("login.failure", client_ip=client_ip, email=email.lower())
         return templates.TemplateResponse(
@@ -89,10 +95,10 @@ def login_submit(
             status_code=401,
         )
 
-    log_audit_event("login.success", actor_id=user.id, client_ip=client_ip)
+    log_audit_event("login.success", actor_id=valid_user.id, client_ip=client_ip)
     response = Response(status_code=200, headers={"HX-Redirect": "/"})
     set_session_cookie(
-        response, session, user_id=user.id, user_agent=request.headers.get("user-agent")
+        response, session, user_id=valid_user.id, user_agent=request.headers.get("user-agent")
     )
     return response
 

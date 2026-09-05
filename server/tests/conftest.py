@@ -19,7 +19,7 @@ def app_client(tmp_path, monkeypatch) -> Generator:
     before anything reads them — otherwise a DB/engine created by an earlier
     test (or import) would leak into this one.
     """
-    from app.auth.rate_limit import login_rate_limiter
+    from app.auth.rate_limit import account_action_rate_limiter, login_rate_limiter
     from app.config import get_settings
     from app.db import get_engine
 
@@ -37,10 +37,11 @@ def app_client(tmp_path, monkeypatch) -> Generator:
     monkeypatch.setenv("SR_SECURE_COOKIES", "false")
     get_settings.cache_clear()
     get_engine.cache_clear()
-    # login_rate_limiter is a module-level singleton (see app/auth/rate_limit.py)
-    # shared across the whole test process — reset it so one test's login
-    # attempts don't count against the next test's budget.
+    # Both are module-level singletons (see app/auth/rate_limit.py) shared
+    # across the whole test process — reset them so one test's attempts
+    # don't count against the next test's budget.
     login_rate_limiter.reset()
+    account_action_rate_limiter.reset()
 
     from alembic.config import Config
     from fastapi.testclient import TestClient

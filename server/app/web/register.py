@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, 
 from sqlalchemy.orm import Session
 
 from app.auth.passwords import hash_password
+from app.auth.rate_limit import account_action_rate_limiter
 from app.config import get_settings
 from app.deps import db_session
 from app.models.user import User
@@ -38,6 +39,20 @@ def register_submit(
     email: Annotated[str, Form()],
     password: Annotated[str, Form()],
 ) -> Response:
+    client_ip = request.client.host if request.client else "unknown"
+    if not account_action_rate_limiter.allow(f"ip:{client_ip}"):
+        return templates.TemplateResponse(
+            request,
+            "register.html",
+            {
+                "user": None,
+                "error": "Too many attempts, try again shortly",
+                "display_name": display_name,
+                "email": email,
+            },
+            status_code=429,
+        )
+
     try:
         email = normalize_email(email)
         display_name = validate_name(display_name, field="Display name")

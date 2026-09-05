@@ -15,8 +15,8 @@ from app.api.v1.schemas import (
 from app.audit import log_audit_event
 from app.auth.current_user import CurrentUser, bearer_token_from_header
 from app.auth.device_tokens import generate_device_token, hash_device_token
-from app.auth.passwords import hash_password, verify_password
-from app.auth.rate_limit import login_rate_limiter
+from app.auth.passwords import hash_password, verify_or_burn, verify_password
+from app.auth.rate_limit import account_action_rate_limiter, login_rate_limiter
 from app.deps import db_session
 from app.models.device_token import DeviceToken
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
@@ -46,12 +46,14 @@ def login(
 
     users = SqlAlchemyUserRepository(session)
     user = users.get_by_email(body.email)
-    if user is None or user.disabled_at is not None:
+    valid_user = user if user is not None and user.disabled_at is None else None
+    password_ok = verify_or_burn(
+        body.password, valid_user.password_hash if valid_user is not None else None
+    )
+    if valid_user is None or not password_ok:
         log_audit_event("login.failure", client_ip=client_ip, email=body.email.lower())
         raise api_error(401, "invalid_credentials", _INVALID_CREDENTIALS)
-    if not verify_password(body.password, user.password_hash):
-        log_audit_event("login.failure", client_ip=client_ip, email=body.email.lower())
-        raise api_error(401, "invalid_credentials", _INVALID_CREDENTIALS)
+    user = valid_user
 
     log_audit_event("login.success", actor_id=user.id, client_ip=client_ip)
     secret = generate_device_token()
@@ -141,6 +143,10 @@ def change_password(
     user: CurrentUser,
     session: Annotated[Session, Depends(db_session)],
 ) -> None:
+    client_ip = _client_ip(request)
+    if not account_action_rate_limiter.allow(f"ip:{client_ip}"):
+        raise api_error(429, "rate_limited", "Too many attempts. Try again shortly.")
+
     if not verify_password(body.current_password, user.password_hash):
         raise api_error(401, "invalid_credentials", "Current password is incorrect")
 

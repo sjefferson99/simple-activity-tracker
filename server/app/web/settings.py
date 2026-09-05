@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import log_audit_event
 from app.auth.passwords import hash_password, verify_password
+from app.auth.rate_limit import account_action_rate_limiter
 from app.deps import db_session
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
 from app.repositories.web_sessions import SqlAlchemyWebSessionRepository
@@ -73,6 +74,15 @@ def change_password(
     current_password: Annotated[str, Form()],
     new_password: Annotated[str, Form()],
 ) -> Response:
+    client_ip = request.client.host if request.client else "unknown"
+    if not account_action_rate_limiter.allow(f"ip:{client_ip}"):
+        return templates.TemplateResponse(
+            request,
+            "partials/change_password_form.html",
+            {"user": user, "error": "Too many attempts, try again shortly"},
+            status_code=429,
+        )
+
     if not verify_password(current_password, user.password_hash):
         return templates.TemplateResponse(
             request,
