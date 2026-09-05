@@ -77,3 +77,26 @@ def test_reanalyze_all_only_touches_activities_older_than_current_version(
 def test_reanalyze_activity_id_that_does_not_exist_exits_with_an_error(app_client) -> None:
     with pytest.raises(SystemExit):
         reanalyze(activity_id="00000000-0000-0000-0000-000000000000", all_activities=False)
+
+
+def test_reanalyze_repopulates_the_cached_track(app_client, auth_headers, sample_gpx_bytes) -> None:
+    """R8 in docs/SERVER-PRODUCTION-PLAN.md: reanalyze is the recovery path
+    for rows analyzed before the track cache existed (track is null) — it
+    must fill it in, not just update the analysis result."""
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+
+    with get_session_factory()() as session:
+        analysis = session.get(ActivityAnalysis, activity_id)
+        assert analysis is not None
+        analysis.track = None
+        analysis.analysis_version = 0
+        session.commit()
+
+    reanalyze(activity_id=activity_id, all_activities=False)
+
+    with get_session_factory()() as session:
+        analysis = session.get(ActivityAnalysis, activity_id)
+        assert analysis is not None
+        assert analysis.track is not None
+        assert len(analysis.track["segments"]) == 2

@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.analysis.gpx_parser import GpxParseError, parse_gpx
+from app.analysis.track_sampling import DEFAULT_MAX_POINTS, sample_track
 from app.analysis.v1 import ANALYSIS_VERSION, AnalyzerV1
 from app.api.v1.errors import api_error
 from app.api.v1.schemas import (
@@ -20,7 +21,6 @@ from app.api.v1.schemas import (
     ActivitySummary,
     AnalysisOut,
     TrackOut,
-    TrackPointOut,
 )
 from app.audit import log_audit_event
 from app.auth.current_user import CurrentUser
@@ -181,6 +181,7 @@ def upload_activity(
             analysis_version=ANALYSIS_VERSION,
             status=AnalysisStatus.done,
             result=result,
+            track=sample_track(track, max_points=DEFAULT_MAX_POINTS),
             computed_at=datetime.now(UTC),
         )
     except Exception as exc:  # analysis failure must never fail the upload
@@ -316,11 +317,16 @@ def get_track(
     activity_id: str,
     user: CurrentUser,
     session: Annotated[Session, Depends(db_session)],
-    max_points: Annotated[int, Query(ge=1, le=20000)] = 2000,
+    max_points: Annotated[int, Query(ge=1, le=20000)] = DEFAULT_MAX_POINTS,
 ) -> TrackOut:
     activity = SqlAlchemyActivityRepository(session).get_by_id_for_user(user.id, activity_id)
     if activity is None:
         raise api_error(404, "not_found", "Activity not found")
+
+    if max_points == DEFAULT_MAX_POINTS:
+        analysis = SqlAlchemyActivityAnalysisRepository(session).get_by_activity_id(activity.id)
+        if analysis is not None and analysis.track is not None:
+            return TrackOut.model_validate(analysis.track)
 
     data = _blob_store().get(activity.gpx_blob_key)
     try:
@@ -328,20 +334,4 @@ def get_track(
     except GpxParseError:
         return TrackOut(segments=[])
 
-    out_segments: list[list[TrackPointOut]] = []
-    for segment in track.segments:
-        points = segment.points
-        stride = max(1, -(-len(points) // max_points))
-        start_time = track.segments[0].points[0].time
-        sampled = points[::stride]
-        if sampled[-1] is not points[-1]:
-            sampled.append(points[-1])
-        out_segments.append(
-            [
-                TrackPointOut(
-                    lat=p.lat, lon=p.lon, ele=p.ele, t=(p.time - start_time).total_seconds()
-                )
-                for p in sampled
-            ]
-        )
-    return TrackOut(segments=out_segments)
+    return TrackOut.model_validate(sample_track(track, max_points=max_points))

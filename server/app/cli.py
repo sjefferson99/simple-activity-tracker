@@ -81,6 +81,7 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
     this).
     """
     from app.analysis.gpx_parser import GpxParseError, parse_gpx
+    from app.analysis.track_sampling import DEFAULT_MAX_POINTS, sample_track
     from app.analysis.v1 import ANALYSIS_VERSION, AnalyzerV1
     from app.db import get_session_factory
     from app.models.activity import Activity
@@ -116,10 +117,12 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
                 gpx_bytes = blob_store.get(activity.gpx_blob_key)
                 track = parse_gpx(gpx_bytes)
                 result = analyzer.analyze(track)
+                cached_track = sample_track(track, max_points=DEFAULT_MAX_POINTS)
                 status = AnalysisStatus.done
                 error = None
             except (GpxParseError, OSError, ValueError) as exc:
                 result = None
+                cached_track = None
                 status = AnalysisStatus.failed
                 error = str(exc)
                 print(f"  {activity.id}: FAILED — {exc}")
@@ -131,6 +134,7 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
             existing.analysis_version = ANALYSIS_VERSION
             existing.status = status
             existing.result = result
+            existing.track = cached_track
             existing.error = error
             existing.computed_at = datetime.now(UTC)
 

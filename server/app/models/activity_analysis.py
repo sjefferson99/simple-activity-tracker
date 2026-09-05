@@ -27,3 +27,9 @@ class ActivityAnalysis(Base):
     result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     computed_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
+    # Cached output of sample_track() at DEFAULT_MAX_POINTS, computed once at
+    # upload/reanalyze time instead of re-parsing the full GPX blob on every
+    # map view — see R8 in docs/SERVER-PRODUCTION-PLAN.md. Null for rows
+    # analyzed before this column existed, or when analysis failed; the
+    # track endpoint falls back to parsing on the fly in either case.
+    track: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
