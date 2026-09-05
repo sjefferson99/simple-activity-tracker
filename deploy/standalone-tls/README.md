@@ -33,6 +33,13 @@ encrypted even though the cert isn't from a public CA.
 To trust the cert instead of clicking through the warning every time, install
 `certs/cert.pem` as a trusted root on each client device.
 
+If you provide your own `certs/key.pem` instead of using `generate-cert.sh`
+(e.g. a cert from an internal CA), make sure it's readable by the `proxy`
+container — `chmod 644 certs/key.pem` — since `generate-cert.sh` already
+does this for you but a manually-placed key may not have it. There's nothing
+in `certs/` more sensitive than the rest of this deployment folder, so
+matching `cert.pem`'s permissions is fine.
+
 `app` runs the published image (`ghcr.io/sjefferson99/simple-activity-tracker-server:latest`,
 the same one CI pushes on every merge to `main`) — to update to the latest
 version later: `docker compose pull app && docker compose up -d`.

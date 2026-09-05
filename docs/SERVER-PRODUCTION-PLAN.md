@@ -468,10 +468,11 @@ container restart-loops.
   adding the dev dependency**); publish the number in the PR description.
 - T3: ruff — enable `S` (bandit), `SIM`, `N`, `RUF`, `PTH` rule sets, fix or `noqa` with a
   reason; remove the unused `token_hashes_equal` or use it in `get_by_hash` callers.
-- T4: housekeeping — fix `generate-cert.sh`'s comment that points at a non-existent
-  `../traefik/docker-compose.yml`; delete the stray empty `android/` directory at the repo
-  root (a gitignored leftover from the W0 move — confirm it's empty first); add a
-  `LICENSE` and a short `SECURITY.md` (how to report, supported versions = `main`).
+- T4: housekeeping — ~~fix `generate-cert.sh`'s comment that points at a non-existent
+  `../traefik/docker-compose.yml`~~ (done alongside D8, PR TBD); delete the stray empty
+  `android/` directory at the repo root (a gitignored leftover from the W0 move — confirm
+  it's empty first); add a `LICENSE` and a short `SECURITY.md` (how to report, supported
+  versions = `main`).
 - T5: `openapi.json` — after S2/S7 changes regenerate it (`uv run python -m
   app.openapi_export > openapi.json`) and make sure the mobile DTO tests still pass
   against the committed fixtures (`mobile/test/fixtures/*.json`).
