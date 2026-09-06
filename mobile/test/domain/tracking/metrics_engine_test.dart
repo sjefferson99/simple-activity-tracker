@@ -10,6 +10,7 @@ TrackPoint _pointAtMeters(
   double metersFromOrigin,
   DateTime timestamp, {
   double accuracyMeters = 5,
+  bool hasAccuracy = true,
   double? elevationMeters,
 }) {
   final degrees = metersFromOrigin / 111195;
@@ -18,6 +19,7 @@ TrackPoint _pointAtMeters(
     longitude: degrees,
     timestamp: timestamp,
     accuracyMeters: accuracyMeters,
+    hasAccuracy: hasAccuracy,
     elevationMeters: elevationMeters,
   );
 }
@@ -101,6 +103,51 @@ void main() {
       expect(engine.metrics.distanceMeters, closeTo(50, 1));
       expect(engine.metrics.elapsed, const Duration(seconds: 20));
     });
+
+    test(
+      'drops a point with hasAccuracy false even if accuracyMeters looks good',
+      () {
+        final engine = MetricsEngine();
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        engine.addPoint(_pointAtMeters(0, start));
+        // Platform never actually measured accuracy for this fix — a great
+        // accuracyMeters value here is a placeholder, not a real reading.
+        engine.addPoint(
+          _pointAtMeters(
+            5000,
+            start.add(const Duration(seconds: 10)),
+            accuracyMeters: 1,
+            hasAccuracy: false,
+          ),
+        );
+
+        expect(engine.metrics.distanceMeters, 0);
+        expect(engine.metrics.elapsed, Duration.zero);
+      },
+    );
+
+    test(
+      'resumes correctly after a hasAccuracy-false point using the last good fix',
+      () {
+        final engine = MetricsEngine();
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        engine.addPoint(_pointAtMeters(0, start));
+        engine.addPoint(
+          _pointAtMeters(
+            5000,
+            start.add(const Duration(seconds: 10)),
+            accuracyMeters: 1,
+            hasAccuracy: false,
+          ),
+        );
+        engine.addPoint(
+          _pointAtMeters(50, start.add(const Duration(seconds: 20))),
+        );
+
+        expect(engine.metrics.distanceMeters, closeTo(50, 1));
+        expect(engine.metrics.elapsed, const Duration(seconds: 20));
+      },
+    );
   });
 
   group('splits', () {
@@ -394,14 +441,14 @@ void main() {
     test('does not credit distance or elapsed time to sub-floor wander', () {
       final engine = MetricsEngine();
       final start = DateTime(2026, 1, 1, 0, 0, 0);
-      // Indoor multipath: fixes drift by ~2m/s while the phone is
-      // stationary. Well inside the running-mode plausibility cap (12 m/s),
-      // so the teleport filter alone would accept every one of these as
-      // real motion.
+      // Indoor multipath: fixes drift by well under a metre per second while
+      // the phone is stationary. Well inside the running-mode plausibility
+      // cap (12 m/s), so the teleport filter alone would accept every one
+      // of these as real motion.
       engine.addPoint(_pointAtMeters(0, start));
-      engine.addPoint(_pointAtMeters(2, start.add(const Duration(seconds: 1))));
-      engine.addPoint(_pointAtMeters(1, start.add(const Duration(seconds: 2))));
-      engine.addPoint(_pointAtMeters(2.5, start.add(const Duration(seconds: 3))));
+      engine.addPoint(_pointAtMeters(0.8, start.add(const Duration(seconds: 1))));
+      engine.addPoint(_pointAtMeters(0.3, start.add(const Duration(seconds: 2))));
+      engine.addPoint(_pointAtMeters(1.0, start.add(const Duration(seconds: 3))));
 
       expect(engine.metrics.distanceMeters, 0);
       expect(engine.metrics.elapsed, Duration.zero);
@@ -412,9 +459,9 @@ void main() {
       final engine = MetricsEngine();
       final start = DateTime(2026, 1, 1, 0, 0, 0);
       engine.addPoint(_pointAtMeters(0, start));
-      engine.addPoint(_pointAtMeters(5, start.add(const Duration(seconds: 1))));
+      engine.addPoint(_pointAtMeters(2, start.add(const Duration(seconds: 1))));
 
-      expect(engine.metrics.distanceMeters, closeTo(5, 0.1));
+      expect(engine.metrics.distanceMeters, closeTo(2, 0.1));
       expect(engine.metrics.elapsed, const Duration(seconds: 1));
     });
 
@@ -423,15 +470,167 @@ void main() {
       final start = DateTime(2026, 1, 1, 0, 0, 0);
       engine.addPoint(_pointAtMeters(0, start));
       // Stationary indoor wander for a few seconds.
-      engine.addPoint(_pointAtMeters(1.5, start.add(const Duration(seconds: 1))));
-      engine.addPoint(_pointAtMeters(0.5, start.add(const Duration(seconds: 2))));
+      engine.addPoint(_pointAtMeters(0.9, start.add(const Duration(seconds: 1))));
+      engine.addPoint(_pointAtMeters(0.3, start.add(const Duration(seconds: 2))));
       // The runner actually starts moving.
       engine.addPoint(_pointAtMeters(50, start.add(const Duration(seconds: 12))));
 
-      // Measured from the last wander point (0.5m, t=2s), not from the very
+      // Measured from the last wander point (0.3m, t=2s), not from the very
       // first fix — the anchor keeps advancing through the noise.
-      expect(engine.metrics.distanceMeters, closeTo(49.5, 0.5));
+      expect(engine.metrics.distanceMeters, closeTo(49.7, 0.5));
       expect(engine.metrics.elapsed, const Duration(seconds: 10));
+    });
+
+    test(
+      'walking pace at ~1s fixes clears the floor even though many '
+      'individual steps are close to it',
+      () {
+        // #49: real on-device capture of a ~1.7 m/s walk averaged ~1.7m
+        // between fixes; a naive "just raise the floor" fix would have
+        // swallowed most of a genuine walk as noise. Modelled here as a
+        // steady 1.7 m/s pace.
+        final engine = MetricsEngine();
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        for (var i = 0; i <= 20; i++) {
+          engine.addPoint(
+            _pointAtMeters(i * 1.7, start.add(Duration(seconds: i))),
+          );
+        }
+
+        expect(engine.metrics.distanceMeters, greaterThan(30));
+      },
+    );
+  });
+
+  group('#49: current speed does not leak from noise ticks', () {
+    test(
+      'current speed does not read a false wobble from noise-floor/drift '
+      'ticks, even though cumulative distance correctly stays at zero',
+      () {
+        // A second real on-device capture (still indoors, stationary) showed
+        // cumulative distance/elapsed correctly at zero throughout — the
+        // fix above worked — but the *live current-speed tile* still read
+        // several km/h, because MetricsEngine._currentSpeedMps computes
+        // speed directly between the oldest/newest points in a rolling
+        // window that noise-floor and straightness-rejected points were
+        // still being added to, entirely bypassing both filters. Every
+        // segment below is sub-noise-floor by itself (well under 3m) but
+        // the *cumulative* wobble across a few of them was enough to read
+        // as a few km/h if it fed the current-speed window at all.
+        final engine = MetricsEngine();
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        engine.addPoint(_pointAtMeters(0, start));
+        engine.addPoint(
+          _pointAtMeters(0.4, start.add(const Duration(seconds: 1))),
+        );
+        engine.addPoint(
+          _pointAtMeters(0.9, start.add(const Duration(seconds: 2))),
+        );
+        engine.addPoint(
+          _pointAtMeters(1.6, start.add(const Duration(seconds: 3))),
+        );
+        engine.addPoint(
+          _pointAtMeters(2.2, start.add(const Duration(seconds: 4))),
+        );
+
+        expect(engine.metrics.distanceMeters, 0);
+        expect(engine.metrics.elapsed, Duration.zero);
+        expect(engine.metrics.currentSpeedMps, isNull);
+      },
+    );
+
+    test(
+      'current speed decays to null (not a frozen stale reading) once real '
+      'motion is followed by a long noise/stationary streak',
+      () {
+        final engine = MetricsEngine();
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        // Real motion at a steady pace.
+        engine.addPoint(_pointAtMeters(0, start));
+        engine.addPoint(
+          _pointAtMeters(5, start.add(const Duration(seconds: 1))),
+        );
+        engine.addPoint(
+          _pointAtMeters(10, start.add(const Duration(seconds: 2))),
+        );
+        expect(engine.metrics.currentSpeedMps, isNotNull);
+
+        // The runner then stops; every subsequent fix is sub-floor wander
+        // for well beyond the 3s current-speed window.
+        engine.addPoint(
+          _pointAtMeters(10.5, start.add(const Duration(seconds: 5))),
+        );
+        engine.addPoint(
+          _pointAtMeters(10.2, start.add(const Duration(seconds: 8))),
+        );
+        engine.addPoint(
+          _pointAtMeters(10.6, start.add(const Duration(seconds: 11))),
+        );
+
+        expect(
+          engine.metrics.currentSpeedMps,
+          isNull,
+          reason:
+              'should not still be reporting the last real 5 m/s reading '
+              'from before the runner stopped',
+        );
+      },
+    );
+  });
+
+  group('#49: a real out-and-back route is never mistaken for GPS drift', () {
+    // A "straightness" filter (net displacement over a window vs. total path
+    // walked in it) was tried and reverted here: a genuine on-device capture
+    // of an ordinary out-and-back walk has the *identical* signature to
+    // indoor multipath drift-then-snap-back — low net displacement relative
+    // to path length, because the walker turns around — and that filter
+    // rejected the whole walk, reporting 0 distance/elapsed throughout. Any
+    // real loop, out-and-back, or lap course looks like this; position data
+    // alone can't tell it apart from a bad fix snapping back. These tests
+    // guard against reintroducing that class of filter without solving this.
+    test('walking out and back to the start credits real distance', () {
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      var t = 0;
+      void point(double meters) {
+        engine.addPoint(_pointAtMeters(meters, start.add(Duration(seconds: t))));
+        t++;
+      }
+
+      // Walk out ~50m at a real walking pace (5m/s steps, clear of the 3m
+      // noise floor)...
+      for (var m = 0; m <= 50; m += 5) {
+        point(m.toDouble());
+      }
+      // ...then walk back to (near) the start.
+      for (var m = 45; m >= 0; m -= 5) {
+        point(m.toDouble());
+      }
+
+      // Every leg was a genuine plausible-speed, above-noise-floor segment,
+      // so all of it should be credited — net displacement ending up near
+      // zero must not suppress any of it.
+      expect(engine.metrics.distanceMeters, greaterThan(90));
+    });
+
+    test('a short there-and-back loop (a lap course) still accrues distance', () {
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      var t = 0;
+      void point(double meters) {
+        engine.addPoint(_pointAtMeters(meters, start.add(Duration(seconds: t))));
+        t++;
+      }
+
+      // Several short back-and-forth laps, each leg a real walking-speed
+      // segment (well clear of the 3m noise floor) — net displacement
+      // across the whole thing is ~0.
+      for (var lap = 0; lap < 4; lap++) {
+        point(10);
+        point(0);
+      }
+
+      expect(engine.metrics.distanceMeters, greaterThan(65));
     });
   });
 

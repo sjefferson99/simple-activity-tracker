@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:meta/meta.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:uuid/uuid.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -29,6 +30,11 @@ import 'live_run_state.dart';
 
 const _gpxFlushInterval = Duration(seconds: 5);
 
+/// How long to wait for a first GPS fix before LiveRunAcquiring surfaces a
+/// message instead of spinning silently forever (#49) — GPS may never get a
+/// fix at all (indoors, hardware issue, or a Wi-Fi-off provider stall).
+const _acquiringTimeout = Duration(seconds: 20);
+
 String get _sourcePlatform {
   if (Platform.isAndroid) return 'android';
   if (Platform.isIOS) return 'ios';
@@ -43,11 +49,17 @@ final liveRunControllerProvider =
     NotifierProvider<LiveRunController, LiveRunState>(LiveRunController.new);
 
 class LiveRunController extends Notifier<LiveRunState> {
+  /// Overridable only by tests, which need a much shorter wait than the real
+  /// 20s to exercise the acquiring-timeout path without a slow test run.
+  @visibleForTesting
+  Duration acquiringTimeout = _acquiringTimeout;
+
   StreamSubscription<LocationSample>? _subscription;
   TrackPoint? _previousPoint;
   MetricsEngine? _metricsEngine;
   RunGpxLog? _gpxLog;
   Timer? _flushTimer;
+  Timer? _acquiringTimeoutTimer;
   File? _currentGpxFile;
   final RunExportService _exportService = RunExportService();
 
@@ -136,7 +148,16 @@ class LiveRunController extends Notifier<LiveRunState> {
     await WakelockPlus.enable();
 
     state = const LiveRunAcquiring();
+    _acquiringTimeoutTimer = Timer(acquiringTimeout, _onAcquiringTimeout);
     _subscription = service.stream.listen(_onSample);
+  }
+
+  void _onAcquiringTimeout() {
+    // The subscription may have delivered a fix in the same event-loop turn
+    // the timer fires, or the run may already have been stopped/cancelled —
+    // only touch state if it's still genuinely waiting.
+    if (state is! LiveRunAcquiring) return;
+    state = const LiveRunAcquiring(timedOut: true);
   }
 
   void pause() {
@@ -238,10 +259,12 @@ class LiveRunController extends Notifier<LiveRunState> {
   }
 
   Future<void> _disposeRun() async {
-    // Cancel the timer first and synchronously, so no new flush can start
-    // after teardown begins (matters on the un-awaited onDispose path).
+    // Cancel the timers first and synchronously, so no new flush/timeout can
+    // fire after teardown begins (matters on the un-awaited onDispose path).
     _flushTimer?.cancel();
     _flushTimer = null;
+    _acquiringTimeoutTimer?.cancel();
+    _acquiringTimeoutTimer = null;
     await _subscription?.cancel();
     _subscription = null;
 
@@ -258,6 +281,11 @@ class LiveRunController extends Notifier<LiveRunState> {
 
   void _onSample(LocationSample sample) {
     if (_phase == RunPhase.paused) return;
+
+    // The first fix has arrived — the acquiring timeout no longer applies,
+    // whether or not it already fired.
+    _acquiringTimeoutTimer?.cancel();
+    _acquiringTimeoutTimer = null;
 
     final point = TrackPoint.fromSample(sample);
     final speed = sample.speedMps ?? _fallbackSpeed(point);

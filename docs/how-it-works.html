@@ -1,4 +1,4 @@
-<title>Simple Runner, Explained</title>
+<title>Simple Activity Tracker, Explained</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -552,13 +552,13 @@
 <div class="wrap">
 
   <div class="masthead">
-    <div class="eyebrow"><span class="dot"></span>Technical brief · Simple Runner</div>
+    <div class="eyebrow"><span class="dot"></span>Technical brief · Simple Activity Tracker</div>
     <h1 class="title">How the app turns satellite noise into a pace you can trust</h1>
     <p class="subtitle">A plain-language tour of the app's construction and the arithmetic behind every number on screen — written so the "why" behind a jumpy split or a slow-to-appear speed is never a mystery.</p>
     <div class="meta-row">
       <span><b>Platform</b> Android &amp; iOS, one codebase</span>
       <span><b>Phase</b> 1 of 3 — live tracking &amp; GPX logging</span>
-      <span><b>Reading time</b> ~9 min</span>
+      <span><b>Reading time</b> ~10 min</span>
     </div>
   </div>
 
@@ -566,7 +566,7 @@
   <section>
     <div class="section-head"><span class="section-num">01</span><h2>Executive summary</h2></div>
     <div class="summary-box prose">
-      <p>Simple Runner is a <strong>Flutter</strong> app — one Dart codebase that compiles to a native Android and a native iOS app, rather than two separate projects kept in sync by hand. It reads your phone's GPS roughly once a second, turns that stream of coordinates into speed, distance, pace and kilometre splits, and writes the raw route to a GPX file you could open in any mapping tool.</p>
+      <p>Simple Activity Tracker is a <strong>Flutter</strong> app — one Dart codebase that compiles to a native Android and a native iOS app, rather than two separate projects kept in sync by hand. It reads your phone's GPS roughly once a second, turns that stream of coordinates into speed, distance, pace and kilometre splits, and writes the raw route to a GPX file you could open in any mapping tool.</p>
       <p>The distinctive engineering problem here is not the arithmetic — distance and speed are two lines of trigonometry — it's that <strong>consumer GPS occasionally lies</strong>. A phone can report a location half a kilometre from where you actually are, for one sample, before correcting itself. Unfiltered, that single bad sample would spike your speed to over 1,000&nbsp;km/h and permanently inflate your total distance. Most of what follows is the app deciding, sample by sample, whether to believe what the GPS just told it.</p>
     </div>
   </section>
@@ -600,7 +600,7 @@
       <div class="stack-cell">
         <div class="role">GPS access</div>
         <div class="what">geolocator</div>
-        <div class="why">The one package allowed to talk to the OS location APIs directly. Tuned per-platform: <code>bestForNavigation</code> accuracy, background updates enabled on iOS via an Info.plist entry.</div>
+        <div class="why">The one package allowed to talk to the OS location APIs directly. Tuned per-platform: <code>bestForNavigation</code> accuracy, background updates enabled on iOS via an Info.plist entry. On Android it also asks for the phone's location hardware directly rather than the network-assisted provider Android normally prefers — that provider can stall waiting on Wi-Fi even when GPS itself is on and working, which otherwise left a run stuck on "Acquiring GPS…" with Wi-Fi turned off.</div>
       </div>
       <div class="stack-cell">
         <div class="role">State management</div>
@@ -768,7 +768,7 @@
   <!-- ============ PRECAUTIONS ============ -->
   <section>
     <div class="section-head"><span class="section-num">04</span><h2>Precautions against bad GPS data</h2></div>
-    <p class="lede">GPS receivers occasionally hand back a wrong answer — most often right at the start of a run, before the chipset has a confident lock. Every fix passes through three checks before it's allowed to count.</p>
+    <p class="lede">GPS receivers occasionally hand back a wrong answer — most often right at the start of a run, before the chipset has a confident lock, or indoors, where reflected signal ("multipath") can make a stationary phone look like it's slowly moving. Every fix passes through several checks before it's allowed to count, and the checks differ slightly for running versus cycling.</p>
 
     <div class="table-scroll">
       <table class="guard-table">
@@ -777,27 +777,43 @@
         </thead>
         <tbody>
           <tr>
+            <td class="gname">Measured-accuracy filter</td>
+            <td>Some fixes carry an accuracy figure the OS never actually measured — just a placeholder. Trusting that value as if it were a confident reading would let an arbitrarily bad fix straight through the next filter, so it's rejected outright, regardless of what the number says.</td>
+            <td>reject if <span class="gval">accuracy unmeasured</span></td>
+          </tr>
+          <tr>
             <td class="gname">Accuracy filter</td>
             <td>The OS reports a confidence radius with every fix. A fix the phone itself isn't confident about is dropped before it reaches any calculation.</td>
             <td>reject if <span class="gval">accuracy &gt; 25 m</span></td>
           </tr>
           <tr>
             <td class="gname">Plausible-speed filter</td>
-            <td>No runner sustains this pace. A fix implying it is treated as a glitch — a stale or default location before the GPS gets a real lock — not real motion.</td>
-            <td>reject if <span class="gval">implied speed &gt; 12 m/s</span> <span style="color:var(--ink-faint)">(43 km/h)</span></td>
+            <td>No one sustains this pace for the chosen activity. A fix implying it is treated as a glitch — a stale or default location before the GPS gets a real lock — not real motion. Cycling's cap is higher, since a fast descent is routine on a bike but not on foot.</td>
+            <td>reject if implied speed &gt;<br><span class="gval">12 m/s</span> <span style="color:var(--ink-faint)">(43 km/h) running</span><br><span class="gval">25 m/s</span> <span style="color:var(--ink-faint)">(90 km/h) cycling</span></td>
           </tr>
           <tr>
             <td class="gname">Absolute-jump cap</td>
-            <td>Closes a loophole in the speed filter alone: given a long enough gap since the last fix, <em>any</em> distance starts to look like a slow, plausible pace. This catches a large teleport regardless of how much time has passed.</td>
-            <td>reject if <span class="gval">jump &gt; 20 km</span></td>
+            <td>Closes a loophole in the speed filter alone: given a long enough gap since the last fix, <em>any</em> distance starts to look like a slow, plausible pace. This catches a large teleport regardless of how much time has passed. Cycling's cap is larger, since a bike can cover far more ground in a genuinely sparse-fix gap (a tunnel, a backgrounded phone) without it being a bad fix.</td>
+            <td>reject if jump &gt;<br><span class="gval">20 km</span> running · <span class="gval">40 km</span> cycling</td>
+          </tr>
+          <tr>
+            <td class="gname">Noise floor</td>
+            <td>Indoors, reflected/multipath fixes routinely wander a few metres between updates while the phone doesn't move at all — well within even the plausible-speed filter's limits, so that check alone never catches it. A segment this small is treated as noise: the app keeps tracking your position but credits no distance or time for it, the same as while paused.</td>
+            <td>ignore if <span class="gval">segment &lt; 3 m</span></td>
+          </tr>
+          <tr>
+            <td class="gname">Straightness filter</td>
+            <td>The noise floor alone isn't enough for every kind of indoor drift: multipath can also creep steadily in one direction for several seconds — each individual step clearing the noise floor, even looking like a plausible running speed — before snapping back close to where it started. Real motion's net displacement over a few seconds stays close to the total ground it covered; a drift-then-snap-back's doesn't, because the eventual reversal cancels much of it out. A segment only counts once the recent path is straight enough to trust.</td>
+            <td>ignore if <span class="gval">net ÷ path &lt; 0.7</span> <span style="color:var(--ink-faint)">over last 25 s</span></td>
           </tr>
         </tbody>
       </table>
     </div>
 
     <div class="prose" style="margin-top:28px;">
-      <p><strong>What happens to a rejected fix.</strong> It's discarded from the live metrics — distance and average speed act as though it never arrived. But it isn't simply forgotten: if the <em>next</em> fix agrees with the rejected one (i.e. two consecutive readings that are mutually consistent, showing at least a couple of metres of real movement between them), the app concludes the earlier "good" fix was actually the mistake, and quietly re-anchors its tracking onto the new, more plausible position — crediting no extra distance or time for the jump itself, the same way a pause and resume works.</p>
+      <p><strong>What happens to a rejected fix.</strong> It's discarded from the live metrics — distance and average speed act as though it never arrived. But an implausible-speed or absolute-jump rejection isn't simply forgotten: if the <em>next</em> fix agrees with the rejected one (i.e. two consecutive readings that are mutually consistent, showing at least a couple of metres of real movement between them), the app concludes the earlier "good" fix was actually the mistake, and quietly re-anchors its tracking onto the new, more plausible position — crediting no extra distance or time for the jump itself, the same way a pause and resume works. That candidate has to be confirmed within 30 seconds, or it's treated as a genuine gap rather than a recoverable glitch.</p>
       <p>That recovery step exists because the obvious alternative — always trusting the last accepted fix — has a sharp failure mode: if that fix turns out to have been the bad one, <em>every subsequent real fix</em> near your actual position also looks like an impossible jump and gets rejected too, until enough time passes for the maths to catch up. An early version of this logic quarantined 77 seconds of perfectly good running data this way before the fix below it.</p>
+      <p><strong>On the straightness filter specifically:</strong> no check that only looks at position can spot a drift-then-snap-back <em>before</em> it snaps back — up to that point, a steady drift in one direction is genuinely indistinguishable from someone walking that way. In practice this means the very first such episode after a stable period can credit a small amount of phantom distance (typically under 15 m, from real indoor test captures), but the moment the drift reverses, that reversal itself is rejected and stays in view for the next 25 seconds — so a second drift-and-snap-back cycle right afterwards, of the kind that previously produced several seconds of a falsely elevated speed reading, is caught immediately and credits nothing further.</p>
       <p>The GPX file written to disk, by contrast, keeps <strong>every</strong> fix, filtered or not — filtering is a display decision the app makes for you live; the underlying recording stays complete, in case you ever want to re-process it differently.</p>
     </div>
   </section>
@@ -847,8 +863,8 @@
   </section>
 
   <div class="colophon">
-    <span>Simple Runner — Phase 1 (live tracking, GPX logging)</span>
-    <span>Prepared 2026-09-02</span>
+    <span>Simple Activity Tracker — Phase 1 (live tracking, GPX logging)</span>
+    <span>Prepared 2026-09-02 · updated 2026-09-06</span>
   </div>
 
 </div>

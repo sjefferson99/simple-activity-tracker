@@ -262,6 +262,8 @@ class _StatusLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final message = switch (state) {
       LiveRunIdle() => 'Press Start to begin tracking',
+      LiveRunAcquiring(timedOut: true) =>
+        'Still waiting for GPS — check Location mode and Wi-Fi',
       LiveRunAcquiring() => 'Acquiring GPS…',
       LiveRunActive(phase: RunPhase.paused) => 'Paused',
       LiveRunActive(:final accuracyMeters) =>

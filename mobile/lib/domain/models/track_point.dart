@@ -9,11 +9,17 @@ class TrackPoint {
   final DateTime timestamp;
   final double accuracyMeters;
 
+  /// See [LocationSample.hasAccuracy]. Defaults to true so call sites that
+  /// construct a [TrackPoint] directly (tests, anything not sourced from a
+  /// real GPS fix) don't spuriously fail the accuracy-measured check.
+  final bool hasAccuracy;
+
   const TrackPoint({
     required this.latitude,
     required this.longitude,
     required this.timestamp,
     required this.accuracyMeters,
+    this.hasAccuracy = true,
     this.elevationMeters,
   });
 
@@ -23,5 +29,6 @@ class TrackPoint {
         elevationMeters: sample.elevationMeters,
         timestamp: sample.timestamp,
         accuracyMeters: sample.accuracyMeters,
+        hasAccuracy: sample.hasAccuracy,
       );
 }

@@ -58,6 +58,16 @@ class GeolocatorLocationService implements LocationService {
         // enableWakeLock defaults to false; wakelock_plus already keeps
         // the screen on during tracking (see LiveRunController), and
         // enabling it here would need the WAKE_LOCK manifest permission.
+        //
+        // forceLocationManager routes through Android's legacy
+        // LocationManager/GPS_PROVIDER instead of Play Services'
+        // FusedLocationProviderClient, which blends in Wi-Fi/cell-based
+        // positioning and (per #49) can stall indefinitely waiting on that
+        // network-location backend when Wi-Fi is off, even though GPS
+        // itself is on and working. This trades away fused positioning's
+        // faster/smoother fixes in open sky for not depending on Wi-Fi to
+        // get a fix at all.
+        forceLocationManager: true,
         foregroundNotificationConfig: const ForegroundNotificationConfig(
           notificationTitle: 'Simple Activity Tracker',
           notificationText: 'Tracking your run',
@@ -89,6 +99,7 @@ class GeolocatorLocationService implements LocationService {
       elevationMeters: position.altitude,
       speedMps: position.speed >= 0 ? position.speed : null,
       accuracyMeters: position.accuracy,
+      hasAccuracy: position.hasAccuracy,
       timestamp: position.timestamp,
     );
   }

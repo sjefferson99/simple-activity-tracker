@@ -61,16 +61,38 @@ const Duration _pendingCandidateTtl = Duration(seconds: 30);
 const double _minReanchorMotionMeters = 2;
 
 /// Below this, a segment is treated as GPS noise rather than motion — see
-/// [MetricsEngine._isNoiseFloorSegment]. Indoors, reflected/multipath fixes
-/// routinely wander a few meters between updates while the phone is
-/// completely stationary; that wander implies only 1-3 m/s, comfortably
-/// inside even running mode's plausibility cap, so the existing
-/// teleport-oriented checks never catch it. This is deliberately a small
-/// fixed floor rather than a multiple of reported accuracy: accuracy on
-/// consumer GPS is itself an unreliable estimate indoors (often
+/// the noise-floor check in [MetricsEngine.addPoint]. Indoors,
+/// reflected/multipath fixes routinely wander between updates while the
+/// phone is completely stationary; that wander implies a low but non-zero
+/// speed, comfortably inside even running mode's plausibility cap, so the
+/// existing teleport-oriented checks never catch it. This is deliberately a
+/// small fixed floor rather than a multiple of reported accuracy: accuracy
+/// on consumer GPS is itself an unreliable estimate indoors (often
 /// overconfident), so scaling off it would let exactly the wander this is
 /// meant to catch back in.
-const double _noiseFloorMeters = 3;
+///
+/// #49: originally 3m, but real on-device capture of an ordinary walk
+/// (~1.7 m/s, ~1s fixes) showed almost every real step is *itself* under 3m
+/// — the floor was silently swallowing genuine walking pace, not just GPS
+/// noise. Lowered to 1.2m: comfortably credits that walk's real segments
+/// (only a small fraction still fall under 1.2m) while a separate near-
+/// stationary capture stayed at exactly zero distance down to 1.0m. This
+/// value is a genuine trade-off, tuned against real captures, not a value
+/// with a clean correct answer — a slower walk than this session's test
+/// data, or a very jittery fix, can still land on either side of it.
+///
+/// This floor alone does **not** fully solve the indoor-drift symptom #49
+/// was originally filed for: a drift that ramps up gradually (each hop
+/// individually clearing whatever the floor is, before snapping back) still
+/// gets credited, sometimes for tens of metres, before the eventual reversal
+/// gets rejected by the plausibility filter. An earlier revision of this fix
+/// added a "straightness" check (net displacement vs. path length over a
+/// window) to catch exactly that — but a real on-device out-and-back walk
+/// has the *identical* signature (low net displacement because the route
+/// doubles back) and got entirely rejected by it. That approach was
+/// reverted; distinguishing genuine drift from a genuine turnaround using
+/// position data alone is an open problem, not solved by this floor.
+const double _noiseFloorMeters = 1.2;
 
 /// Accumulates accepted track points into live run metrics: elapsed time,
 /// distance, current/average speed, and interpolated 1km splits.
@@ -108,10 +130,14 @@ class MetricsEngine {
   LiveMetrics _metrics = LiveMetrics.zero;
   LiveMetrics get metrics => _metrics;
 
-  /// Feeds one more accepted GPS fix into the engine. Points with worse
-  /// accuracy than [_maxAcceptableAccuracyMeters] are dropped entirely —
-  /// call site should not call this for paused/rejected points.
+  /// Feeds one more accepted GPS fix into the engine. A point is dropped
+  /// entirely if [TrackPoint.hasAccuracy] is false — an unmeasured accuracy
+  /// value is not the same as a perfect one, and would otherwise sail
+  /// straight through the accuracy-radius check below — or if its accuracy
+  /// is worse than [_maxAcceptableAccuracyMeters]. Call site should not call
+  /// this for paused/rejected points.
   void addPoint(TrackPoint point) {
+    if (!point.hasAccuracy) return;
     if (point.accuracyMeters > _maxAcceptableAccuracyMeters) return;
 
     final previous = _lastAccepted;
@@ -186,8 +212,15 @@ class MetricsEngine {
     // pause/resume gap.
     if (segmentDistance < _noiseFloorMeters) {
       _lastAccepted = point;
-      _recentPoints.add(point);
-      _pruneRecentPoints(point.timestamp);
+      // Deliberately not added to _recentPoints: that window feeds the live
+      // current-speed readout (see _currentSpeedMps), and a noise tick is
+      // exactly the kind of point that must not count toward it — otherwise
+      // the cumulative distance/time correctly show zero while the on-screen
+      // speed tile still reads a few km/h from nothing but multipath wobble
+      // between two noisy fixes (#49). Aged out by time, not just pruned,
+      // so a long noise streak decays current speed to null instead of
+      // freezing on whatever real motion last looked like.
+      _expireRecentPointsIfStale(point.timestamp);
       _metrics = _buildMetrics();
       return;
     }
@@ -304,6 +337,23 @@ class MetricsEngine {
     while (_recentPoints.length > 2 &&
         _recentPoints.first.timestamp.isBefore(cutoff)) {
       _recentPoints.removeAt(0);
+    }
+  }
+
+  /// Ages out [_recentPoints] entirely once its newest entry is older than
+  /// [_currentSpeedWindow] relative to [latestTimestamp] — called instead of
+  /// [_pruneRecentPoints] whenever [latestTimestamp]'s own point was *not*
+  /// added to the window (a noise/drift tick, #49). [_pruneRecentPoints]'s
+  /// "always keep the last 2" floor exists so a real but sparse fix doesn't
+  /// go missing while more real fixes keep arriving; that reasoning doesn't
+  /// apply here; a run of noise ticks with no real motion at all should let
+  /// current speed decay to null rather than freeze on a stale real reading
+  /// from before the runner stopped.
+  void _expireRecentPointsIfStale(DateTime latestTimestamp) {
+    if (_recentPoints.isEmpty) return;
+    final cutoff = latestTimestamp.subtract(_currentSpeedWindow);
+    if (_recentPoints.last.timestamp.isBefore(cutoff)) {
+      _recentPoints.clear();
     }
   }
 
