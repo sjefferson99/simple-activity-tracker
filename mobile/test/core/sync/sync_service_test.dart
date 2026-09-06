@@ -337,6 +337,60 @@ void main() {
     expect(api.uploadCallCount, 2);
   });
 
+  test(
+    'a permanently-rejected record does not block later queued records',
+    () async {
+      // Regression: one activity with no GPS data at all (e.g. an indoor
+      // run) gets rejected by the server with a 400. That must not jam
+      // every other queued activity behind it forever.
+      final api = FakeApiClient()
+        ..uploadRunHandler = ({
+          required baseUrl,
+          required token,
+          required summary,
+          required gpxFile,
+        }) async {
+          if (summary.clientRunId == 'broken') {
+            throw const ApiRejectedException('no GPS data', statusCode: 400);
+          }
+          return FakeApiClient().uploadRun(
+            baseUrl: baseUrl,
+            token: token,
+            summary: summary,
+            gpxFile: gpxFile,
+          );
+        };
+      final store = FakeRunStore()
+        ..seed(
+          _record(clientRunId: 'broken', startedAt: DateTime.utc(2026, 1, 1)),
+        )
+        ..seed(
+          _record(clientRunId: 'healthy', startedAt: DateTime.utc(2026, 1, 2)),
+        );
+      final auth = await _signedInAuthService(api);
+      final connectivity = FakeConnectivityMonitor();
+      final service = SyncService(
+        apiClient: api,
+        runStore: store,
+        authService: auth,
+        connectivity: connectivity,
+      );
+      addTearDown(service.dispose);
+      addTearDown(connectivity.dispose);
+
+      service.runFinished();
+      await pumpEventQueue();
+
+      final records = {for (final r in await store.listAll()) r.clientRunId: r};
+      expect(records['broken']!.syncStatus, isA<SyncStatusFailed>());
+      expect(
+        (records['broken']!.syncStatus as SyncStatusFailed).retryable,
+        isFalse,
+      );
+      expect(records['healthy']!.syncStatus, isA<SyncStatusUploaded>());
+    },
+  );
+
   test('oldest-first: two pending records upload in startedAt order', () async {
     final api = FakeApiClient();
     final store = FakeRunStore()

@@ -47,4 +47,16 @@ class FakeRunStore implements RunStore {
     if (record == null) return;
     _records[clientRunId] = record.copyWith(analysisResult: analysisResult);
   }
+
+  @override
+  Future<int> clearFailed() async {
+    final failedIds = _records.entries
+        .where((e) => e.value.syncStatus is SyncStatusFailed)
+        .map((e) => e.key)
+        .toList();
+    for (final id in failedIds) {
+      _records.remove(id);
+    }
+    return failedIds.length;
+  }
 }

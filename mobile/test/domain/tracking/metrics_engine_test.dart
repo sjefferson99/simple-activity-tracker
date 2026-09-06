@@ -390,6 +390,51 @@ void main() {
     });
   });
 
+  group('noise floor', () {
+    test('does not credit distance or elapsed time to sub-floor wander', () {
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      // Indoor multipath: fixes drift by ~2m/s while the phone is
+      // stationary. Well inside the running-mode plausibility cap (12 m/s),
+      // so the teleport filter alone would accept every one of these as
+      // real motion.
+      engine.addPoint(_pointAtMeters(0, start));
+      engine.addPoint(_pointAtMeters(2, start.add(const Duration(seconds: 1))));
+      engine.addPoint(_pointAtMeters(1, start.add(const Duration(seconds: 2))));
+      engine.addPoint(_pointAtMeters(2.5, start.add(const Duration(seconds: 3))));
+
+      expect(engine.metrics.distanceMeters, 0);
+      expect(engine.metrics.elapsed, Duration.zero);
+      expect(engine.metrics.avgSpeedMps, isNull);
+    });
+
+    test('a real segment right at the noise floor is still accepted', () {
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      engine.addPoint(_pointAtMeters(0, start));
+      engine.addPoint(_pointAtMeters(5, start.add(const Duration(seconds: 1))));
+
+      expect(engine.metrics.distanceMeters, closeTo(5, 0.1));
+      expect(engine.metrics.elapsed, const Duration(seconds: 1));
+    });
+
+    test('resumes normal accumulation once genuine motion follows wander', () {
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      engine.addPoint(_pointAtMeters(0, start));
+      // Stationary indoor wander for a few seconds.
+      engine.addPoint(_pointAtMeters(1.5, start.add(const Duration(seconds: 1))));
+      engine.addPoint(_pointAtMeters(0.5, start.add(const Duration(seconds: 2))));
+      // The runner actually starts moving.
+      engine.addPoint(_pointAtMeters(50, start.add(const Duration(seconds: 12))));
+
+      // Measured from the last wander point (0.5m, t=2s), not from the very
+      // first fix — the anchor keeps advancing through the noise.
+      expect(engine.metrics.distanceMeters, closeTo(49.5, 0.5));
+      expect(engine.metrics.elapsed, const Duration(seconds: 10));
+    });
+  });
+
   group('ActivityMode.cycling raises both plausibility thresholds', () {
     test('accepts a segment fast enough to be rejected in running mode', () {
       // 20 m/s (72 km/h) is a plausible fast descent on a bike, but well
