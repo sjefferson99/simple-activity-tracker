@@ -60,6 +60,18 @@ const Duration _pendingCandidateTtl = Duration(seconds: 30);
 /// worth of travel between fixes.
 const double _minReanchorMotionMeters = 2;
 
+/// Below this, a segment is treated as GPS noise rather than motion — see
+/// [MetricsEngine._isNoiseFloorSegment]. Indoors, reflected/multipath fixes
+/// routinely wander a few meters between updates while the phone is
+/// completely stationary; that wander implies only 1-3 m/s, comfortably
+/// inside even running mode's plausibility cap, so the existing
+/// teleport-oriented checks never catch it. This is deliberately a small
+/// fixed floor rather than a multiple of reported accuracy: accuracy on
+/// consumer GPS is itself an unreliable estimate indoors (often
+/// overconfident), so scaling off it would let exactly the wander this is
+/// meant to catch back in.
+const double _noiseFloorMeters = 3;
+
 /// Accumulates accepted track points into live run metrics: elapsed time,
 /// distance, current/average speed, and interpolated 1km splits.
 ///
@@ -163,6 +175,23 @@ class MetricsEngine {
     }
 
     _pendingCandidate = null;
+
+    // A plausible-speed segment can still be pure GPS noise: indoors,
+    // reflected/multipath fixes wander a few meters between updates while
+    // the phone doesn't move at all, which implies only 1-3 m/s — well
+    // inside even running mode's cap, so it passes the teleport-oriented
+    // check above untouched. Below the noise floor, advance the anchor (so
+    // the wander doesn't accumulate as drift against a stale reference
+    // point) but credit no distance or elapsed time, the same as a
+    // pause/resume gap.
+    if (segmentDistance < _noiseFloorMeters) {
+      _lastAccepted = point;
+      _recentPoints.add(point);
+      _pruneRecentPoints(point.timestamp);
+      _metrics = _buildMetrics();
+      return;
+    }
+
     _acceptSegment(segmentDistance, segmentDuration, previous, point);
   }
 

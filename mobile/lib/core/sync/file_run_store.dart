@@ -99,4 +99,30 @@ class FileRunStore implements RunStore {
     }
     return null;
   }
+
+  @override
+  Future<int> clearFailed() async {
+    final all = await listAll();
+    var cleared = 0;
+    for (final record in all) {
+      if (record.syncStatus is! SyncStatusFailed) continue;
+      // Delete the sidecar first: if the GPX delete below fails partway,
+      // listAll() will no longer surface this record at all (no sidecar),
+      // rather than resurrecting a half-cleared entry pointing at a GPX
+      // file that's already gone.
+      await _deleteIfExists(_sidecarPathFor(record.gpxPath));
+      await _deleteIfExists(record.gpxPath);
+      cleared++;
+    }
+    return cleared;
+  }
+
+  Future<void> _deleteIfExists(String path) async {
+    try {
+      await File(path).delete();
+    } on Object {
+      // Already gone, or some other filesystem hiccup — either way the
+      // record is being discarded regardless, so this must never throw.
+    }
+  }
 }

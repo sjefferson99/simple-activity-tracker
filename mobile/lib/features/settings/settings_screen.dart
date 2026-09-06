@@ -346,6 +346,10 @@ class _SyncQueueSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final queue = ref.watch(_syncQueueProvider);
+    final failedCount = queue.value
+            ?.where((r) => r.syncStatus is SyncStatusFailed)
+            .length ??
+        0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -358,12 +362,59 @@ class _SyncQueueSection extends ConsumerWidget {
           error: (error, _) => Text('$error'),
         ),
         const SizedBox(height: 12),
-        OutlinedButton(
-          onPressed: () => ref.read(syncServiceProvider).retryNow(),
-          child: const Text('Retry now'),
+        Row(
+          children: [
+            OutlinedButton(
+              onPressed: () => ref.read(syncServiceProvider).retryNow(),
+              child: const Text('Retry now'),
+            ),
+            if (failedCount > 0) ...[
+              const SizedBox(width: 12),
+              OutlinedButton(
+                onPressed: () => _confirmAndClear(context, ref, failedCount),
+                child: const Text('Clear failed'),
+              ),
+            ],
+          ],
         ),
       ],
     );
+  }
+
+  /// Discarding a failed record deletes its local GPX/sidecar for good — the
+  /// activity's data doesn't exist anywhere else, so confirm before doing it.
+  Future<void> _confirmAndClear(
+    BuildContext context,
+    WidgetRef ref,
+    int failedCount,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear failed activities?'),
+        content: Text(
+          'This permanently deletes the $failedCount failed '
+          '${failedCount == 1 ? 'activity' : 'activities'} in the queue, '
+          'including its local GPX track. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await ref.read(runStoreProvider).clearFailed();
+      // clearFailed() doesn't go through SyncService, so _syncQueueProvider's
+      // statusChanges trigger never fires for it — force a re-read.
+      ref.invalidate(_syncQueueProvider);
+    }
   }
 }
 

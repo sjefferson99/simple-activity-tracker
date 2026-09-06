@@ -19,4 +19,12 @@ abstract class RunStore {
   Future<void> updateSyncStatus(String clientRunId, SyncStatus status);
 
   Future<void> updateAnalysisResult(String clientRunId, Map<String, dynamic> analysisResult);
+
+  /// Deletes every record currently in [SyncStatusFailed], regardless of
+  /// [SyncStatusFailed.retryable] — an explicit "give up on these" action
+  /// for a record that can never succeed (e.g. no GPS data at all), so it
+  /// stops cluttering the queue without requiring a full app reinstall.
+  /// Records still pending/uploading/uploaded are untouched. Returns the
+  /// number of records removed.
+  Future<int> clearFailed();
 }

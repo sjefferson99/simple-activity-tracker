@@ -137,21 +137,25 @@ class SyncService {
   }
 
   Future<void> _drainQueue() async {
-    while (true) {
-      final queue = await _runStore.listPendingOrRetryable();
-      if (queue.isEmpty) return;
+    final queue = await _runStore.listPendingOrRetryable();
+    for (final record in queue) {
       if (!await _connectivity.isConnected) return;
 
-      final record = queue.first;
       final due = _dueAt(record);
       if (due != null && _now().isBefore(due)) {
-        // Oldest-first also means nothing later in the queue is any more
-        // due than this one — no point scanning further this pass.
-        return;
+        // Not a `return`: oldest-first is about upload order, not
+        // eligibility — a not-yet-due retryable record must not block a
+        // later one (e.g. freshly pending) that's ready now.
+        continue;
       }
 
-      final succeeded = await _attemptUpload(record);
-      if (!succeeded) return; // stop the pass on the first non-terminal outcome
+      if (!await _attemptUpload(record)) return;
+      // A successful upload always continues to the next record. A failed
+      // one also continues rather than stopping the pass — the record just
+      // moved to `failed` (retryable or not) and simply won't be picked up
+      // again until its backoff/never, so nothing is gained by giving up on
+      // the rest of the queue too. One broken record (e.g. a GPX with no GPS
+      // points at all) must not block every other queued activity behind it.
     }
   }
 
@@ -164,10 +168,12 @@ class SyncService {
     return lastAttemptAt.add(_backoffSchedule[index]);
   }
 
-  /// Returns true if the record reached a terminal state this attempt
-  /// (uploaded) — false covers every other outcome (still-retryable
-  /// failure, permanent rejection, or not signed in), each of which stops
-  /// the pass rather than moving on to the next queued record.
+  /// Returns false only when the pass as a whole should stop (not signed in
+  /// / no server configured — every other queued record would fail the same
+  /// way right now, so there's no point trying them). Returns true for every
+  /// other outcome, including a recorded failure: a broken record (retryable
+  /// or not) is done with for this pass either way, and must not block the
+  /// rest of the queue from being attempted.
   Future<bool> _attemptUpload(RunRecord record) async {
     await _setStatus(record.clientRunId, const SyncStatusUploading());
     _lastAttemptTimes[record.clientRunId] = _now();
@@ -196,6 +202,9 @@ class SyncService {
     } on ApiUnauthorizedException {
       await _authService.markSignedOutDueToAuthFailure();
       await _setStatus(record.clientRunId, const SyncStatusPending());
+      // Every other queued record would also fail with the same 401 right
+      // now, so stop the pass rather than churning through the rest of the
+      // queue for nothing.
       return false;
     } on ApiRejectedException catch (e) {
       final attempts = _bumpAttempts(record.clientRunId);
@@ -203,7 +212,7 @@ class SyncService {
         record.clientRunId,
         SyncStatusFailed(error: e.message, attempts: attempts, retryable: false),
       );
-      return false;
+      return true;
     } on ApiException catch (e) {
       // network / timeout / 5xx / 429 — retryable.
       final attempts = _bumpAttempts(record.clientRunId);
@@ -211,7 +220,7 @@ class SyncService {
         record.clientRunId,
         SyncStatusFailed(error: e.message, attempts: attempts, retryable: true),
       );
-      return false;
+      return true;
     }
   }
 
