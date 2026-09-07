@@ -170,5 +170,54 @@ void main() {
     // back to an acquiring state — a real fix already arrived.
     await Future<void>.delayed(testTimeout * 3);
     expect(c.read(liveRunControllerProvider), isA<LiveRunActive>());
+
+    await controller.stop();
+  });
+
+  test('Time (wall clock) advances while no segment is accepted, and freezes on pause', () async {
+    final service = _NeverEmittingLocationService();
+    final c = container(service);
+    final controller = c.read(liveRunControllerProvider.notifier)
+      ..acquiringTimeout = const Duration(seconds: 30)
+      ..tickInterval = testTimeout;
+    LiveRunActive active() =>
+        c.read(liveRunControllerProvider) as LiveRunActive;
+
+    await controller.start();
+    // Two fixes at the exact same spot: nothing for the engine to accept,
+    // so moving time and distance must stay at zero throughout.
+    final sample = LocationSample(
+      latitude: 51.5,
+      longitude: -0.1,
+      accuracyMeters: 5,
+      hasAccuracy: true,
+      timestamp: DateTime.now(),
+    );
+    service.emit(sample);
+    await pumpEventQueue();
+    expect(c.read(liveRunControllerProvider), isA<LiveRunActive>());
+
+    await Future<void>.delayed(testTimeout * 4);
+    service.emit(sample);
+    await pumpEventQueue();
+
+    final ticking = active().metrics;
+    expect(ticking.elapsedWallClock, greaterThan(Duration.zero));
+    expect(ticking.elapsed, Duration.zero);
+    expect(ticking.distanceMeters, 0);
+
+    controller.pause();
+    final atPause = active().metrics.elapsedWallClock;
+    await Future<void>.delayed(testTimeout * 4);
+    expect(active().metrics.elapsedWallClock, atPause);
+
+    controller.resume();
+    await Future<void>.delayed(testTimeout * 4);
+    expect(active().metrics.elapsedWallClock, greaterThan(atPause));
+
+    await controller.stop();
+    final finished = c.read(liveRunControllerProvider) as LiveRunFinished;
+    expect(finished.metrics.elapsedWallClock, greaterThan(atPause));
+    expect(finished.metrics.elapsed, Duration.zero);
   });
 }

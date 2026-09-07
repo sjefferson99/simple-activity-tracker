@@ -101,6 +101,52 @@ void main() {
     },
   );
 
+  test(
+    'addPoint writes accuracy/speed diagnostics as GPX extensions',
+    () async {
+      final file = File('${tempDir.path}/run.gpx');
+      final log = RunGpxLog(file);
+      final start = DateTime(2026, 1, 1, 9, 0, 0);
+
+      log.addPoint(
+        TrackPoint(
+          latitude: 51.5,
+          longitude: -0.1,
+          timestamp: start,
+          accuracyMeters: 12.5,
+          hasAccuracy: true,
+          speedMps: 1.7,
+          hasSpeed: true,
+        ),
+      );
+      log.addPoint(
+        TrackPoint(
+          latitude: 51.51,
+          longitude: -0.11,
+          timestamp: start.add(const Duration(seconds: 1)),
+          accuracyMeters: 40,
+          hasAccuracy: false,
+          hasSpeed: false,
+        ),
+      );
+      await log.flush();
+
+      final gpx = GpxReader().fromString(await file.readAsString());
+      final points = gpx.trks.first.trksegs.first.trkpts;
+      expect(points, hasLength(2));
+
+      expect(points[0].extensions['sat:accuracy'], '12.5');
+      expect(points[0].extensions['sat:has_accuracy'], 'true');
+      expect(points[0].extensions['sat:speed'], '1.7');
+      expect(points[0].extensions['sat:has_speed'], 'true');
+
+      expect(points[1].extensions['sat:accuracy'], '40.0');
+      expect(points[1].extensions['sat:has_accuracy'], 'false');
+      expect(points[1].extensions.containsKey('sat:speed'), isFalse);
+      expect(points[1].extensions['sat:has_speed'], 'false');
+    },
+  );
+
   test('flush is crash-safe: an interrupted temp write leaves the prior file intact', () async {
     final file = File('${tempDir.path}/run.gpx');
     final log = RunGpxLog(file);

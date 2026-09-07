@@ -4,6 +4,16 @@ import 'package:gpx/gpx.dart';
 
 import '../../domain/models/track_point.dart';
 
+/// Namespace for this app's own per-point GPX extensions (accuracy/speed
+/// diagnostics — see [RunGpxLog.addPoint]). A plain, unregistered URI is
+/// fine: nothing resolves it, it just has to be unique enough not to clash
+/// with a real extension schema. Unknown extensions are ignored by both the
+/// `gpx` package's own reader and the server's `gpxpy`-based parser, so
+/// adding these never breaks reading a file back.
+const String _extensionsNamespaceUri =
+    'https://simple-activity-tracker.local/gpx-extensions';
+const String _extensionsPrefix = 'sat';
+
 /// Builds a GPX 1.1 track for one run and flushes it to disk incrementally.
 ///
 /// Crash safety: every [flush] serializes the *entire* accumulated track
@@ -41,6 +51,18 @@ class RunGpxLog {
         lon: point.longitude,
         ele: point.elevationMeters,
         time: point.timestamp,
+        // Diagnostic-only extensions (docs/GPS-METRICS-PLAN.md step 1): the
+        // values MetricsEngine's acceptance gates actually decide on, which
+        // a plain lat/lon/ele/time GPX otherwise has no way to show. Written
+        // as strings — the `gpx` package's own extension map round-trips
+        // element text as strings on read, not typed values.
+        extensions: {
+          '$_extensionsPrefix:accuracy': '${point.accuracyMeters}',
+          '$_extensionsPrefix:has_accuracy': '${point.hasAccuracy}',
+          if (point.speedMps != null)
+            '$_extensionsPrefix:speed': '${point.speedMps}',
+          '$_extensionsPrefix:has_speed': '${point.hasSpeed}',
+        },
       ),
     );
   }
@@ -64,6 +86,7 @@ class RunGpxLog {
       gpx,
       pretty: true,
       compatibility: GpxCompatibilityMode.gpx11,
+      namespaces: const {_extensionsPrefix: _extensionsNamespaceUri},
     );
 
     final tempFile = File('${_targetFile.path}.tmp');

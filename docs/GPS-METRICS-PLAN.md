@@ -10,6 +10,13 @@ Branch state at handoff (commit `0a31137`):
 - **Working, verified on the S10, keep:** `forceLocationManager: true` +
   20s acquiring timeout (`LiveRunAcquiring(timedOut:)`) for the Wi-Fi-off hang;
   `hasAccuracy` plumbed `LocationSample → TrackPoint → MetricsEngine`.
+  **Correction (2026-09-07, from step 1's first captures):** the `hasAccuracy`
+  plumbing was *not* working — `geolocator_android` 5.0.3 drops every `has*`
+  flag in `AndroidPosition.fromMap`, so the gate rejected every fix on
+  Android. This, not the floor, is why the tiles read 0 on this branch (§1.3's
+  first candidate was close but the mechanism was the flag, not the 25 m
+  cutoff — accuracy was 3–20 m throughout). Worked around in
+  `sampleFromPosition()`; see CLAUDE.md's #49 entry.
 - **Unverified / suspect:** everything in `MetricsEngine` around the noise floor
   (lowered 3m → 1.2m) and the `_recentPoints` / `_expireRecentPointsIfStale` changes.
 - **Symptom still open:** on a real outdoor walk/jog, the big speed readout is

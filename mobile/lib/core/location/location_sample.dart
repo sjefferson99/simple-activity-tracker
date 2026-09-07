@@ -5,9 +5,16 @@ class LocationSample {
   final double longitude;
   final double? elevationMeters;
 
-  /// Speed reported directly by the GPS fix, in meters/second. Null when
-  /// the platform doesn't provide it for this sample.
+  /// Speed as reported by the platform for this fix, in meters/second — the
+  /// raw value, which on Android is `0.0` both for "stationary" and for
+  /// "not measured". Null only when the platform gave nothing usable at all.
   final double? speedMps;
+
+  /// Whether [speedMps] is unambiguously a real measurement. False for a
+  /// `0.0` that may or may not have been measured — see `sampleFromPosition`
+  /// in `geolocator_location_service.dart` for why the platform's own flag
+  /// can't be relied on.
+  final bool hasSpeed;
 
   final double accuracyMeters;
 
@@ -27,5 +34,6 @@ class LocationSample {
     required this.timestamp,
     this.elevationMeters,
     this.speedMps,
+    this.hasSpeed = false,
   });
 }

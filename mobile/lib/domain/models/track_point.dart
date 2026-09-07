@@ -14,6 +14,16 @@ class TrackPoint {
   /// real GPS fix) don't spuriously fail the accuracy-measured check.
   final bool hasAccuracy;
 
+  /// Raw platform-reported speed in meters/second; a `0.0` is only a
+  /// trustworthy "stationary" when [hasSpeed] is true — see
+  /// [LocationSample.speedMps].
+  final double? speedMps;
+
+  /// See [LocationSample.hasSpeed]. Defaults to false so a [TrackPoint] built
+  /// without an explicit speed (tests, GPX round-trips) doesn't imply a
+  /// measured-but-null speed.
+  final bool hasSpeed;
+
   const TrackPoint({
     required this.latitude,
     required this.longitude,
@@ -21,6 +31,8 @@ class TrackPoint {
     required this.accuracyMeters,
     this.hasAccuracy = true,
     this.elevationMeters,
+    this.speedMps,
+    this.hasSpeed = false,
   });
 
   factory TrackPoint.fromSample(LocationSample sample) => TrackPoint(
@@ -30,5 +42,7 @@ class TrackPoint {
         timestamp: sample.timestamp,
         accuracyMeters: sample.accuracyMeters,
         hasAccuracy: sample.hasAccuracy,
+        speedMps: sample.speedMps,
+        hasSpeed: sample.hasSpeed,
       );
 }
