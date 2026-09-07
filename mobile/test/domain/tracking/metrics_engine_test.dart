@@ -10,7 +10,10 @@ TrackPoint _pointAtMeters(
   double metersFromOrigin,
   DateTime timestamp, {
   double accuracyMeters = 5,
+  bool hasAccuracy = true,
   double? elevationMeters,
+  double? speedMps,
+  bool hasSpeed = false,
 }) {
   final degrees = metersFromOrigin / 111195;
   return TrackPoint(
@@ -18,7 +21,10 @@ TrackPoint _pointAtMeters(
     longitude: degrees,
     timestamp: timestamp,
     accuracyMeters: accuracyMeters,
+    hasAccuracy: hasAccuracy,
     elevationMeters: elevationMeters,
+    speedMps: speedMps,
+    hasSpeed: hasSpeed,
   );
 }
 
@@ -30,7 +36,6 @@ void main() {
 
       expect(engine.metrics.distanceMeters, 0);
       expect(engine.metrics.elapsed, Duration.zero);
-      expect(engine.metrics.currentSpeedMps, isNull);
       expect(engine.metrics.avgSpeedMps, isNull);
       expect(engine.metrics.completedSplits, isEmpty);
     });
@@ -98,6 +103,48 @@ void main() {
 
       // Distance/time measured from the last *accepted* point (at 0m, t=0),
       // not from the rejected 5000m fix.
+      expect(engine.metrics.distanceMeters, closeTo(50, 1));
+      expect(engine.metrics.elapsed, const Duration(seconds: 20));
+    });
+
+    test(
+      'drops a point with hasAccuracy false even if accuracyMeters looks good',
+      () {
+        final engine = MetricsEngine();
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        engine.addPoint(_pointAtMeters(0, start));
+        // Platform never actually measured accuracy for this fix — a great
+        // accuracyMeters value here is a placeholder, not a real reading.
+        engine.addPoint(
+          _pointAtMeters(
+            5000,
+            start.add(const Duration(seconds: 10)),
+            accuracyMeters: 1,
+            hasAccuracy: false,
+          ),
+        );
+
+        expect(engine.metrics.distanceMeters, 0);
+        expect(engine.metrics.elapsed, Duration.zero);
+      },
+    );
+
+    test('resumes correctly after a hasAccuracy-false point using the last good fix', () {
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      engine.addPoint(_pointAtMeters(0, start));
+      engine.addPoint(
+        _pointAtMeters(
+          5000,
+          start.add(const Duration(seconds: 10)),
+          accuracyMeters: 1,
+          hasAccuracy: false,
+        ),
+      );
+      engine.addPoint(
+        _pointAtMeters(50, start.add(const Duration(seconds: 20))),
+      );
+
       expect(engine.metrics.distanceMeters, closeTo(50, 1));
       expect(engine.metrics.elapsed, const Duration(seconds: 20));
     });
@@ -191,24 +238,6 @@ void main() {
     );
   });
 
-  group('current speed window', () {
-    test('still reports a speed when fixes arrive slower than the window', () {
-      final engine = MetricsEngine();
-      final start = DateTime(2026, 1, 1, 0, 0, 0);
-      // 4s apart, wider than the 3s smoothing window.
-      engine.addPoint(_pointAtMeters(0, start));
-      engine.addPoint(
-        _pointAtMeters(20, start.add(const Duration(seconds: 4))),
-      );
-      engine.addPoint(
-        _pointAtMeters(40, start.add(const Duration(seconds: 8))),
-      );
-
-      expect(engine.metrics.currentSpeedMps, isNotNull);
-      expect(engine.metrics.currentSpeedMps, closeTo(5, 0.5));
-    });
-  });
-
   group('implausible speed filtering', () {
     test('drops a segment implying an impossible running speed', () {
       final engine = MetricsEngine();
@@ -294,29 +323,6 @@ void main() {
       expect(engine.metrics.elapsed, const Duration(seconds: 2));
     });
 
-    test('re-anchoring does not leave current speed spanning the jump', () {
-      // The speed window is a separate accumulator from distance/elapsed: if
-      // re-anchoring leaves the pre-jump fix in it, the live speed tile reads
-      // the teleport's implied speed (thousands of km/h) for several seconds
-      // until the window refills.
-      final engine = MetricsEngine();
-      final start = DateTime(2026, 1, 1, 0, 0, 0);
-      engine.addPoint(_pointAtMeters(0, start));
-      engine.addPoint(
-        _pointAtMeters(65000, start.add(const Duration(seconds: 19))),
-      );
-      engine.addPoint(
-        _pointAtMeters(65010, start.add(const Duration(seconds: 20))),
-      );
-
-      expect(engine.metrics.currentSpeedMps, isNull);
-
-      engine.addPoint(
-        _pointAtMeters(65020, start.add(const Duration(seconds: 21))),
-      );
-      expect(engine.metrics.currentSpeedMps, closeTo(10, 0.5));
-    });
-
     test('does not credit a drifting bad-fix cluster as real distance', () {
       // Two rejected fixes that agree with each other identify the runner's
       // position, but the drift *between* them is the glitch's own noise â€”
@@ -390,18 +396,24 @@ void main() {
     });
   });
 
-  group('noise floor', () {
+  group('noise floor (fallback stationary test, no chip speed available)', () {
     test('does not credit distance or elapsed time to sub-floor wander', () {
       final engine = MetricsEngine();
       final start = DateTime(2026, 1, 1, 0, 0, 0);
-      // Indoor multipath: fixes drift by ~2m/s while the phone is
-      // stationary. Well inside the running-mode plausibility cap (12 m/s),
-      // so the teleport filter alone would accept every one of these as
-      // real motion.
+      // Indoor multipath: fixes drift by well under a metre per second while
+      // the phone is stationary. Well inside the running-mode plausibility
+      // cap (12 m/s), so the teleport filter alone would accept every one
+      // of these as real motion.
       engine.addPoint(_pointAtMeters(0, start));
-      engine.addPoint(_pointAtMeters(2, start.add(const Duration(seconds: 1))));
-      engine.addPoint(_pointAtMeters(1, start.add(const Duration(seconds: 2))));
-      engine.addPoint(_pointAtMeters(2.5, start.add(const Duration(seconds: 3))));
+      engine.addPoint(
+        _pointAtMeters(0.8, start.add(const Duration(seconds: 1))),
+      );
+      engine.addPoint(
+        _pointAtMeters(0.3, start.add(const Duration(seconds: 2))),
+      );
+      engine.addPoint(
+        _pointAtMeters(1.0, start.add(const Duration(seconds: 3))),
+      );
 
       expect(engine.metrics.distanceMeters, 0);
       expect(engine.metrics.elapsed, Duration.zero);
@@ -412,9 +424,9 @@ void main() {
       final engine = MetricsEngine();
       final start = DateTime(2026, 1, 1, 0, 0, 0);
       engine.addPoint(_pointAtMeters(0, start));
-      engine.addPoint(_pointAtMeters(5, start.add(const Duration(seconds: 1))));
+      engine.addPoint(_pointAtMeters(2, start.add(const Duration(seconds: 1))));
 
-      expect(engine.metrics.distanceMeters, closeTo(5, 0.1));
+      expect(engine.metrics.distanceMeters, closeTo(2, 0.1));
       expect(engine.metrics.elapsed, const Duration(seconds: 1));
     });
 
@@ -423,16 +435,359 @@ void main() {
       final start = DateTime(2026, 1, 1, 0, 0, 0);
       engine.addPoint(_pointAtMeters(0, start));
       // Stationary indoor wander for a few seconds.
-      engine.addPoint(_pointAtMeters(1.5, start.add(const Duration(seconds: 1))));
-      engine.addPoint(_pointAtMeters(0.5, start.add(const Duration(seconds: 2))));
+      engine.addPoint(
+        _pointAtMeters(0.9, start.add(const Duration(seconds: 1))),
+      );
+      engine.addPoint(
+        _pointAtMeters(0.3, start.add(const Duration(seconds: 2))),
+      );
       // The runner actually starts moving.
-      engine.addPoint(_pointAtMeters(50, start.add(const Duration(seconds: 12))));
+      engine.addPoint(
+        _pointAtMeters(50, start.add(const Duration(seconds: 12))),
+      );
 
-      // Measured from the last wander point (0.5m, t=2s), not from the very
+      // Measured from the last wander point (0.3m, t=2s), not from the very
       // first fix — the anchor keeps advancing through the noise.
-      expect(engine.metrics.distanceMeters, closeTo(49.5, 0.5));
+      expect(engine.metrics.distanceMeters, closeTo(49.7, 0.5));
       expect(engine.metrics.elapsed, const Duration(seconds: 10));
     });
+
+    test('walking pace at ~1s fixes clears the floor even though many '
+        'individual steps are close to it', () {
+      // #49: real on-device capture of a ~1.7 m/s walk averaged ~1.7m
+      // between fixes; a naive "just raise the floor" fix would have
+      // swallowed most of a genuine walk as noise. Modelled here as a
+      // steady 1.7 m/s pace.
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      for (var i = 0; i <= 20; i++) {
+        engine.addPoint(
+          _pointAtMeters(i * 1.7, start.add(Duration(seconds: i))),
+        );
+      }
+
+      expect(engine.metrics.distanceMeters, greaterThan(30));
+    });
+  });
+
+  group('step 3a: chip-speed stationary gate (primary path)', () {
+    test('a noisy stationary blip ringing for two fixes credits only a small '
+        'residual, not the ~6m the old position-floor gate let through', () {
+      // Real on-device indoor capture: phone motionless on a table, chip
+      // speed rang 4.32, then 4.34 m/s for two consecutive fixes (not just
+      // one) before decaying back down through 0.71 and 0.62 m/s. The old
+      // position-floor gate accepted this because one segment happened to
+      // exceed 1.2m, credited ~6m. A 2-fix confirmation still let ~5m of
+      // this ringing through in testing. 3 consecutive fixes reduce it to
+      // ~1.2m — the decaying tail (0.71, 0.62) is still above the 0.6
+      // enter threshold, so it can complete the confirmation streak even
+      // though it's the same noise event settling, not fresh motion.
+      // Fully eliminating that would need the gate to also check for real
+      // position displacement, not just speed; not worth the complexity
+      // for this residual (docs/GPS-METRICS-PLAN.md's "reasonably good"
+      // bar — see project decision 2026-09-07).
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      var t = 0;
+      void point(double meters, double speed) {
+        engine.addPoint(
+          _pointAtMeters(
+            meters,
+            start.add(Duration(seconds: t)),
+            speedMps: speed,
+            hasSpeed: true,
+          ),
+        );
+        t++;
+      }
+
+      point(0, 0.0);
+      point(0.54, 4.32);
+      point(2.76, 4.34);
+      point(4.91, 0.71);
+      point(5.74, 0.62);
+      point(6.11, 0.24);
+
+      expect(engine.metrics.distanceMeters, lessThan(2));
+    });
+
+    test('three consecutive fixes at/above the enter threshold credit motion, '
+        'lagging by the segment that completes the confirmation', () {
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      var t = 0;
+      void point(double meters, double speed) {
+        engine.addPoint(
+          _pointAtMeters(
+            meters,
+            start.add(Duration(seconds: t)),
+            speedMps: speed,
+            hasSpeed: true,
+          ),
+        );
+        t++;
+      }
+
+      point(0, 0.0);
+      // Real walking pace from an on-device capture: ~1.0-1.35 m/s.
+      point(1.2, 1.16); // streak 1 - not yet moving, segment not credited
+      point(2.4, 1.15); // streak 2 - not yet moving, segment not credited
+      point(3.6, 1.20); // streak 3 confirms moving as of *this* fix, but the
+      // segment ending on it is judged by the pre-update verdict (still not
+      // moving) - so it's not credited either; only the *next* segment,
+      // after the verdict has actually flipped, is the first one credited.
+      point(4.8, 1.18); // now moving - this segment is credited
+
+      // Only the last segment (3.6m -> 4.8m) is credited — three fixes worth
+      // of walk-off are the deliberate cost of not crediting on a
+      // single/double noisy fix (the very bug this gate exists to fix).
+      expect(engine.metrics.distanceMeters, closeTo(1.2, 0.1));
+    });
+
+    test(
+      'a real walk-off after a stationary stretch ramps through the enter '
+      'threshold, matching a genuine on-device resume-from-pause capture',
+      () {
+        // Real capture: resumed from a pause stationary (chip speed
+        // 0.02-0.08 m/s for 4 fixes), then a genuine walk-off ramped
+        // 0.51 -> 0.96 -> 1.18 -> 1.25 m/s over the next 4 fixes. The gate
+        // must start crediting once 3 consecutive fixes clear 0.6 m/s.
+        final engine = MetricsEngine();
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        var t = 0;
+        void point(double meters, double speed) {
+          engine.addPoint(
+            _pointAtMeters(
+              meters,
+              start.add(Duration(seconds: t)),
+              speedMps: speed,
+              hasSpeed: true,
+            ),
+          );
+          t++;
+        }
+
+        point(0, 0.06);
+        point(0.07, 0.08);
+        point(0.13, 0.02);
+        point(0.19, 0.08);
+        // Ramp-up begins: 0.51 is below the enter threshold, so it doesn't
+        // start the confirmation streak.
+        point(1.28, 0.51);
+        point(2.78, 0.96); // streak 1
+        point(4.63, 1.18); // streak 2
+        point(6.24, 1.25); // streak 3 confirms moving as of this fix
+        point(7.9, 1.24); // moving - this segment is the first credited one
+
+        expect(engine.metrics.distanceMeters, greaterThan(0));
+      },
+    );
+
+    test('hysteresis keeps crediting through a dip below the enter threshold '
+        'once already moving', () {
+      // Once moving, only a drop below the lower exit threshold (0.4)
+      // should stop crediting — pace jitter that dips just under the enter
+      // threshold (0.6) but stays above exit must not flicker distance
+      // on/off mid-stride.
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      var t = 0;
+      void point(double meters, double speed) {
+        engine.addPoint(
+          _pointAtMeters(
+            meters,
+            start.add(Duration(seconds: t)),
+            speedMps: speed,
+            hasSpeed: true,
+          ),
+        );
+        t++;
+      }
+
+      point(0, 1.2);
+      point(1.2, 1.2);
+      point(2.4, 1.2);
+      point(3.6, 1.2); // confirms moving as of this fix
+      final distanceOnceMoving = engine.metrics.distanceMeters;
+      expect(
+        distanceOnceMoving,
+        0,
+        reason:
+            'nothing credited yet — the '
+            'verdict only flips on this fix, judging none of the segments '
+            'seen so far',
+      );
+      // Dips to 0.5 - below the enter threshold but above the exit one.
+      point(4.1, 0.5);
+
+      expect(
+        engine.metrics.distanceMeters,
+        greaterThan(distanceOnceMoving),
+        reason:
+            'a dip that stays above the exit threshold must still be '
+            'credited, not treated as a stop',
+      );
+    });
+
+    test(
+      'a genuine stop (speed drops below the exit threshold) stops crediting',
+      () {
+        final engine = MetricsEngine();
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        var t = 0;
+        void point(double meters, double speed) {
+          engine.addPoint(
+            _pointAtMeters(
+              meters,
+              start.add(Duration(seconds: t)),
+              speedMps: speed,
+              hasSpeed: true,
+            ),
+          );
+          t++;
+        }
+
+        point(0, 1.2);
+        point(1.2, 1.2);
+        point(2.4, 1.2); // confirms moving
+        // Genuinely stops — below the exit threshold, no confirmation needed.
+        point(2.5, 0.1);
+
+        final distanceAtStop = engine.metrics.distanceMeters;
+        // Further stationary wander must not add any more distance.
+        point(2.7, 0.15);
+
+        expect(engine.metrics.distanceMeters, distanceAtStop);
+      },
+    );
+
+    test('falls back to the position noise floor when the platform reports no '
+        'usable speed for a fix', () {
+      // A mix of speed-bearing and speed-less fixes within the same run —
+      // the gate must fall back to the position floor per-fix, not for the
+      // whole run.
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      engine.addPoint(_pointAtMeters(0, start));
+      // No speed reported: falls back to the 1.2m floor. This segment is
+      // under it, so it's rejected regardless of geometry alone.
+      engine.addPoint(
+        _pointAtMeters(0.5, start.add(const Duration(seconds: 1))),
+      );
+
+      expect(engine.metrics.distanceMeters, 0);
+    });
+
+    test('resetSegmentAnchor clears the moving/stationary verdict', () {
+      // Without a reset, a pause/resume could inherit "already moving" from
+      // before the pause and credit the first post-resume segment even if
+      // its own chip speed is still ambiguous.
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      var t = 0;
+      void point(double meters, double speed) {
+        engine.addPoint(
+          _pointAtMeters(
+            meters,
+            start.add(Duration(seconds: t)),
+            speedMps: speed,
+            hasSpeed: true,
+          ),
+        );
+        t++;
+      }
+
+      point(0, 1.2);
+      point(1.2, 1.2);
+      point(2.4, 1.2);
+      point(3.6, 1.2); // confirms moving as of this fix
+      point(4.8, 1.2); // now moving - this segment is credited
+      expect(engine.metrics.distanceMeters, greaterThan(0));
+
+      engine.resetSegmentAnchor();
+
+      final resumeTime = start.add(const Duration(minutes: 5));
+      // First post-resume fix establishes the new anchor; the second reports
+      // a speed below the enter threshold, so — starting fresh, not still
+      // "moving" from before the pause — it must not be credited.
+      engine.addPoint(
+        _pointAtMeters(100, resumeTime, speedMps: 0.3, hasSpeed: true),
+      );
+      final distanceAfterAnchor = engine.metrics.distanceMeters;
+      engine.addPoint(
+        _pointAtMeters(
+          100.3,
+          resumeTime.add(const Duration(seconds: 1)),
+          speedMps: 0.3,
+          hasSpeed: true,
+        ),
+      );
+
+      expect(engine.metrics.distanceMeters, distanceAfterAnchor);
+    });
+  });
+
+  group('#49: a real out-and-back route is never mistaken for GPS drift', () {
+    // A "straightness" filter (net displacement over a window vs. total path
+    // walked in it) was tried and reverted here: a genuine on-device capture
+    // of an ordinary out-and-back walk has the *identical* signature to
+    // indoor multipath drift-then-snap-back — low net displacement relative
+    // to path length, because the walker turns around — and that filter
+    // rejected the whole walk, reporting 0 distance/elapsed throughout. Any
+    // real loop, out-and-back, or lap course looks like this; position data
+    // alone can't tell it apart from a bad fix snapping back. These tests
+    // guard against reintroducing that class of filter without solving this.
+    test('walking out and back to the start credits real distance', () {
+      final engine = MetricsEngine();
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      var t = 0;
+      void point(double meters) {
+        engine.addPoint(
+          _pointAtMeters(meters, start.add(Duration(seconds: t))),
+        );
+        t++;
+      }
+
+      // Walk out ~50m at a real walking pace (5m/s steps, clear of the 3m
+      // noise floor)...
+      for (var m = 0; m <= 50; m += 5) {
+        point(m.toDouble());
+      }
+      // ...then walk back to (near) the start.
+      for (var m = 45; m >= 0; m -= 5) {
+        point(m.toDouble());
+      }
+
+      // Every leg was a genuine plausible-speed, above-noise-floor segment,
+      // so all of it should be credited — net displacement ending up near
+      // zero must not suppress any of it.
+      expect(engine.metrics.distanceMeters, greaterThan(90));
+    });
+
+    test(
+      'a short there-and-back loop (a lap course) still accrues distance',
+      () {
+        final engine = MetricsEngine();
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        var t = 0;
+        void point(double meters) {
+          engine.addPoint(
+            _pointAtMeters(meters, start.add(Duration(seconds: t))),
+          );
+          t++;
+        }
+
+        // Several short back-and-forth laps, each leg a real walking-speed
+        // segment (well clear of the 3m noise floor) — net displacement
+        // across the whole thing is ~0.
+        for (var lap = 0; lap < 4; lap++) {
+          point(10);
+          point(0);
+        }
+
+        expect(engine.metrics.distanceMeters, greaterThan(65));
+      },
+    );
   });
 
   group('ActivityMode.cycling raises both plausibility thresholds', () {

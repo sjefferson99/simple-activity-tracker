@@ -11,7 +11,14 @@ class LiveRunIdle extends LiveRunState {
 }
 
 class LiveRunAcquiring extends LiveRunState {
-  const LiveRunAcquiring();
+  /// True once no fix has arrived within LiveRunController's acquiring
+  /// timeout. GPS may never get a fix at all (indoors, hardware issue, or
+  /// #49's Wi-Fi-off hang) — this turns an indefinite silent spinner into an
+  /// actionable message, without taking away the Cancel control this state
+  /// already had.
+  final bool timedOut;
+
+  const LiveRunAcquiring({this.timedOut = false});
 }
 
 /// Covers both [RunPhase.tracking] and [RunPhase.paused] — [phase]

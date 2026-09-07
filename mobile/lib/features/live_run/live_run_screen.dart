@@ -262,6 +262,8 @@ class _StatusLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final message = switch (state) {
       LiveRunIdle() => 'Press Start to begin tracking',
+      LiveRunAcquiring(timedOut: true) =>
+        'Still waiting for GPS — check Location mode and Wi-Fi',
       LiveRunAcquiring() => 'Acquiring GPS…',
       LiveRunActive(phase: RunPhase.paused) => 'Paused',
       LiveRunActive(:final accuracyMeters) =>
@@ -337,6 +339,7 @@ class _MetricGrid extends StatelessWidget {
                   flex: 2,
                   child: _MetricTile(
                     label: spec.label,
+                    description: spec.description,
                     value: spec.valueOf(metrics, null, useKmh),
                     unit: unit,
                   ),
@@ -351,11 +354,13 @@ class _MetricGrid extends StatelessWidget {
 
 class _MetricTile extends StatelessWidget {
   final String label;
+  final String description;
   final String value;
   final double unit;
 
   const _MetricTile({
     required this.label,
+    required this.description,
     required this.value,
     required this.unit,
   });
@@ -364,40 +369,52 @@ class _MetricTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Padding(
-      padding: EdgeInsets.symmetric(horizontal: unit * 0.5),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Every tile shares one size off the screen's type scale, so the
-          // metrics read as peers and don't resize as their values change.
-          // scaleDown is the safety net for an unusually wide value on a
-          // narrow screen, not the thing choosing the size.
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              value,
-              maxLines: 1,
-              style: TextStyle(
-                fontSize: unit * 7,
-                fontWeight: FontWeight.w400,
-                height: 1.1,
-                color: theme.colorScheme.onSurface,
+    // Tap (not long-press, which is reserved for Stop) shows what the
+    // number measures, then fades — no modal to dismiss mid-run.
+    return Tooltip(
+      message: description,
+      triggerMode: TooltipTriggerMode.tap,
+      showDuration: const Duration(seconds: 5),
+      margin: const EdgeInsets.symmetric(horizontal: 24),
+      textStyle: TextStyle(
+        fontSize: unit * 2.6,
+        color: theme.colorScheme.onInverseSurface,
+      ),
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: unit * 0.5),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Every tile shares one size off the screen's type scale, so the
+            // metrics read as peers and don't resize as their values change.
+            // scaleDown is the safety net for an unusually wide value on a
+            // narrow screen, not the thing choosing the size.
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                value,
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: unit * 7,
+                  fontWeight: FontWeight.w400,
+                  height: 1.1,
+                  color: theme.colorScheme.onSurface,
+                ),
               ),
             ),
-          ),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              label,
-              maxLines: 1,
-              style: TextStyle(
-                fontSize: unit * 2.6,
-                color: theme.colorScheme.onSurfaceVariant,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: unit * 2.6,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -46,7 +46,6 @@ void main() {
     final metrics = LiveMetrics(
       elapsed: const Duration(seconds: 900),
       distanceMeters: 3000.0,
-      currentSpeedMps: null,
       avgSpeedMps: 3.33,
       completedSplits: const [
         Split(index: 1, duration: Duration(seconds: 300), avgSpeedMps: 3.33),

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:meta/meta.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:uuid/uuid.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -24,10 +25,16 @@ import '../../domain/models/sync_status.dart';
 import '../../domain/models/track_point.dart';
 import '../../domain/tracking/activity_mode.dart';
 import '../../domain/tracking/metrics_engine.dart';
+import '../../domain/tracking/run_clock.dart';
 import '../../domain/tracking/run_phase.dart';
 import 'live_run_state.dart';
 
 const _gpxFlushInterval = Duration(seconds: 5);
+
+/// How long to wait for a first GPS fix before LiveRunAcquiring surfaces a
+/// message instead of spinning silently forever (#49) — GPS may never get a
+/// fix at all (indoors, hardware issue, or a Wi-Fi-off provider stall).
+const _acquiringTimeout = Duration(seconds: 20);
 
 String get _sourcePlatform {
   if (Platform.isAndroid) return 'android';
@@ -43,11 +50,24 @@ final liveRunControllerProvider =
     NotifierProvider<LiveRunController, LiveRunState>(LiveRunController.new);
 
 class LiveRunController extends Notifier<LiveRunState> {
+  /// Overridable only by tests, which need a much shorter wait than the real
+  /// 20s to exercise the acquiring-timeout path without a slow test run.
+  @visibleForTesting
+  Duration acquiringTimeout = _acquiringTimeout;
+
+  /// How often the Time tile is refreshed while tracking, independent of
+  /// GPS fixes. Overridable only by tests.
+  @visibleForTesting
+  Duration tickInterval = const Duration(seconds: 1);
+
   StreamSubscription<LocationSample>? _subscription;
   TrackPoint? _previousPoint;
   MetricsEngine? _metricsEngine;
+  RunClock? _runClock;
   RunGpxLog? _gpxLog;
   Timer? _flushTimer;
+  Timer? _acquiringTimeoutTimer;
+  Timer? _tickTimer;
   File? _currentGpxFile;
   final RunExportService _exportService = RunExportService();
 
@@ -113,6 +133,7 @@ class LiveRunController extends Notifier<LiveRunState> {
 
     _clientRunId = const Uuid().v4();
     _startedAt = DateTime.now().toUtc();
+    _runClock = RunClock(startedAt: _startedAt!);
 
     _previousPoint = null;
     // Fixed for the run's duration — read once here, not from a live
@@ -136,25 +157,51 @@ class LiveRunController extends Notifier<LiveRunState> {
     await WakelockPlus.enable();
 
     state = const LiveRunAcquiring();
+    _acquiringTimeoutTimer = Timer(acquiringTimeout, _onAcquiringTimeout);
     _subscription = service.stream.listen(_onSample);
+    // The Time tile must keep counting when no fix is accepted — or none
+    // arrives at all — so it can't ride on the sample stream alone.
+    _tickTimer = Timer.periodic(tickInterval, (_) => _onTick());
+  }
+
+  void _onTick() {
+    // Nothing to refresh while acquiring (no tiles yet) or paused (the clock
+    // is frozen, so a re-emit would be a no-op).
+    if (_phase != RunPhase.tracking) return;
+    final current = state as LiveRunActive;
+    _emitActive(
+      RunPhase.tracking,
+      speedMps: current.speedMps,
+      accuracyMeters: current.accuracyMeters,
+    );
+  }
+
+  void _onAcquiringTimeout() {
+    // The subscription may have delivered a fix in the same event-loop turn
+    // the timer fires, or the run may already have been stopped/cancelled —
+    // only touch state if it's still genuinely waiting.
+    if (state is! LiveRunAcquiring) return;
+    state = const LiveRunAcquiring(timedOut: true);
   }
 
   void pause() {
     if (_phase != RunPhase.tracking) return;
     _previousPoint = null;
+    _runClock?.pause(DateTime.now().toUtc());
     _emitActive(RunPhase.paused, speedMps: null, accuracyMeters: null);
   }
 
   void resume() {
     if (_phase != RunPhase.paused) return;
     _previousPoint = null;
+    _runClock?.resume(DateTime.now().toUtc());
     _metricsEngine?.resetSegmentAnchor();
     _gpxLog?.startNewSegment();
     _emitActive(RunPhase.tracking, speedMps: null, accuracyMeters: null);
   }
 
   Future<void> stop() async {
-    final metrics = _metricsEngine?.metrics ?? LiveMetrics.zero;
+    final metrics = _currentMetrics();
     final gpxFile = _currentGpxFile;
     final clientRunId = _clientRunId;
     final startedAt = _startedAt;
@@ -192,6 +239,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     }
     _clientRunId = null;
     _startedAt = null;
+    _runClock = null;
     _activityMode = null;
 
     state = LiveRunFinished(
@@ -238,10 +286,14 @@ class LiveRunController extends Notifier<LiveRunState> {
   }
 
   Future<void> _disposeRun() async {
-    // Cancel the timer first and synchronously, so no new flush can start
-    // after teardown begins (matters on the un-awaited onDispose path).
+    // Cancel the timers first and synchronously, so no new flush/timeout can
+    // fire after teardown begins (matters on the un-awaited onDispose path).
     _flushTimer?.cancel();
     _flushTimer = null;
+    _acquiringTimeoutTimer?.cancel();
+    _acquiringTimeoutTimer = null;
+    _tickTimer?.cancel();
+    _tickTimer = null;
     await _subscription?.cancel();
     _subscription = null;
 
@@ -258,6 +310,11 @@ class LiveRunController extends Notifier<LiveRunState> {
 
   void _onSample(LocationSample sample) {
     if (_phase == RunPhase.paused) return;
+
+    // The first fix has arrived — the acquiring timeout no longer applies,
+    // whether or not it already fired.
+    _acquiringTimeoutTimer?.cancel();
+    _acquiringTimeoutTimer = null;
 
     final point = TrackPoint.fromSample(sample);
     final speed = sample.speedMps ?? _fallbackSpeed(point);
@@ -294,6 +351,16 @@ class LiveRunController extends Notifier<LiveRunState> {
     return speedMpsBetween(previous, point);
   }
 
+  /// The engine's point-driven metrics with the wall-clock Time stamped in.
+  LiveMetrics _currentMetrics() {
+    final base = _metricsEngine?.metrics ?? LiveMetrics.zero;
+    final clock = _runClock;
+    if (clock == null) return base;
+    return base.copyWith(
+      elapsedWallClock: clock.elapsed(DateTime.now().toUtc()),
+    );
+  }
+
   void _emitActive(
     RunPhase phase, {
     required double? speedMps,
@@ -307,7 +374,7 @@ class LiveRunController extends Notifier<LiveRunState> {
       phase: phase,
       speedMps: speedMps,
       accuracyMeters: accuracyMeters ?? previousAccuracy,
-      metrics: _metricsEngine?.metrics ?? LiveMetrics.zero,
+      metrics: _currentMetrics(),
       // Fixed for the run's whole duration (see start()); _activityMode is
       // only ever null before a run has started, at which point nothing
       // reaches LiveRunActive.

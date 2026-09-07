@@ -6,7 +6,6 @@ import 'activity_mode.dart';
 
 const double _splitDistanceMeters = 1000;
 const double _maxAcceptableAccuracyMeters = 25;
-const Duration _currentSpeedWindow = Duration(seconds: 3);
 
 /// The two plausibility thresholds [MetricsEngine] checks every accepted
 /// segment against — see [MetricsEngine._isPlausibleSegment]. Per-[ActivityMode]
@@ -60,17 +59,105 @@ const Duration _pendingCandidateTtl = Duration(seconds: 30);
 /// worth of travel between fixes.
 const double _minReanchorMotionMeters = 2;
 
-/// Below this, a segment is treated as GPS noise rather than motion — see
-/// [MetricsEngine._isNoiseFloorSegment]. Indoors, reflected/multipath fixes
-/// routinely wander a few meters between updates while the phone is
-/// completely stationary; that wander implies only 1-3 m/s, comfortably
-/// inside even running mode's plausibility cap, so the existing
-/// teleport-oriented checks never catch it. This is deliberately a small
-/// fixed floor rather than a multiple of reported accuracy: accuracy on
-/// consumer GPS is itself an unreliable estimate indoors (often
-/// overconfident), so scaling off it would let exactly the wander this is
-/// meant to catch back in.
-const double _noiseFloorMeters = 3;
+/// Below this, a segment is treated as GPS noise rather than motion — the
+/// **fallback** stationary test for when a fix carries no usable chip speed
+/// (see [_StationaryDetector]). Indoors, reflected/multipath fixes routinely
+/// wander between updates while the phone is completely stationary; that
+/// wander implies a low but non-zero speed, comfortably inside even running
+/// mode's plausibility cap, so the teleport-oriented checks never catch it.
+/// Deliberately a small fixed floor rather than a multiple of reported
+/// accuracy: accuracy on consumer GPS is itself an unreliable estimate
+/// indoors (often overconfident), so scaling off it would let exactly the
+/// wander this is meant to catch back in.
+///
+/// #49: originally 3m, but real on-device capture of an ordinary walk
+/// (~1.7 m/s, ~1s fixes) showed almost every real step is *itself* under 3m
+/// — the floor was silently swallowing genuine walking pace, not just GPS
+/// noise. Lowered to 1.2m: comfortably credits that walk's real segments
+/// (only a small fraction still fall under 1.2m) while a separate near-
+/// stationary capture stayed at exactly zero distance down to 1.0m.
+const double _noiseFloorMeters = 1.2;
+
+/// The chip-speed stationary gate (docs/GPS-METRICS-PLAN.md step 3a).
+///
+/// A segment's *position-implied* speed can't tell genuine drift (indoor
+/// multipath ramping the reported position while the phone doesn't move)
+/// apart from a genuine turnaround — both have long stretches where every
+/// individual hop is small and plausible. But GNSS Doppler speed comes from
+/// carrier frequency shift, not from successive position fixes, so multipath
+/// that moves the *position* does not produce a matching *speed*: real
+/// on-device captures show stationary/indoor chip speed at 0.0–0.2 m/s
+/// (occasionally spiking to several m/s for one noisy fix) while real
+/// walking sits solidly at 0.9–1.35 m/s and jogging at 1.2–2.3 m/s, with no
+/// overlap between the two once hysteresis absorbs the odd stray reading.
+///
+/// [_enterMovingMps] and [_exitMovingMps] are deliberately different, and
+/// entering "moving" deliberately needs [_enterConfirmFixes] *consecutive*
+/// fixes at/above the enter threshold, not just one: real on-device capture
+/// showed the noise this gate exists for isn't always a single clean spike —
+/// one stationary blip rang for two consecutive fixes (4.32, then 4.34 m/s)
+/// before decaying back down through 0.71 and 0.62 m/s over the next two.
+/// A 2-fix confirmation still let ~5m of that ringing through; 3 fixes
+/// rejects it almost entirely (tested against real captures: ~1m credited
+/// from a 69s stationary indoor capture, vs. ~230m correctly retained from a
+/// real walk/jog) at the cost of a ~2-3s lag recognising a genuine walk-off,
+/// an acceptable trade for a live tracker. Dropping below the lower exit bar
+/// stops crediting immediately (no confirmation needed) so pace jitter right
+/// at walking speed doesn't flicker distance on/off mid-stride once already
+/// moving. Values chosen from real captures with clear headroom either side,
+/// not intended as an exact physiological threshold — see
+/// docs/GPS-METRICS-PLAN.md step 1's capture data.
+class _StationaryDetector {
+  static const double _enterMovingMps = 0.6;
+  static const double _exitMovingMps = 0.4;
+  static const int _enterConfirmFixes = 3;
+
+  bool _isMoving = false;
+
+  /// Consecutive fixes at/above [_enterMovingMps] seen while not yet moving.
+  int _aboveEnterStreak = 0;
+
+  /// Whether [point] (with chip speed [speedMps], trustworthy only when
+  /// [hasSpeed]) should credit its segment as motion. Falls back to the
+  /// position-based [_noiseFloorMeters] check against [segmentDistance] when
+  /// the platform gave no usable speed for this fix — see
+  /// [LocationSample.hasSpeed]'s doc for why a platform-reported `0.0` can't
+  /// always be trusted as a real measurement.
+  bool accepts({
+    required bool hasSpeed,
+    required double? speedMps,
+    required double segmentDistance,
+  }) {
+    if (!hasSpeed || speedMps == null) {
+      return segmentDistance >= _noiseFloorMeters;
+    }
+    // The verdict this segment is judged by is whatever was true *before*
+    // this fix updates it — a fix that completes the confirmation streak
+    // confirms the *next* segment as moving, not the one ending on itself.
+    final wasMoving = _isMoving;
+    if (wasMoving) {
+      if (speedMps < _exitMovingMps) {
+        _isMoving = false;
+        _aboveEnterStreak = 0;
+      }
+    } else {
+      _aboveEnterStreak = speedMps >= _enterMovingMps
+          ? _aboveEnterStreak + 1
+          : 0;
+      if (_aboveEnterStreak >= _enterConfirmFixes) {
+        _isMoving = true;
+      }
+    }
+    return wasMoving;
+  }
+
+  /// Resets to "not moving" — call alongside [MetricsEngine.resetSegmentAnchor]
+  /// so a pause/re-anchor doesn't inherit a stale moving/stationary verdict.
+  void reset() {
+    _isMoving = false;
+    _aboveEnterStreak = 0;
+  }
+}
 
 /// Accumulates accepted track points into live run metrics: elapsed time,
 /// distance, current/average speed, and interpolated 1km splits.
@@ -87,7 +174,7 @@ class MetricsEngine {
   MetricsEngine({ActivityMode mode = ActivityMode.running})
     : _limits = _PlausibilityLimits.forMode(mode);
 
-  final List<TrackPoint> _recentPoints = [];
+  final _StationaryDetector _stationaryDetector = _StationaryDetector();
   TrackPoint? _lastAccepted;
 
   /// A point rejected as an implausible jump from [_lastAccepted], kept in
@@ -108,18 +195,20 @@ class MetricsEngine {
   LiveMetrics _metrics = LiveMetrics.zero;
   LiveMetrics get metrics => _metrics;
 
-  /// Feeds one more accepted GPS fix into the engine. Points with worse
-  /// accuracy than [_maxAcceptableAccuracyMeters] are dropped entirely —
-  /// call site should not call this for paused/rejected points.
+  /// Feeds one more accepted GPS fix into the engine. A point is dropped
+  /// entirely if [TrackPoint.hasAccuracy] is false — an unmeasured accuracy
+  /// value is not the same as a perfect one, and would otherwise sail
+  /// straight through the accuracy-radius check below — or if its accuracy
+  /// is worse than [_maxAcceptableAccuracyMeters]. Call site should not call
+  /// this for paused/rejected points.
   void addPoint(TrackPoint point) {
+    if (!point.hasAccuracy) return;
     if (point.accuracyMeters > _maxAcceptableAccuracyMeters) return;
 
     final previous = _lastAccepted;
 
     if (previous == null) {
       _lastAccepted = point;
-      _recentPoints.add(point);
-      _pruneRecentPoints(point.timestamp);
       _metrics = _buildMetrics();
       return;
     }
@@ -180,14 +269,19 @@ class MetricsEngine {
     // reflected/multipath fixes wander a few meters between updates while
     // the phone doesn't move at all, which implies only 1-3 m/s — well
     // inside even running mode's cap, so it passes the teleport-oriented
-    // check above untouched. Below the noise floor, advance the anchor (so
-    // the wander doesn't accumulate as drift against a stale reference
-    // point) but credit no distance or elapsed time, the same as a
+    // check above untouched. The chip-speed gate (step 3a) tells this apart
+    // from real motion using the fix's own reported speed, not the segment's
+    // geometry — see [_StationaryDetector]. Below the gate, advance the
+    // anchor (so the wander doesn't accumulate as drift against a stale
+    // reference point) but credit no distance or elapsed time, the same as a
     // pause/resume gap.
-    if (segmentDistance < _noiseFloorMeters) {
+    final isMoving = _stationaryDetector.accepts(
+      hasSpeed: point.hasSpeed,
+      speedMps: point.speedMps,
+      segmentDistance: segmentDistance,
+    );
+    if (!isMoving) {
       _lastAccepted = point;
-      _recentPoints.add(point);
-      _pruneRecentPoints(point.timestamp);
       _metrics = _buildMetrics();
       return;
     }
@@ -211,11 +305,7 @@ class MetricsEngine {
   void _resetAnchorTo(TrackPoint point) {
     _lastAccepted = point;
     _pendingCandidate = null;
-    // The speed window must not straddle the discontinuity, or current speed
-    // reads as the teleport's implied speed for the next few seconds.
-    _recentPoints
-      ..clear()
-      ..add(point);
+    _stationaryDetector.reset();
     _metrics = _buildMetrics();
   }
 
@@ -226,8 +316,6 @@ class MetricsEngine {
     TrackPoint point,
   ) {
     _lastAccepted = point;
-    _recentPoints.add(point);
-    _pruneRecentPoints(point.timestamp);
 
     final segmentSpeedMps =
         segmentDistance / (segmentDuration.inMilliseconds / 1000);
@@ -251,7 +339,7 @@ class MetricsEngine {
   void resetSegmentAnchor() {
     _lastAccepted = null;
     _pendingCandidate = null;
-    _recentPoints.clear();
+    _stationaryDetector.reset();
   }
 
   void _applySegment(double segmentDistance, Duration segmentDuration) {
@@ -294,26 +382,6 @@ class MetricsEngine {
     _movingElapsed = elapsedBefore + segmentDuration;
   }
 
-  /// Trims the smoothing window to [_currentSpeedWindow], but always keeps
-  /// the last two fixes. When fixes arrive slower than the window (weak GPS,
-  /// doze), a strict cutoff would leave a single point and make current
-  /// speed permanently null; falling back to the last pair still gives a
-  /// usable — if less smoothed — reading.
-  void _pruneRecentPoints(DateTime latestTimestamp) {
-    final cutoff = latestTimestamp.subtract(_currentSpeedWindow);
-    while (_recentPoints.length > 2 &&
-        _recentPoints.first.timestamp.isBefore(cutoff)) {
-      _recentPoints.removeAt(0);
-    }
-  }
-
-  double? _currentSpeedMps() {
-    if (_recentPoints.length < 2) return null;
-    final oldest = _recentPoints.first;
-    final newest = _recentPoints.last;
-    return speedMpsBetween(oldest, newest);
-  }
-
   double? _avgSpeedMps() {
     if (_movingElapsed <= Duration.zero) return null;
     return _totalDistanceMeters / _movingElapsed.inMilliseconds * 1000;
@@ -323,7 +391,6 @@ class MetricsEngine {
     return LiveMetrics(
       elapsed: _movingElapsed,
       distanceMeters: _totalDistanceMeters,
-      currentSpeedMps: _currentSpeedMps(),
       avgSpeedMps: _avgSpeedMps(),
       completedSplits: List.unmodifiable(_completedSplits),
       currentSplitElapsed: _movingElapsed - _splitStartElapsed,
