@@ -1,6 +1,7 @@
 from lib.ulogging import uLogger
 from lib.networking import WirelessNetwork
 from lib.gps import Gps
+from lib.display import Display
 from machine import freq, I2C
 from config import CLOCK_FREQUENCY, I2C_ID, SDA_PIN, SCL_PIN, I2C_FREQ, TIMEZONE
 from asyncio import sleep_ms, create_task, get_event_loop, Event
@@ -22,6 +23,7 @@ class Tracker:
         self.i2c = I2C(I2C_ID, sda = SDA_PIN, scl = SCL_PIN, freq = I2C_FREQ)
         self.wifi = WirelessNetwork()
         self.gps = Gps()
+        self.display = Display()
 
     def startup(self) -> None:
         """
@@ -43,7 +45,10 @@ class Tracker:
         self.log.info("Entering main event loop")
         while True:
             if self.gps.has_recent_fix():
-                self.log.info(f"GPS fix: {self.gps.get_fix()}")
+                fix = self.gps.get_fix()
+                fix_text = f"Fix: {fix['latitude']:.5f}, {fix['longitude']:.5f}"
             else:
-                self.log.info("GPS: no recent fix")
+                fix_text = "Fix: no recent fix"
+            self.log.info(fix_text)
+            self.display.show_text_line(fix_text)
             await sleep_ms(1000)

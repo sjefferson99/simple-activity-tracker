@@ -37,5 +37,18 @@ GPS_RX_PIN = 17
 # PA1616S default baud rate
 GPS_UART_BAUD = 9600
 
+## Display (Waveshare 2.4inch LCD Module, ST7789, 4-wire SPI)
+# Wired by hand (not a plug-on Pico board) - update these to match actual wiring
+DISPLAY_SPI_ID = 0
+DISPLAY_SCK_PIN = 2
+DISPLAY_MOSI_PIN = 3
+DISPLAY_CS_PIN = 1
+DISPLAY_DC_PIN = 21
+DISPLAY_RST_PIN = 20
+DISPLAY_BL_PIN = 19
+DISPLAY_SPI_BAUDRATE = 40000000
+DISPLAY_WIDTH = 240
+DISPLAY_HEIGHT = 320
+
 ## Overclocking - Pico1 default 133MHz, Pico2 default 150MHz
 CLOCK_FREQUENCY = 133000000
