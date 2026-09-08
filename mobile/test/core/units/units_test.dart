@@ -63,6 +63,20 @@ void main() {
     });
   });
 
+  group('milesFromMeters', () {
+    test('converts meters to miles', () {
+      expect(milesFromMeters(1609.344), closeTo(1, 0.0001));
+      expect(milesFromMeters(0), 0);
+    });
+  });
+
+  group('formatDistanceMi', () {
+    test('formats meters as miles with two decimals', () {
+      expect(formatDistanceMi(1609.344), '1.00');
+      expect(formatDistanceMi(0), '0.00');
+    });
+  });
+
   group('formatMeters', () {
     test('rounds to the nearest whole metre', () {
       expect(formatMeters(123.4), '123');

@@ -338,7 +338,7 @@ class _MetricGrid extends StatelessWidget {
                 Expanded(
                   flex: 2,
                   child: _MetricTile(
-                    label: spec.label,
+                    label: spec.label(useKmh),
                     description: spec.description,
                     value: spec.valueOf(metrics, null, useKmh),
                     unit: unit,
