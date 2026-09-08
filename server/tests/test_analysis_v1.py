@@ -186,6 +186,9 @@ def test_time_min_splits_interpolate_distance_at_the_time_boundary() -> None:
         assert split["duration_seconds"] == pytest.approx(120.0, abs=1.0)
         # 5:00/km pace covers 400m in 2 minutes.
         assert split["distance_m"] == pytest.approx(400.0, rel=0.05)
+        # boundary.dist_m (issue #58) is the interpolated cumulative distance
+        # at the time boundary, i.e. index * 400m at this pace.
+        assert split["boundary"]["dist_m"] == pytest.approx(split["index"] * 400.0, rel=0.05)
 
 
 def test_split_boundary_carries_a_chart_time_and_position() -> None:
@@ -194,11 +197,14 @@ def test_split_boundary_carries_a_chart_time_and_position() -> None:
     # t_s should be the cumulative sum of duration_seconds up to and
     # including each split — i.e. it lines up with the series' own t_s axis,
     # which is what lets the chart draw a boundary line at the right x.
+    # dist_m is the mirror image for a distance-based x-axis (issue #58) —
+    # here it's exact km boundaries, since these are distance-mode splits.
     cumulative_duration = 0.0
     for split in splits:
         cumulative_duration += split["duration_seconds"]
         boundary = split["boundary"]
         assert boundary["t_s"] == pytest.approx(cumulative_duration, abs=0.01)
+        assert boundary["dist_m"] == pytest.approx(split["index"] * 1000.0, rel=0.001)
         assert -90.0 <= boundary["lat"] <= 90.0
         assert -180.0 <= boundary["lon"] <= 180.0
 

@@ -38,6 +38,12 @@
 {% if activity.analysis.status == "done" %}
 <div class="card">
   <h2>Pace &amp; elevation</h2>
+  <label for="chart_x_unit">X axis</label>
+  <select id="chart_x_unit" aria-label="Chart X axis unit" style="width:auto; margin-bottom:0.75rem;">
+    <option value="time" selected>Time</option>
+    <option value="km">Kilometers</option>
+    <option value="mi">Miles</option>
+  </select>
   <div class="chart-container">
     <div id="chart"></div>
   </div>
@@ -302,16 +308,48 @@
     {% if activity.analysis.status == "done" %}
     const series = {{ activity.analysis.result.series | tojson }};
     const chartEl = document.getElementById('chart');
+    const xUnitSelect = document.getElementById('chart_x_unit');
+    const METERS_PER_MILE = 1609.344;
     if (series.length > 1 && chartEl) {
-      const t = series.map((s) => s.t_s);
       const paceKmh = series.map((s) => (s.speed_mps != null ? s.speed_mps * 3.6 : null));
       const ele = series.map((s) => s.ele_m);
       const distM = series.map((s) => s.dist_m);
+      // x-axis values and matching label/formatter/split-boundary accessor
+      // per unit (issue #58) — 'time' is moving-time seconds (the original
+      // axis), 'km'/'mi' are cumulative distance. Switching units rebuilds
+      // the whole chart rather than just swapping data, since uPlot doesn't
+      // support replacing a scale's time-vs-linear semantics in place.
+      const xByUnit = {
+        time: { data: series.map((s) => s.t_s), label: 'Time', boundary: (b) => b.t_s },
+        km: {
+          data: distM.map((d) => d / 1000),
+          label: 'Distance (km)',
+          boundary: (b) => b.dist_m / 1000,
+        },
+        mi: {
+          data: distM.map((d) => d / METERS_PER_MILE),
+          label: 'Distance (mi)',
+          boundary: (b) => b.dist_m / METERS_PER_MILE,
+        },
+      };
+
+      function formatHms(totalSeconds) {
+        const s = Math.round(totalSeconds);
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const sec = s % 60;
+        const mm = String(m).padStart(2, '0');
+        const ss = String(sec).padStart(2, '0');
+        return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+      }
+
       // Draws a dotted vertical line + split-number label at each split
-      // boundary's t_s, directly on the canvas after uPlot's own series
-      // draw — the simplest way to add an annotation uPlot has no built-in
-      // concept of, without pulling in a plugin dependency for one feature.
+      // boundary's x-value (unit-dependent, see xByUnit), directly on the
+      // canvas after uPlot's own series draw — the simplest way to add an
+      // annotation uPlot has no built-in concept of, without pulling in a
+      // plugin dependency for one feature.
       function drawSplitLines(u) {
+        const toBoundaryX = xByUnit[xUnitSelect.value].boundary;
         const { ctx } = u;
         ctx.save();
         ctx.strokeStyle = '#64748b';
@@ -321,7 +359,7 @@
         ctx.fillStyle = '#64748b';
         currentSplits.forEach((split) => {
           if (!split.boundary) return;
-          const x = u.valToPos(split.boundary.t_s, 'x', true);
+          const x = u.valToPos(toBoundaryX(split.boundary), 'x', true);
           if (x < u.bbox.left || x > u.bbox.left + u.bbox.width) return;
           ctx.beginPath();
           ctx.moveTo(x, u.bbox.top);
@@ -333,7 +371,8 @@
       }
       // Hovering the chart shows the corresponding position on the map
       // (issue #46); the reverse — hovering the map — deliberately does
-      // nothing. idx is null when the cursor leaves the plot area.
+      // nothing. idx is null when the cursor leaves the plot area. Keyed by
+      // array index, so this needs no change when the x-axis unit changes.
       function syncMapToCursor(u) {
         const idx = u.cursor.idx;
         if (idx == null || distM[idx] == null) {
@@ -347,22 +386,38 @@
           hideHoverMarker();
         }
       }
-      chartInstance = new uPlot(
-        {
-          width: chartEl.clientWidth || 600,
-          height: 260,
-          scales: { x: { time: false } },
-          series: [
-            { label: 'Time (s)' },
-            { label: 'Speed (km/h)', stroke: '#0f766e', scale: 'kmh' },
-            { label: 'Elevation (m)', stroke: '#c2410c', scale: 'ele' },
-          ],
-          axes: [{}, { scale: 'kmh', side: 3 }, { scale: 'ele', side: 1 }],
-          hooks: { draw: [drawSplitLines], setCursor: [syncMapToCursor] },
-        },
-        [t, paceKmh, ele],
-        chartEl
-      );
+
+      function buildChart(unit) {
+        const x = xByUnit[unit];
+        if (chartInstance) {
+          chartInstance.destroy();
+        }
+        chartInstance = new uPlot(
+          {
+            width: chartEl.clientWidth || 600,
+            height: 260,
+            scales: { x: { time: false } },
+            series: [
+              unit === 'time'
+                ? { label: x.label, value: (u, v) => (v == null ? '--' : formatHms(v)) }
+                : { label: x.label },
+              { label: 'Speed (km/h)', stroke: '#0f766e', scale: 'kmh' },
+              { label: 'Elevation (m)', stroke: '#c2410c', scale: 'ele' },
+            ],
+            axes: [
+              unit === 'time' ? { values: (u, ticks) => ticks.map(formatHms) } : {},
+              { scale: 'kmh', side: 3 },
+              { scale: 'ele', side: 1 },
+            ],
+            hooks: { draw: [drawSplitLines], setCursor: [syncMapToCursor] },
+          },
+          [x.data, paceKmh, ele],
+          chartEl
+        );
+      }
+
+      buildChart(xUnitSelect.value);
+      xUnitSelect.addEventListener('change', () => buildChart(xUnitSelect.value));
     }
     {% endif %}
   })();
