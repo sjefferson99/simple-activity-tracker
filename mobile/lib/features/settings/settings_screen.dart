@@ -8,8 +8,10 @@ import '../../core/auth/auth_state.dart';
 import '../../core/auth/auth_state_controller.dart';
 import '../../core/sync/file_run_store.dart';
 import '../../core/sync/sync_service.dart';
+import '../../core/tracking/split_preference_controller.dart';
 import '../../domain/models/run_record.dart';
 import '../../domain/models/sync_status.dart';
+import '../../domain/tracking/split_preference.dart';
 
 /// Re-fetches the run queue on every SyncService status change, so the
 /// summary below stays live while a pass is running — a StreamProvider
@@ -46,6 +48,10 @@ class SettingsScreen extends ConsumerWidget {
               ),
               error: (error, _) => _ErrorBanner(message: _messageFor(error)),
             ),
+            const SizedBox(height: 24),
+            const Divider(),
+            const SizedBox(height: 16),
+            const _SplitPreferenceSection(),
             const SizedBox(height: 24),
             const Divider(),
             const SizedBox(height: 16),
@@ -366,6 +372,92 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
       ],
     );
   }
+}
+
+class _SplitPreferenceSection extends ConsumerWidget {
+  const _SplitPreferenceSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final preference = ref.watch(splitPreferenceControllerProvider);
+    final notifier = ref.read(splitPreferenceControllerProvider.notifier);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Splits', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Text(
+          'Choose how splits are measured for new runs, recorded with each '
+          'run and used as the default when viewing it on the web.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 12),
+        SegmentedButton<SplitKind>(
+          segments: const [
+            ButtonSegment(
+              value: SplitKind.distanceKm,
+              label: SizedBox(
+                width: 88,
+                child: Center(child: Text('Km', softWrap: false)),
+              ),
+            ),
+            ButtonSegment(
+              value: SplitKind.distanceMi,
+              label: SizedBox(
+                width: 88,
+                child: Center(child: Text('Miles', softWrap: false)),
+              ),
+            ),
+            ButtonSegment(
+              value: SplitKind.timeMin,
+              label: SizedBox(
+                width: 88,
+                child: Center(child: Text('Minutes', softWrap: false)),
+              ),
+            ),
+          ],
+          showSelectedIcon: false,
+          selected: {preference.kind},
+          onSelectionChanged: (selection) => notifier.select(
+            SplitPreference(kind: selection.first, value: preference.value),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            const Text('Every'),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 72,
+              child: TextFormField(
+                key: ValueKey(preference.value),
+                initialValue: '${preference.value}',
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                onFieldSubmitted: (text) {
+                  final value = int.tryParse(text);
+                  if (value != null && value > 0) {
+                    notifier.select(
+                      SplitPreference(kind: preference.kind, value: value),
+                    );
+                  }
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(_unitLabel(preference.kind)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  String _unitLabel(SplitKind kind) => switch (kind) {
+    SplitKind.distanceKm => 'km',
+    SplitKind.distanceMi => 'mi',
+    SplitKind.timeMin => 'min',
+  };
 }
 
 class _SyncQueueSection extends ConsumerWidget {

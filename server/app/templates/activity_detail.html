@@ -82,22 +82,26 @@
   </table>
   {% endif %}
 
-  {% if result.splits %}
-  <h2 style="margin-top:1.5rem;">Splits</h2>
-  <table>
-    <thead><tr><th>Km</th><th>Time</th><th>Pace</th><th>Elevation</th></tr></thead>
-    <tbody>
-      {% for split in result.splits %}
-      <tr>
-        <td>{{ split.index }}</td>
-        <td>{{ split.duration_seconds | duration }}</td>
-        <td>{{ split.avg_speed_mps | pace }}</td>
-        <td>{{ "%+.0f"|format(split.elevation_delta_m) }} m</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
+  <form class="split-controls"
+        hx-get="/activities/{{ activity.id }}/splits"
+        hx-target="#splits-table"
+        hx-trigger="change"
+        style="margin-top:1.5rem;">
+    <label for="split_value">Split every</label>
+    <input type="number" id="split_value" name="split_value" min="1" max="1000"
+           value="{{ result.split_value or 1 }}">
+    <select id="split_type" name="split_type" aria-label="Split unit">
+      <option value="distance_km" {% if not result.split_type or result.split_type == "distance_km" %}selected{% endif %}>Kilometers</option>
+      <option value="distance_mi" {% if result.split_type == "distance_mi" %}selected{% endif %}>Miles</option>
+      <option value="time_min" {% if result.split_type == "time_min" %}selected{% endif %}>Minutes</option>
+    </select>
+  </form>
+  {% set splits = result.splits %}
+  {% set split_type = result.split_type %}
+  {% set split_value = result.split_value %}
+  <div id="splits-table">
+    {% include "partials/splits_table.html" %}
+  </div>
 
   <h2 style="margin-top:1.5rem;">Pace &amp; elevation</h2>
   <div class="chart-container">

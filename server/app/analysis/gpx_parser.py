@@ -85,3 +85,48 @@ def guess_device_name(data: bytes) -> str | None:
         return creator
     author = (gpx.author_name or "").strip()
     return author or None
+
+
+_SPLIT_EXTENSIONS_NS = "https://simple-activity-tracker.local/gpx-extensions"
+_VALID_SPLIT_TYPES = {"distance_km", "distance_mi", "time_min"}
+
+
+def parse_split_preference(data: bytes) -> tuple[str, int] | None:
+    """Best-effort split preference from the uploaded GPX's root
+    <extensions> (written by mobile — see
+    mobile/lib/core/files/run_gpx_log.dart's sat:split_type/sat:split_value).
+    Returns None (never raises) for any GPX with no/invalid/partial split
+    extensions — an old activity, a manually-uploaded file, or a malformed
+    value — so callers fall back to AnalyzerV1's own default rather than
+    failing the upload.
+    """
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if "<!DOCTYPE" in text or "<!ENTITY" in text:
+        return None
+    try:
+        gpx = gpxpy.parse(text)
+    except Exception:
+        return None
+
+    split_type: str | None = None
+    split_value_raw: str | None = None
+    for element in gpx.extensions:
+        tag = getattr(element, "tag", None)
+        if tag == f"{{{_SPLIT_EXTENSIONS_NS}}}split_type":
+            split_type = (element.text or "").strip()
+        elif tag == f"{{{_SPLIT_EXTENSIONS_NS}}}split_value":
+            split_value_raw = (element.text or "").strip()
+
+    if split_type not in _VALID_SPLIT_TYPES or split_value_raw is None:
+        return None
+    try:
+        split_value = int(split_value_raw)
+    except ValueError:
+        return None
+    if split_value <= 0:
+        return None
+
+    return split_type, split_value

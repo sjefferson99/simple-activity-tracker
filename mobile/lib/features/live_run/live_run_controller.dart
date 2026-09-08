@@ -17,6 +17,7 @@ import '../../core/location/location_service.dart';
 import '../../core/sync/file_run_store.dart';
 import '../../core/sync/sync_service.dart';
 import '../../core/tracking/activity_mode_controller.dart';
+import '../../core/tracking/split_preference_controller.dart';
 import '../../domain/geo_math.dart';
 import '../../domain/models/live_metrics.dart';
 import '../../domain/models/run_record.dart';
@@ -27,6 +28,7 @@ import '../../domain/tracking/activity_mode.dart';
 import '../../domain/tracking/metrics_engine.dart';
 import '../../domain/tracking/run_clock.dart';
 import '../../domain/tracking/run_phase.dart';
+import '../../domain/tracking/split_preference.dart';
 import 'live_run_state.dart';
 
 const _gpxFlushInterval = Duration(seconds: 5);
@@ -74,6 +76,7 @@ class LiveRunController extends Notifier<LiveRunState> {
   String? _clientRunId;
   DateTime? _startedAt;
   ActivityMode? _activityMode;
+  SplitPreference? _splitPreference;
   String? _cachedAppVersion;
 
   // Bumped every time a run starts. stop() closes over the token for the
@@ -143,9 +146,13 @@ class LiveRunController extends Notifier<LiveRunState> {
     // captured value is reused at stop() for the RunRecord/RunSummary, since
     // the toggle may have moved on by then.
     _activityMode = ref.read(activityModeControllerProvider);
-    _metricsEngine = MetricsEngine(mode: _activityMode!);
+    _splitPreference = ref.read(splitPreferenceControllerProvider);
+    _metricsEngine = MetricsEngine(
+      mode: _activityMode!,
+      splitPreference: _splitPreference!,
+    );
     _currentGpxFile = await newRunGpxFile(DateTime.now());
-    _gpxLog = RunGpxLog(_currentGpxFile!);
+    _gpxLog = RunGpxLog(_currentGpxFile!, _splitPreference!);
     // A periodic flush that fails is not fatal: every flush rewrites the
     // whole track, so the next one recovers whatever this one missed.
     // Swallow it here rather than letting it surface as an unhandled error.
@@ -241,6 +248,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     _startedAt = null;
     _runClock = null;
     _activityMode = null;
+    _splitPreference = null;
 
     state = LiveRunFinished(
       metrics: metrics,

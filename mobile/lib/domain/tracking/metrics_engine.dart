@@ -3,8 +3,9 @@ import '../models/live_metrics.dart';
 import '../models/split.dart';
 import '../models/track_point.dart';
 import 'activity_mode.dart';
+import 'split_preference.dart';
 
-const double _splitDistanceMeters = 1000;
+const double _metersPerMile = 1609.344;
 const double _maxAcceptableAccuracyMeters = 25;
 
 /// The two plausibility thresholds [MetricsEngine] checks every accepted
@@ -171,8 +172,26 @@ class _StationaryDetector {
 class MetricsEngine {
   final _PlausibilityLimits _limits;
 
-  MetricsEngine({ActivityMode mode = ActivityMode.running})
-    : _limits = _PlausibilityLimits.forMode(mode);
+  /// The split boundary this run is measured against — resolved once at
+  /// construction from [splitPreference] into either a distance (km/mi) or a
+  /// duration (minutes), never both. Read-once-at-start, same as [mode]: a
+  /// mid-run preference change (disabled in the UI, but this is the actual
+  /// guarantee) can't affect an in-progress run.
+  final double? _splitDistanceMeters;
+  final Duration? _splitDurationTarget;
+
+  MetricsEngine({
+    ActivityMode mode = ActivityMode.running,
+    SplitPreference splitPreference = SplitPreference.defaultPreference,
+  }) : _limits = _PlausibilityLimits.forMode(mode),
+       _splitDistanceMeters = switch (splitPreference.kind) {
+         SplitKind.distanceKm => splitPreference.value * 1000.0,
+         SplitKind.distanceMi => splitPreference.value * _metersPerMile,
+         SplitKind.timeMin => null,
+       },
+       _splitDurationTarget = splitPreference.kind == SplitKind.timeMin
+           ? Duration(minutes: splitPreference.value)
+           : null;
 
   final _StationaryDetector _stationaryDetector = _StationaryDetector();
   TrackPoint? _lastAccepted;
@@ -343,14 +362,26 @@ class MetricsEngine {
   }
 
   void _applySegment(double segmentDistance, Duration segmentDuration) {
+    if (_splitDurationTarget != null) {
+      _applySegmentTimeMode(segmentDistance, segmentDuration);
+    } else {
+      _applySegmentDistanceMode(segmentDistance, segmentDuration);
+    }
+  }
+
+  void _applySegmentDistanceMode(
+    double segmentDistance,
+    Duration segmentDuration,
+  ) {
+    final splitDistanceMeters = _splitDistanceMeters!;
     var remainingDistance = segmentDistance;
     var elapsedBefore = _movingElapsed;
 
     while (_totalDistanceMeters + remainingDistance >=
-            _splitStartDistanceMeters + _splitDistanceMeters &&
+            _splitStartDistanceMeters + splitDistanceMeters &&
         remainingDistance > 0) {
       final distanceIntoSplit =
-          (_splitStartDistanceMeters + _splitDistanceMeters) -
+          (_splitStartDistanceMeters + splitDistanceMeters) -
           _totalDistanceMeters;
       final fraction = distanceIntoSplit / remainingDistance;
       final crossingDuration = segmentDuration * fraction;
@@ -364,8 +395,9 @@ class MetricsEngine {
           // A split covering measurable distance in no measurable time would
           // divide by zero; report 0 rather than an infinite pace.
           avgSpeedMps: splitDuration.inMilliseconds > 0
-              ? _splitDistanceMeters / splitDuration.inMilliseconds * 1000
+              ? splitDistanceMeters / splitDuration.inMilliseconds * 1000
               : 0,
+          distanceMeters: splitDistanceMeters,
         ),
       );
 
@@ -380,6 +412,48 @@ class MetricsEngine {
 
     _totalDistanceMeters += remainingDistance;
     _movingElapsed = elapsedBefore + segmentDuration;
+  }
+
+  /// The mirror image of [_applySegmentDistanceMode]: the boundary is a
+  /// fixed elapsed-time target, so instead of interpolating the crossing
+  /// *time* by fraction of the segment's distance, this interpolates the
+  /// crossing *distance* by fraction of the segment's duration.
+  void _applySegmentTimeMode(double segmentDistance, Duration segmentDuration) {
+    final splitDurationTarget = _splitDurationTarget!;
+    var remainingDuration = segmentDuration;
+    var distanceBefore = _totalDistanceMeters;
+
+    while (_movingElapsed + remainingDuration >=
+            _splitStartElapsed + splitDurationTarget &&
+        remainingDuration > Duration.zero) {
+      final durationIntoSplit =
+          (_splitStartElapsed + splitDurationTarget) - _movingElapsed;
+      final fraction =
+          durationIntoSplit.inMicroseconds / remainingDuration.inMicroseconds;
+      final crossingDistance = segmentDistance * fraction;
+      final crossingTotalDistance = distanceBefore + crossingDistance;
+
+      final splitDistance = crossingTotalDistance - _splitStartDistanceMeters;
+      _completedSplits.add(
+        Split(
+          index: _completedSplits.length + 1,
+          duration: splitDurationTarget,
+          avgSpeedMps: splitDistance / splitDurationTarget.inMilliseconds * 1000,
+          distanceMeters: splitDistance,
+        ),
+      );
+
+      _movingElapsed += durationIntoSplit;
+      distanceBefore = crossingTotalDistance;
+      _splitStartDistanceMeters = crossingTotalDistance;
+      _splitStartElapsed = _movingElapsed;
+
+      remainingDuration -= durationIntoSplit;
+      segmentDistance -= crossingDistance;
+    }
+
+    _totalDistanceMeters = distanceBefore + segmentDistance;
+    _movingElapsed += remainingDuration;
   }
 
   double? _avgSpeedMps() {

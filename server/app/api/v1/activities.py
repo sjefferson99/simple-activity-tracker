@@ -17,7 +17,7 @@ from app.activity_export import (
     read_import_archive,
     run_import,
 )
-from app.analysis.gpx_parser import GpxParseError, parse_gpx
+from app.analysis.gpx_parser import GpxParseError, parse_gpx, parse_split_preference
 from app.analysis.track_sampling import DEFAULT_MAX_POINTS, sample_track
 from app.analysis.v1 import ANALYSIS_VERSION, AnalyzerV1
 from app.api.v1.errors import api_error
@@ -143,6 +143,7 @@ def _insert_activity_with_gpx(
         track = parse_gpx(gpx_bytes)
     except GpxParseError as exc:
         raise api_error(400, "invalid_gpx", str(exc)) from exc
+    split_pref = parse_split_preference(gpx_bytes)
 
     blob_store = _blob_store()
     blob_key = blob_store.put(user_id, gpx_bytes)
@@ -163,6 +164,8 @@ def _insert_activity_with_gpx(
         gpx_bytes=len(gpx_bytes),
         source_platform=new_activity.source_platform,
         source_app_version=new_activity.source_app_version,
+        split_type=split_pref[0] if split_pref else None,
+        split_value=split_pref[1] if split_pref else None,
         created_at=now,
         updated_at=now,
     )
@@ -183,7 +186,9 @@ def _insert_activity_with_gpx(
         return winner, analyses.get_by_activity_id(winner.id), False  # type: ignore[return-value]
 
     try:
-        result = AnalyzerV1().analyze(track)
+        result = (
+            AnalyzerV1().analyze(track, *split_pref) if split_pref else AnalyzerV1().analyze(track)
+        )
         analysis = ActivityAnalysis(
             activity_id=activity.id,
             analysis_version=ANALYSIS_VERSION,
@@ -381,10 +386,30 @@ def get_analysis(
     user: CurrentUser,
     session: Annotated[Session, Depends(db_session)],
     response: Response,
+    split_type: Annotated[str | None, Query(pattern="^(distance_km|distance_mi|time_min)$")] = None,
+    split_value: Annotated[int | None, Query(ge=1, le=1000)] = None,
 ) -> AnalysisOut:
     activity = SqlAlchemyActivityRepository(session).get_by_id_for_user(user.id, activity_id)
     if activity is None:
         raise api_error(404, "not_found", "Activity not found")
+
+    if (split_type is None) != (split_value is None):
+        raise api_error(400, "invalid_split", "split_type and split_value must be given together")
+
+    if split_type is not None and split_value is not None:
+        # Always recompute rather than trying to detect "same as stored" —
+        # cheap enough, and avoids a bug where cached result predates this
+        # feature and has no split_type/split_value to compare against.
+        # Mirrors /track's max_points-mismatch precedent: recompute, never
+        # write back to ActivityAnalysis.
+        data = _blob_store().get(activity.gpx_blob_key)
+        try:
+            track = parse_gpx(data)
+        except GpxParseError as exc:
+            raise api_error(400, "invalid_gpx", str(exc)) from exc
+        result = AnalyzerV1().analyze(track, split_type, split_value)
+        return AnalysisOut(status="done", result=result)
+
     analysis = SqlAlchemyActivityAnalysisRepository(session).get_by_activity_id(activity.id)
     out = _analysis_out(analysis)
     if out.status != "done":

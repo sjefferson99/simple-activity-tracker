@@ -22,6 +22,7 @@ from app.activity_export import (
     run_import,
 )
 from app.analysis.gpx_parser import GpxParseError, guess_device_name, parse_gpx
+from app.analysis.v1 import AnalyzerV1
 from app.api.v1.activities import (
     _insert_activity_with_gpx,
     _insert_from_manifest_entry,
@@ -177,6 +178,45 @@ def activity_detail(
         request,
         "activity_detail.html",
         {"user": user, "activity": _activity_view(activity, analysis)},
+    )
+
+
+@router.get("/activities/{activity_id}/splits")
+def activity_splits_fragment(
+    activity_id: str,
+    request: Request,
+    user: WebUser,
+    session: Annotated[Session, Depends(db_session)],
+    split_type: Annotated[str, Query(pattern="^(distance_km|distance_mi|time_min)$")] = (
+        "distance_km"
+    ),
+    split_value: Annotated[int, Query(ge=1, le=1000)] = 1,
+) -> Response:
+    """Recomputes just the splits table for the htmx split-size control on
+    activity_detail.html — reuses AnalyzerV1 the same "recompute, don't
+    persist" way as the JSON API's analysis?split_type=... variant, but
+    returns an HTML fragment instead of JSON since htmx needs markup to swap
+    in, not a JSON response it would have to render itself."""
+    activity = SqlAlchemyActivityRepository(session).get_by_id_for_user(user.id, activity_id)
+    if activity is None:
+        return templates.TemplateResponse(
+            request, "not_found.html", {"user": user}, status_code=404
+        )
+
+    data = LocalFileBlobStore(Path(get_settings().data_dir)).get(activity.gpx_blob_key)
+    try:
+        track = parse_gpx(data)
+    except GpxParseError:
+        return templates.TemplateResponse(
+            request,
+            "partials/splits_table.html",
+            {"splits": [], "split_type": split_type, "split_value": split_value},
+        )
+    result = AnalyzerV1().analyze(track, split_type, split_value)
+    return templates.TemplateResponse(
+        request,
+        "partials/splits_table.html",
+        {"splits": result["splits"], "split_type": split_type, "split_value": split_value},
     )
 
 

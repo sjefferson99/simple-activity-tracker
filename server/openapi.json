@@ -1093,6 +1093,41 @@
               "title": "Activity Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "split_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(distance_km|distance_mi|time_min)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Split Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "split_value",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Split Value"
+            }
           }
         ],
         "responses": {

@@ -150,3 +150,54 @@ def test_elevation_gain_is_never_negative() -> None:
     result = _analyze()
     assert result["elevation"]["gain_m"] >= 0
     assert result["elevation"]["loss_m"] >= 0
+
+
+def test_default_split_type_and_value_are_reported() -> None:
+    result = _analyze()
+    assert result["split_type"] == "distance_km"
+    assert result["split_value"] == 1
+    for split in result["splits"]:
+        assert split["distance_m"] == pytest.approx(1000.0, rel=0.001)
+
+
+def test_distance_mi_splits_use_the_mile_boundary() -> None:
+    track = parse_gpx(_FIXTURE.read_bytes())
+    result = AnalyzerV1().analyze(track, "distance_mi", 1)
+    assert result["split_type"] == "distance_mi"
+    assert result["split_value"] == 1
+    splits = result["splits"]
+    # 3km / 1609.344m per mile == 1 full mile split (a second mile never
+    # completes within the 3km fixture).
+    assert len(splits) == 1
+    assert splits[0]["distance_m"] == pytest.approx(1609.344, rel=0.001)
+    # 1 mile at 5:00/km pace: 1609.344m / (1000m / 300s) == 482.8s.
+    assert splits[0]["duration_seconds"] == pytest.approx(482.8, abs=5.0)
+
+
+def test_time_min_splits_interpolate_distance_at_the_time_boundary() -> None:
+    track = parse_gpx(_FIXTURE.read_bytes())
+    result = AnalyzerV1().analyze(track, "time_min", 2)
+    assert result["split_type"] == "time_min"
+    assert result["split_value"] == 2
+    splits = result["splits"]
+    # 900s of moving time / 120s per split == 7 completed 2-minute splits.
+    assert len(splits) == 7
+    for split in splits:
+        assert split["duration_seconds"] == pytest.approx(120.0, abs=1.0)
+        # 5:00/km pace covers 400m in 2 minutes.
+        assert split["distance_m"] == pytest.approx(400.0, rel=0.05)
+
+
+def test_time_min_split_distances_sum_to_the_completed_split_time() -> None:
+    track = parse_gpx(_FIXTURE.read_bytes())
+    result = AnalyzerV1().analyze(track, "time_min", 2)
+    splits = result["splits"]
+    total_split_distance = sum(s["distance_m"] for s in splits)
+    total_split_duration = sum(s["duration_seconds"] for s in splits)
+    # Only whole 2-minute splits are counted (any trailing partial minute is
+    # excluded, same as distance-mode's own incomplete trailing split) — at
+    # the fixture's constant 5:00/km pace, distance and duration should still
+    # agree with each other regardless of how many splits completed.
+    assert total_split_distance == pytest.approx(
+        total_split_duration * (_EXPECTED_DISTANCE_M / _EXPECTED_MOVING_S), rel=0.05
+    )

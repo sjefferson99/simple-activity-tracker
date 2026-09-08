@@ -48,7 +48,12 @@ void main() {
       distanceMeters: 3000.0,
       avgSpeedMps: 3.33,
       completedSplits: const [
-        Split(index: 1, duration: Duration(seconds: 300), avgSpeedMps: 3.33),
+        Split(
+          index: 1,
+          duration: Duration(seconds: 300),
+          avgSpeedMps: 3.33,
+          distanceMeters: 1000.0,
+        ),
       ],
       currentSplitElapsed: Duration.zero,
       currentSplitDistanceMeters: 0,

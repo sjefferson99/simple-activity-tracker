@@ -127,6 +127,123 @@ def test_activity_detail_404_for_missing_activity(app_client, auth_headers):
     assert response.status_code == 404
 
 
+def test_activity_detail_has_split_controls(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get(f"/activities/{activity_id}")
+    assert response.status_code == 200
+    assert f'hx-get="/activities/{activity_id}/splits"' in response.text
+    assert 'id="splits-table"' in response.text
+
+
+def test_activity_detail_shows_split_controls_even_with_zero_completed_splits(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """A short activity (e.g. a few seconds stationary) never crosses a
+    split boundary, so result.splits is empty — the control to try a
+    smaller split size must still be offered, not hidden along with the
+    (empty) table."""
+    from app.db import get_session_factory
+    from app.models.activity_analysis import ActivityAnalysis
+
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+
+    with get_session_factory()() as session:
+        analysis = session.get(ActivityAnalysis, activity_id)
+        assert analysis is not None
+        result = dict(analysis.result)
+        result["splits"] = []
+        analysis.result = result
+        session.commit()
+
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+    response = app_client.get(f"/activities/{activity_id}")
+    assert response.status_code == 200
+    assert f'hx-get="/activities/{activity_id}/splits"' in response.text
+
+
+def test_splits_fragment_recomputes_with_given_split(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get(
+        f"/activities/{activity_id}/splits", params={"split_type": "time_min", "split_value": 5}
+    )
+    assert response.status_code == 200
+    assert "Splits (5 min)" in response.text
+
+
+def test_splits_fragment_defaults_to_one_km(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get(f"/activities/{activity_id}/splits")
+    assert response.status_code == 200
+    assert "Splits (1 km)" in response.text
+
+
+def test_splits_fragment_rejects_invalid_split_type(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get(
+        f"/activities/{activity_id}/splits", params={"split_type": "bogus", "split_value": 1}
+    )
+    assert response.status_code == 422
+
+
+def test_splits_fragment_404_for_missing_activity(app_client, auth_headers):
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+    response = app_client.get("/activities/does-not-exist/splits")
+    assert response.status_code == 404
+
+
+def test_activity_detail_renders_pre_feature_splits_with_no_distance_field(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """Regression: activities analyzed before this feature shipped have
+    result.splits entries with no "distance_m" key at all (not null —
+    genuinely absent). Jinja's dot-access returns its Undefined sentinel for
+    a missing dict key, which `is none` does not catch, so the template must
+    use a falsy check instead or this 500s on any real activity whose splits
+    actually completed under the old code."""
+    from app.db import get_session_factory
+    from app.models.activity_analysis import ActivityAnalysis
+
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+
+    with get_session_factory()() as session:
+        analysis = session.get(ActivityAnalysis, activity_id)
+        assert analysis is not None
+        result = dict(analysis.result)
+        result.pop("split_type", None)
+        result.pop("split_value", None)
+        result["splits"] = [
+            {
+                "index": 1,
+                "duration_seconds": 300.0,
+                "avg_speed_mps": 3.33,
+                "elevation_delta_m": 0.0,
+                # deliberately no "distance_m" key
+            }
+        ]
+        analysis.result = result
+        session.commit()
+
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+    response = app_client.get(f"/activities/{activity_id}")
+    assert response.status_code == 200
+    assert "Splits (1 km)" in response.text
+    assert "—" in response.text
+
+
 def test_activity_patch_without_htmx_header_is_403(app_client, sample_gpx_bytes, auth_headers):
     upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
     activity_id = upload.json()["id"]

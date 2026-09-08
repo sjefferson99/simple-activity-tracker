@@ -80,7 +80,7 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
     of activity_id/all_activities must be given by the caller (main() enforces
     this).
     """
-    from app.analysis.gpx_parser import GpxParseError, parse_gpx
+    from app.analysis.gpx_parser import GpxParseError, parse_gpx, parse_split_preference
     from app.analysis.track_sampling import DEFAULT_MAX_POINTS, sample_track
     from app.analysis.v1 import ANALYSIS_VERSION, AnalyzerV1
     from app.db import get_session_factory
@@ -116,7 +116,14 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
             try:
                 gpx_bytes = blob_store.get(activity.gpx_blob_key)
                 track = parse_gpx(gpx_bytes)
-                result = analyzer.analyze(track)
+                # Reanalyze refreshes the derived ActivityAnalysis.result only —
+                # it deliberately does not touch activity.split_type/split_value,
+                # which were set once at upload time and stay upload-time-fixed
+                # (see docs history: pre-existing defaults aren't backfilled).
+                split_pref = parse_split_preference(gpx_bytes)
+                result = (
+                    analyzer.analyze(track, *split_pref) if split_pref else analyzer.analyze(track)
+                )
                 cached_track = sample_track(track, max_points=DEFAULT_MAX_POINTS)
                 status = AnalysisStatus.done
                 error = None

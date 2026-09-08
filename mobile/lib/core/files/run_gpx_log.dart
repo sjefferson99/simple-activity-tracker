@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:gpx/gpx.dart';
 
 import '../../domain/models/track_point.dart';
+import '../../domain/tracking/split_preference.dart';
 
 /// Namespace for this app's own per-point GPX extensions (accuracy/speed
 /// diagnostics — see [RunGpxLog.addPoint]). A plain, unregistered URI is
@@ -23,6 +24,7 @@ const String _extensionsPrefix = 'sat';
 /// file — the previous flush's file stays valid until the new one lands.
 class RunGpxLog {
   final File _targetFile;
+  final SplitPreference _splitPreference;
   final Trk _track = Trk();
   Trkseg? _currentSegment;
 
@@ -30,7 +32,7 @@ class RunGpxLog {
   /// the same temp file concurrently and clobber each other's rename.
   Future<void> _pendingFlush = Future.value();
 
-  RunGpxLog(this._targetFile) {
+  RunGpxLog(this._targetFile, this._splitPreference) {
     _startNewSegment();
   }
 
@@ -81,7 +83,11 @@ class RunGpxLog {
   Future<void> _writeSnapshot() async {
     final gpx = Gpx()
       ..creator = 'Simple Activity Tracker'
-      ..trks = [_track];
+      ..trks = [_track]
+      ..extensions = {
+        '$_extensionsPrefix:split_type': _splitPreference.gpxSplitType,
+        '$_extensionsPrefix:split_value': '${_splitPreference.value}',
+      };
     final xml = GpxWriter().asString(
       gpx,
       pretty: true,
