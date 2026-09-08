@@ -35,6 +35,15 @@
   <div id="map"></div>
 </div>
 
+{% if activity.analysis.status == "done" %}
+<div class="card">
+  <h2>Pace &amp; elevation</h2>
+  <div class="chart-container">
+    <div id="chart"></div>
+  </div>
+</div>
+{% endif %}
+
 <div class="card">
   <h2>Server analysis</h2>
   {% if activity.analysis.status == "done" %}
@@ -103,11 +112,6 @@
   <div id="splits-table">
     {% include "partials/splits_table.html" %}
   </div>
-
-  <h2 style="margin-top:1.5rem;">Pace &amp; elevation</h2>
-  <div class="chart-container">
-    <div id="chart"></div>
-  </div>
   {% elif activity.analysis.status == "pending" %}
   <p class="muted">Analysis pending.</p>
   {% else %}
@@ -161,6 +165,77 @@
     let chartInstance = null;
     let mapHasView = false;
     let currentSplits = {{ (activity.analysis.result.splits if activity.analysis.status == "done" else []) | tojson }};
+
+    // Flat [{lat, lon, cumDist}] across every segment, in the same order the
+    // polylines were drawn, used to turn a chart hover's cumulative distance
+    // (series[i].dist_m) into a map position — see issue #46. Segment gaps
+    // (pause/resume) aren't bridged with a distance jump: cumDist just keeps
+    // accumulating step-by-step within each segment's own points, so a hover
+    // whose distance falls in a gap resolves to the nearest real point.
+    let trackPointsByDistance = [];
+    let hoverMarker = null;
+
+    function buildDistanceIndex(segments) {
+      const points = [];
+      let cumDist = 0;
+      segments.forEach((segment) => {
+        segment.forEach((p, i) => {
+          if (i > 0) {
+            cumDist += L.latLng(segment[i - 1].lat, segment[i - 1].lon)
+              .distanceTo(L.latLng(p.lat, p.lon));
+          }
+          points.push({ lat: p.lat, lon: p.lon, cumDist });
+        });
+      });
+      return points;
+    }
+
+    // Binary search for the last point with cumDist <= targetDist, then
+    // interpolate towards the next point — trackPointsByDistance is
+    // monotonically non-decreasing in cumDist by construction.
+    function latLngAtDistance(targetDist) {
+      const pts = trackPointsByDistance;
+      if (pts.length === 0) return null;
+      if (targetDist <= pts[0].cumDist) return [pts[0].lat, pts[0].lon];
+      if (targetDist >= pts[pts.length - 1].cumDist) {
+        const last = pts[pts.length - 1];
+        return [last.lat, last.lon];
+      }
+      let lo = 0;
+      let hi = pts.length - 1;
+      while (lo < hi - 1) {
+        const mid = (lo + hi) >> 1;
+        if (pts[mid].cumDist <= targetDist) lo = mid;
+        else hi = mid;
+      }
+      const a = pts[lo];
+      const b = pts[hi];
+      const span = b.cumDist - a.cumDist;
+      const frac = span > 0 ? (targetDist - a.cumDist) / span : 0;
+      return [a.lat + (b.lat - a.lat) * frac, a.lon + (b.lon - a.lon) * frac];
+    }
+
+    function showHoverMarker(latLng) {
+      if (!mapHasView) return;
+      if (!hoverMarker) {
+        hoverMarker = L.circleMarker(latLng, {
+          radius: 7,
+          color: '#fff',
+          weight: 2,
+          fillColor: '#dc2626',
+          fillOpacity: 1,
+        }).addTo(map);
+      } else {
+        hoverMarker.setLatLng(latLng);
+      }
+    }
+
+    function hideHoverMarker() {
+      if (hoverMarker) {
+        hoverMarker.remove();
+        hoverMarker = null;
+      }
+    }
 
     function splitNumberIcon(index) {
       return L.divIcon({
@@ -220,6 +295,7 @@
           map.setView([0, 0], 2);
         }
         mapHasView = true;
+        trackPointsByDistance = buildDistanceIndex(data.segments);
         redrawSplitMapMarkers();
       });
 
@@ -230,6 +306,7 @@
       const t = series.map((s) => s.t_s);
       const paceKmh = series.map((s) => (s.speed_mps != null ? s.speed_mps * 3.6 : null));
       const ele = series.map((s) => s.ele_m);
+      const distM = series.map((s) => s.dist_m);
       // Draws a dotted vertical line + split-number label at each split
       // boundary's t_s, directly on the canvas after uPlot's own series
       // draw — the simplest way to add an annotation uPlot has no built-in
@@ -254,6 +331,22 @@
         });
         ctx.restore();
       }
+      // Hovering the chart shows the corresponding position on the map
+      // (issue #46); the reverse — hovering the map — deliberately does
+      // nothing. idx is null when the cursor leaves the plot area.
+      function syncMapToCursor(u) {
+        const idx = u.cursor.idx;
+        if (idx == null || distM[idx] == null) {
+          hideHoverMarker();
+          return;
+        }
+        const latLng = latLngAtDistance(distM[idx]);
+        if (latLng) {
+          showHoverMarker(latLng);
+        } else {
+          hideHoverMarker();
+        }
+      }
       chartInstance = new uPlot(
         {
           width: chartEl.clientWidth || 600,
@@ -265,7 +358,7 @@
             { label: 'Elevation (m)', stroke: '#c2410c', scale: 'ele' },
           ],
           axes: [{}, { scale: 'kmh', side: 3 }, { scale: 'ele', side: 1 }],
-          hooks: { draw: [drawSplitLines] },
+          hooks: { draw: [drawSplitLines], setCursor: [syncMapToCursor] },
         },
         [t, paceKmh, ele],
         chartEl
