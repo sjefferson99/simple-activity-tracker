@@ -5,7 +5,11 @@ from app.analysis.analyzer import AnalysisResult
 from app.analysis.geo_math import haversine_distance_meters, speed_mps_between
 from app.analysis.track import Point, Track
 
-ANALYSIS_VERSION = 2
+# 3: splits gained a `boundary` {t_s, lat, lon} crossing point (issue #45).
+# Bump this whenever the result shape or algorithm changes, then run
+# `simple-activity-tracker-server reanalyze --all` on each deployment so
+# stored analyses catch up — the web UI reads stored results as-is.
+ANALYSIS_VERSION = 3
 
 _MAX_IMPLIED_SPEED_MPS = 12.5  # ~2:08 min/km; faster than that is treated as a GPS jump
 _MOVING_SPEED_THRESHOLD_MPS = 0.5
@@ -30,6 +34,8 @@ _SPEED_WINDOW_SECONDS = 3.0
 class _Step:
     """One accepted point-to-point step, with its running totals."""
 
+    prev_point: Point  # start of this step, needed to interpolate a split
+    # boundary's crossing position (see _interpolate_latlon)
     point: Point
     distance_m: float  # this step's own distance
     dt_s: float
@@ -78,6 +84,7 @@ def _build_steps(track: Track) -> list[_Step]:
             cum_time += max(dt, 0.0)
             steps.append(
                 _Step(
+                    prev_point=prev,
                     point=curr,
                     distance_m=distance,
                     dt_s=dt,
@@ -144,6 +151,7 @@ def _compute_distance_splits(
             duration_s = crossing_time_s - builder.start_time_s
             split_distance_m = next_boundary - builder.start_distance_m
             avg_speed = split_distance_m / duration_s if duration_s > 0 else 0.0
+            lat, lon = _interpolate_latlon(step, fraction)
             splits.append(
                 {
                     "index": builder.index,
@@ -151,6 +159,7 @@ def _compute_distance_splits(
                     "avg_speed_mps": avg_speed,
                     "elevation_delta_m": builder.elevation_delta_m,
                     "distance_m": split_distance_m,
+                    "boundary": {"t_s": crossing_time_s, "lat": lat, "lon": lon},
                 }
             )
             builder = _SplitBuilder(
@@ -194,6 +203,7 @@ def _compute_time_splits(
             duration_s = next_boundary - builder.start_time_s
             split_distance_m = crossing_distance_m - builder.start_distance_m
             avg_speed = split_distance_m / duration_s if duration_s > 0 else 0.0
+            lat, lon = _interpolate_latlon(step, fraction)
             splits.append(
                 {
                     "index": builder.index,
@@ -201,6 +211,7 @@ def _compute_time_splits(
                     "avg_speed_mps": avg_speed,
                     "elevation_delta_m": builder.elevation_delta_m,
                     "distance_m": split_distance_m,
+                    "boundary": {"t_s": next_boundary, "lat": lat, "lon": lon},
                 }
             )
             builder = _SplitBuilder(
@@ -213,6 +224,17 @@ def _compute_time_splits(
         prev_cum_distance = step.cum_distance_m
 
     return splits
+
+
+def _interpolate_latlon(step: _Step, fraction: float) -> tuple[float, float]:
+    """Position at `fraction` of the way through `step`, linearly interpolated
+    between its two endpoints — consecutive GPS fixes are close enough
+    together that straight-line interpolation is indistinguishable from the
+    great-circle path (same precision tradeoff as the crossing-time
+    interpolation these boundary points share a fraction with)."""
+    lat = step.prev_point.lat + fraction * (step.point.lat - step.prev_point.lat)
+    lon = step.prev_point.lon + fraction * (step.point.lon - step.prev_point.lon)
+    return lat, lon
 
 
 def _elevation_delta(prev_ele: float | None, curr_ele: float | None) -> float:

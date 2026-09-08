@@ -188,6 +188,34 @@ def test_time_min_splits_interpolate_distance_at_the_time_boundary() -> None:
         assert split["distance_m"] == pytest.approx(400.0, rel=0.05)
 
 
+def test_split_boundary_carries_a_chart_time_and_position() -> None:
+    result = _analyze()
+    splits = result["splits"]
+    # t_s should be the cumulative sum of duration_seconds up to and
+    # including each split — i.e. it lines up with the series' own t_s axis,
+    # which is what lets the chart draw a boundary line at the right x.
+    cumulative_duration = 0.0
+    for split in splits:
+        cumulative_duration += split["duration_seconds"]
+        boundary = split["boundary"]
+        assert boundary["t_s"] == pytest.approx(cumulative_duration, abs=0.01)
+        assert -90.0 <= boundary["lat"] <= 90.0
+        assert -180.0 <= boundary["lon"] <= 180.0
+
+
+def test_split_boundary_position_is_interpolated_along_a_sparse_step() -> None:
+    # Straight line from (0, 0) to (0, 2500m-worth-of-lon) — each boundary's
+    # lon should land proportionally to the distance covered (1000m/2500m,
+    # 2000m/2500m).
+    track = _sparse_track(total_distance_m=2500.0, total_duration_s=250.0)
+    result = AnalyzerV1().analyze(track, "distance_km", 1)
+    splits = result["splits"]
+    lon_per_meter = 1 / 111195
+    assert splits[0]["boundary"]["lat"] == pytest.approx(0.0, abs=1e-9)
+    assert splits[0]["boundary"]["lon"] == pytest.approx(1000.0 * lon_per_meter, rel=0.001)
+    assert splits[1]["boundary"]["lon"] == pytest.approx(2000.0 * lon_per_meter, rel=0.001)
+
+
 def test_time_min_split_distances_sum_to_the_completed_split_time() -> None:
     track = parse_gpx(_FIXTURE.read_bytes())
     result = AnalyzerV1().analyze(track, "time_min", 2)
