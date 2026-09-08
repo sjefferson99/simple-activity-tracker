@@ -151,6 +151,58 @@
       maxZoom: 19,
     }).addTo(map);
 
+    // Split markers/lines: the page-load splits are seeded here so the map
+    // and chart include them on their very first paint; afterwards
+    // partials/splits_table.html's inline script calls
+    // window.updateSplitMarkers every time the split-size control swaps in a
+    // fresh table, keeping the map/chart split markers in sync with the
+    // table currently on screen.
+    let splitMarkersLayer = null;
+    let chartInstance = null;
+    let mapHasView = false;
+    let currentSplits = {{ (activity.analysis.result.splits if activity.analysis.status == "done" else []) | tojson }};
+
+    function splitNumberIcon(index) {
+      return L.divIcon({
+        className: 'split-marker',
+        html: `<span>${index}</span>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
+      });
+    }
+
+    // Leaflet defers layers added to a map that has no view yet, so markers
+    // are only drawn once the track has loaded and fitBounds has run.
+    function redrawSplitMapMarkers() {
+      if (!mapHasView) return;
+      if (splitMarkersLayer) {
+        splitMarkersLayer.remove();
+      }
+      splitMarkersLayer = L.layerGroup();
+      currentSplits.forEach((split) => {
+        if (!split.boundary) return;
+        L.marker([split.boundary.lat, split.boundary.lon], {
+          icon: splitNumberIcon(split.index),
+          keyboard: false,
+        })
+          .bindTooltip(`Split ${split.index}`)
+          .addTo(splitMarkersLayer);
+      });
+      splitMarkersLayer.addTo(map);
+    }
+
+    window.updateSplitMarkers = function (splits) {
+      currentSplits = splits || [];
+      redrawSplitMapMarkers();
+      // redraw(false) repaints without rebuilding series paths — the draw
+      // hook below reads currentSplits at paint time, so a repaint is all
+      // that's needed. A full redraw() issued before uPlot's deferred first
+      // paint permanently wipes the series lines.
+      if (chartInstance) {
+        chartInstance.redraw(false);
+      }
+    };
+
     fetch(`/api/v1/activities/${activityId}/track`)
       .then((r) => r.json())
       .then((data) => {
@@ -167,6 +219,8 @@
         } else {
           map.setView([0, 0], 2);
         }
+        mapHasView = true;
+        redrawSplitMapMarkers();
       });
 
     {% if activity.analysis.status == "done" %}
@@ -176,7 +230,31 @@
       const t = series.map((s) => s.t_s);
       const paceKmh = series.map((s) => (s.speed_mps != null ? s.speed_mps * 3.6 : null));
       const ele = series.map((s) => s.ele_m);
-      new uPlot(
+      // Draws a dotted vertical line + split-number label at each split
+      // boundary's t_s, directly on the canvas after uPlot's own series
+      // draw — the simplest way to add an annotation uPlot has no built-in
+      // concept of, without pulling in a plugin dependency for one feature.
+      function drawSplitLines(u) {
+        const { ctx } = u;
+        ctx.save();
+        ctx.strokeStyle = '#64748b';
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1;
+        ctx.font = '11px sans-serif';
+        ctx.fillStyle = '#64748b';
+        currentSplits.forEach((split) => {
+          if (!split.boundary) return;
+          const x = u.valToPos(split.boundary.t_s, 'x', true);
+          if (x < u.bbox.left || x > u.bbox.left + u.bbox.width) return;
+          ctx.beginPath();
+          ctx.moveTo(x, u.bbox.top);
+          ctx.lineTo(x, u.bbox.top + u.bbox.height);
+          ctx.stroke();
+          ctx.fillText(String(split.index), x + 3, u.bbox.top + 11);
+        });
+        ctx.restore();
+      }
+      chartInstance = new uPlot(
         {
           width: chartEl.clientWidth || 600,
           height: 260,
@@ -187,6 +265,7 @@
             { label: 'Elevation (m)', stroke: '#c2410c', scale: 'ele' },
           ],
           axes: [{}, { scale: 'kmh', side: 3 }, { scale: 'ele', side: 1 }],
+          hooks: { draw: [drawSplitLines] },
         },
         [t, paceKmh, ele],
         chartEl

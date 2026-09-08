@@ -1,4 +1,19 @@
 {% set unit_label = {"distance_km": "km", "distance_mi": "mi", "time_min": "min"}[split_type or "distance_km"] %}
+{# Re-run on every htmx swap of this fragment (split-size control changed) as
+   well as the initial full-page render, so the map markers and chart split
+   lines always match the table currently on screen — see
+   window.updateSplitMarkers in activity_detail.html. The nonce is required
+   here even though htmx auto-applies one to content *it* swaps in
+   (htmx.config.inlineScriptNonce, set in base.html) — that only covers
+   scripts htmx's own AJAX swap creates. This partial is also rendered
+   directly into the initial full-page HTML via Jinja's {% include %}, which
+   the browser parses itself with no htmx involvement, so without an
+   explicit nonce here the CSP blocks it outright on first page load. #}
+<script nonce="{{ csp_nonce(request) }}">
+  if (window.updateSplitMarkers) {
+    window.updateSplitMarkers({{ (splits or []) | tojson }});
+  }
+</script>
 {% if splits %}
 <h2 style="margin-top:1.5rem;">Splits ({{ split_value or 1 }} {{ unit_label }})</h2>
 <table>

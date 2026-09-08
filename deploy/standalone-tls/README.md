@@ -51,6 +51,19 @@ always picks up the newest build from `main`. `docker compose ps` should show
 both services `healthy` within a few seconds; if not, `docker compose logs app`
 first (migrations run at startup and fail loudly on a real problem).
 
+When an update changes what the server derives from a GPX (it bumps
+`ANALYSIS_VERSION` in `server/app/analysis/v1.py` — the release notes / PR will
+say so), stored analyses stay on the old version until you re-run them; the web
+UI reads them as-is, so new fields (e.g. the split markers on the map and chart
+added in #45) stay missing on existing activities until then:
+
+```bash
+docker compose exec app simple-activity-tracker-server reanalyze --all
+```
+
+It only touches activities whose stored version is older than the current one,
+so it is safe to run after every update.
+
 To roll back, every merge to `main` also gets an immutable `sha-<short-commit>`
 tag on the same image (see `.github/workflows/container.yml`) — find the last
 known-good commit (`git log --oneline server/`, which prints the same short
