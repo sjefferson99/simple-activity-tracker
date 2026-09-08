@@ -514,9 +514,28 @@ class _StopButton extends StatelessWidget {
     return GestureDetector(
       onLongPress: controller.stop,
       child: FilledButton.tonal(
-        onPressed: () =>
-            ScaffoldMessenger.of(context)
-                .showSnackBar(const SnackBar(content: Text('Hold to stop'))),
+        onPressed: () {
+          // A bottom SnackBar sits right over this button on most layouts,
+          // obscuring the very thing the hint is explaining how to use — a
+          // MaterialBanner anchors to the top of the screen instead, so it
+          // never covers the Stop button.
+          final messenger = ScaffoldMessenger.of(context);
+          messenger.clearMaterialBanners();
+          messenger.showMaterialBanner(
+            MaterialBanner(
+              content: const Text('Press and hold to stop'),
+              actions: [
+                TextButton(
+                  onPressed: messenger.hideCurrentMaterialBanner,
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+          Future.delayed(const Duration(seconds: 2), () {
+            if (context.mounted) messenger.hideCurrentMaterialBanner();
+          });
+        },
         style: FilledButton.styleFrom(minimumSize: const Size(120, 56)),
         child: const Text('Stop'),
       ),

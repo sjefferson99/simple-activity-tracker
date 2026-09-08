@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show TextInput;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/api_client.dart';
@@ -199,6 +200,7 @@ class _SignInForm extends ConsumerStatefulWidget {
 
 class _SignInFormState extends ConsumerState<_SignInForm> {
   bool _submitting = false;
+  bool _obscurePassword = true;
   String? _error;
 
   Future<void> _submit() async {
@@ -211,6 +213,11 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
           .read(authStateControllerProvider.notifier)
           .setServerUrl(widget.serverUrlController.text.trim());
       await _signIn();
+      // Tells the platform autofill service (Bitwarden et al.) the entered
+      // credential was actually used, which is what triggers its "save
+      // password?" prompt — without this, a successful sign-in in an
+      // AutofillGroup never offers to save anything.
+      TextInput.finishAutofillContext();
     } on Object catch (e) {
       // Deliberately caught here, not routed through authStateControllerProvider's
       // state — an AsyncError there would replace this whole form (and the
@@ -305,16 +312,37 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
           _ErrorBanner(message: _error!),
           const SizedBox(height: 8),
         ],
-        TextField(
-          controller: widget.emailController,
-          decoration: const InputDecoration(labelText: 'Email'),
-          keyboardType: TextInputType.emailAddress,
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: widget.passwordController,
-          decoration: const InputDecoration(labelText: 'Password'),
-          obscureText: true,
+        AutofillGroup(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: widget.emailController,
+                decoration: const InputDecoration(labelText: 'Email'),
+                keyboardType: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.username],
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: widget.passwordController,
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                    tooltip: _obscurePassword ? 'Show password' : 'Hide password',
+                    onPressed: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                ),
+                obscureText: _obscurePassword,
+                autofillHints: const [AutofillHints.password],
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 8),
         TextField(
