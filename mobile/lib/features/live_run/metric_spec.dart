@@ -8,7 +8,12 @@ import '../../domain/tracking/activity_mode.dart';
 /// (persisted) list of specs — the tile grid itself doesn't need to change.
 class MetricSpec {
   final String id;
-  final String label;
+
+  /// Most tiles have a fixed label regardless of the km/h ⇄ min/km toggle;
+  /// [_currentSplitSpec] is the exception ("Split pace" only makes sense in
+  /// min/km — it reads "Split speed" in km/h mode), so every spec's label is
+  /// a function of [useKmh] even though most ignore the argument.
+  final String Function(bool useKmh) label;
 
   /// One or two plain sentences on what the number actually measures — shown
   /// on tapping the tile. Worth spelling out for anything ambiguous (Time is
@@ -30,6 +35,8 @@ class MetricSpec {
   });
 }
 
+String Function(bool useKmh) _staticLabel(String text) => (_) => text;
+
 String _speedOrPace(double? mps, bool useKmh) {
   if (mps == null) return useKmh ? '--.-' : '--:--';
   return useKmh ? formatKmh(mps) : formatPace(paceSecPerKmFromMps(mps));
@@ -37,7 +44,7 @@ String _speedOrPace(double? mps, bool useKmh) {
 
 final MetricSpec _avgSpeedSpec = MetricSpec(
   id: 'avg_speed',
-  label: 'Avg',
+  label: _staticLabel('Avg'),
   description:
       'Average pace or speed over moving time only — time spent stationary '
       'or without usable GPS is excluded.',
@@ -50,7 +57,7 @@ final MetricSpec _avgSpeedSpec = MetricSpec(
 /// Avg pace deliberately stays on moving time (Strava's "moving pace").
 final MetricSpec _elapsedSpec = MetricSpec(
   id: 'elapsed',
-  label: 'Time',
+  label: _staticLabel('Time'),
   description:
       'Time since you pressed Start, not counting pauses. Keeps counting '
       'while you are stationary or have no GPS fix.',
@@ -60,20 +67,21 @@ final MetricSpec _elapsedSpec = MetricSpec(
 
 final MetricSpec _distanceSpec = MetricSpec(
   id: 'distance',
-  label: 'Distance (km)',
+  label: _staticLabel('Distance'),
   description:
       'Distance from accepted GPS fixes. Fixes with poor accuracy, '
       'implausible jumps, or stationary jitter are not counted.',
   valueOf: (metrics, currentSpeedMps, useKmh) =>
-      formatDistanceKm(metrics.distanceMeters),
+      '${formatDistanceKm(metrics.distanceMeters)} km / '
+      '${formatDistanceMi(metrics.distanceMeters)} mi',
 );
 
 final MetricSpec _currentSplitSpec = MetricSpec(
   id: 'current_split',
-  label: 'Split pace',
+  label: (useKmh) => useKmh ? 'Split speed' : 'Split pace',
   description:
-      'Pace over the current 1 km split so far, by moving time. Resets at '
-      'each kilometre.',
+      'Pace or speed over the current split so far, by moving time. Resets '
+      'at each split boundary.',
   valueOf: (metrics, currentSpeedMps, useKmh) {
     final elapsedSeconds = metrics.currentSplitElapsed.inMilliseconds / 1000;
     if (elapsedSeconds <= 0) return _speedOrPace(null, useKmh);
@@ -84,12 +92,13 @@ final MetricSpec _currentSplitSpec = MetricSpec(
 
 final MetricSpec _lastSplitSpec = MetricSpec(
   id: 'last_split',
-  label: 'Last split',
-  description: 'Moving time taken for the most recently completed 1 km.',
+  label: _staticLabel('Last split'),
+  description: 'Moving time taken for the most recently completed split.',
   valueOf: (metrics, currentSpeedMps, useKmh) {
     final last = metrics.lastCompletedSplit;
     if (last == null) return '--:--';
-    return formatDuration(last.duration);
+    // Split.index is already 1-based (see MetricsEngine).
+    return '#${last.index}  ${formatDuration(last.duration)}';
   },
 );
 
@@ -98,7 +107,7 @@ final MetricSpec _lastSplitSpec = MetricSpec(
 /// toggle (which cycling mode forces to km/h anyway — see LiveRunScreen).
 final MetricSpec _maxSpeedSpec = MetricSpec(
   id: 'max_speed',
-  label: 'Max speed',
+  label: _staticLabel('Max speed'),
   description: 'Fastest speed between two accepted GPS fixes this ride.',
   valueOf: (metrics, currentSpeedMps, useKmh) {
     final maxSpeedMps = metrics.maxSpeedMps;
@@ -108,7 +117,7 @@ final MetricSpec _maxSpeedSpec = MetricSpec(
 
 final MetricSpec _elevationGainSpec = MetricSpec(
   id: 'elevation_gain',
-  label: 'Elevation gain (m)',
+  label: _staticLabel('Elevation gain (m)'),
   description:
       'Total climb from GPS altitude between accepted fixes — a rough live '
       'figure; the server computes a smoothed one after upload.',
