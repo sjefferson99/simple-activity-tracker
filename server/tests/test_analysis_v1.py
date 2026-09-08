@@ -216,6 +216,24 @@ def test_split_boundary_position_is_interpolated_along_a_sparse_step() -> None:
     assert splits[1]["boundary"]["lon"] == pytest.approx(2000.0 * lon_per_meter, rel=0.001)
 
 
+def test_split_boundary_takes_the_short_way_across_the_antimeridian() -> None:
+    """Regression: interpolating raw longitudes sent the marker the long way
+    round at ±180°, landing it ~30km from the real crossing. Distances were
+    never affected (haversine is wrap-safe), only the boundary position."""
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    # ~1km either side of the antimeridian, so the 1km boundary falls almost
+    # exactly on it.
+    points = [
+        Point(lat=0.0, lon=179.9910, ele=None, time=start),
+        Point(lat=0.0, lon=-179.9910, ele=None, time=start + timedelta(seconds=200)),
+    ]
+    result = AnalyzerV1().analyze(Track(segments=[Segment(points=points)]), "distance_km", 1)
+
+    boundary = result["splits"][0]["boundary"]
+    assert abs(boundary["lon"]) == pytest.approx(180.0, abs=0.01)
+    assert -180.0 <= boundary["lon"] <= 180.0
+
+
 def test_time_min_split_distances_sum_to_the_completed_split_time() -> None:
     track = parse_gpx(_FIXTURE.read_bytes())
     result = AnalyzerV1().analyze(track, "time_min", 2)

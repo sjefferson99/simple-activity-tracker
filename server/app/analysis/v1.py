@@ -233,7 +233,12 @@ def _interpolate_latlon(step: _Step, fraction: float) -> tuple[float, float]:
     great-circle path (same precision tradeoff as the crossing-time
     interpolation these boundary points share a fraction with)."""
     lat = step.prev_point.lat + fraction * (step.point.lat - step.prev_point.lat)
-    lon = step.prev_point.lon + fraction * (step.point.lon - step.prev_point.lon)
+    # Take the short way round the antimeridian: a step from lon 179.99 to
+    # -179.99 is ~2km, not ~40000km the wrong way. Distances elsewhere are
+    # already wrap-safe (haversine works on sin(d_lon/2)), so without this
+    # only the marker position would be wrong.
+    delta_lon = (step.point.lon - step.prev_point.lon + 540) % 360 - 180
+    lon = (step.prev_point.lon + fraction * delta_lon + 540) % 360 - 180
     return lat, lon
 
 
