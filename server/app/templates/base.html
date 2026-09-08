@@ -60,6 +60,20 @@
     }
     formatLocalTimes(document);
     document.body.addEventListener("htmx:afterSettle", (event) => formatLocalTimes(event.target));
+
+    // Delegated on document so it keeps working after htmx swaps in new
+    // password fields (login/register error re-renders, admin password
+    // form) without needing to re-attach a listener per fragment.
+    document.body.addEventListener("click", (event) => {
+      const toggle = event.target.closest(".password-toggle");
+      if (!toggle) return;
+      const input = document.getElementById(toggle.dataset.for);
+      if (!input) return;
+      const showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      toggle.textContent = showing ? "Show" : "Hide";
+      toggle.setAttribute("aria-pressed", showing ? "false" : "true");
+    });
   </script>
   {% block scripts %}{% endblock %}
 </body>

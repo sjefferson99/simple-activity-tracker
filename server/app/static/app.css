@@ -96,6 +96,29 @@ input[type="text"], input[type="email"], input[type="password"], textarea, selec
   margin-bottom: 1rem;
 }
 
+.password-field {
+  position: relative;
+}
+.password-field input[type="password"], .password-field input[type="text"] {
+  padding-right: 3rem;
+  margin-bottom: 0;
+}
+.password-field .password-toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  padding: 0 0.75rem;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.password-field .password-toggle:hover { color: var(--text); }
+.password-field { margin-bottom: 1rem; }
+
 button, .button {
   display: inline-block;
   padding: 0.5rem 1rem;
