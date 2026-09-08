@@ -1,0 +1,23 @@
+{% set unit_label = {"distance_km": "km", "distance_mi": "mi", "time_min": "min"}[split_type or "distance_km"] %}
+{% if splits %}
+<h2 style="margin-top:1.5rem;">Splits ({{ split_value or 1 }} {{ unit_label }})</h2>
+<table>
+  <thead><tr><th>#</th><th>Distance</th><th>Time</th><th>Pace</th><th>Elevation</th></tr></thead>
+  <tbody>
+    {% for split in splits %}
+    <tr>
+      <td>{{ split.index }}</td>
+      <td>
+        {% if not split.distance_m %}—
+        {% elif split_type == "distance_mi" %}{{ "%.2f"|format(split.distance_m / 1609.344) }} mi
+        {% else %}{{ split.distance_m | distance_km }}
+        {% endif %}
+      </td>
+      <td>{{ split.duration_seconds | duration }}</td>
+      <td>{{ split.avg_speed_mps | pace }}</td>
+      <td>{{ "%+.0f"|format(split.elevation_delta_m) }} m</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}

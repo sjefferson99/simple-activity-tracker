@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:simple_activity_tracker/domain/tracking/activity_mode.dart';
 import 'package:simple_activity_tracker/domain/tracking/metrics_engine.dart';
+import 'package:simple_activity_tracker/domain/tracking/split_preference.dart';
 import 'package:simple_activity_tracker/domain/models/track_point.dart';
 
 /// One degree of longitude at the equator is ~111,195m, matching the
@@ -172,7 +173,94 @@ void main() {
         closeTo(const Duration(seconds: 100).inMilliseconds, 50),
       );
       expect(split.avgSpeedMps, closeTo(10, 0.1));
+      expect(split.distanceMeters, closeTo(1000, 0.1));
     });
+
+    test('a mile split completes at the 1609.344m boundary, not 1000m', () {
+      final engine = MetricsEngine(
+        splitPreference: const SplitPreference(
+          kind: SplitKind.distanceMi,
+          value: 1,
+        ),
+      );
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      // Moving at 10 m/s: point at 1500m (t=150s), then 1700m (t=170s).
+      // The 1609.344m boundary is crossed partway into that 20s/200m segment.
+      engine.addPoint(_pointAtMeters(0, start));
+      engine.addPoint(
+        _pointAtMeters(1500, start.add(const Duration(seconds: 150))),
+      );
+      engine.addPoint(
+        _pointAtMeters(1700, start.add(const Duration(seconds: 170))),
+      );
+
+      expect(engine.metrics.completedSplits, hasLength(1));
+      final split = engine.metrics.completedSplits.first;
+      expect(split.distanceMeters, closeTo(1609.344, 0.1));
+      expect(split.avgSpeedMps, closeTo(10, 0.1));
+      // 1609.344m at 10 m/s = 160.9344s.
+      expect(
+        split.duration.inMilliseconds,
+        closeTo(const Duration(milliseconds: 160934).inMilliseconds, 50),
+      );
+    });
+
+    test(
+      'a time-based split interpolates the crossing distance, not time',
+      () {
+        final engine = MetricsEngine(
+          splitPreference: const SplitPreference(
+            kind: SplitKind.timeMin,
+            value: 1,
+          ),
+        );
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        // Moving at 5 m/s: the 1-minute (60s) boundary falls inside a segment
+        // spanning t=50s (250m) to t=70s (350m) — crossed 10s/50m in.
+        engine.addPoint(_pointAtMeters(0, start));
+        engine.addPoint(
+          _pointAtMeters(250, start.add(const Duration(seconds: 50))),
+        );
+        engine.addPoint(
+          _pointAtMeters(350, start.add(const Duration(seconds: 70))),
+        );
+
+        expect(engine.metrics.completedSplits, hasLength(1));
+        final split = engine.metrics.completedSplits.first;
+        expect(split.index, 1);
+        expect(split.duration, const Duration(seconds: 60));
+        // 5 m/s for 60s covers 300m.
+        expect(split.distanceMeters, closeTo(300, 1));
+        expect(split.avgSpeedMps, closeTo(5, 0.1));
+      },
+    );
+
+    test(
+      'multiple time-based splits crossed within a single sparse segment',
+      () {
+        final engine = MetricsEngine(
+          splitPreference: const SplitPreference(
+            kind: SplitKind.timeMin,
+            value: 1,
+          ),
+        );
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        // 5 m/s for 150s covers 750m in one jump, crossing two 1-minute
+        // boundaries (at t=60s and t=120s).
+        engine.addPoint(_pointAtMeters(0, start));
+        engine.addPoint(
+          _pointAtMeters(750, start.add(const Duration(seconds: 150))),
+        );
+
+        expect(engine.metrics.completedSplits, hasLength(2));
+        expect(engine.metrics.completedSplits[0].duration, const Duration(seconds: 60));
+        expect(engine.metrics.completedSplits[1].duration, const Duration(seconds: 60));
+        expect(engine.metrics.completedSplits[0].distanceMeters, closeTo(300, 1));
+        expect(engine.metrics.completedSplits[1].distanceMeters, closeTo(300, 1));
+        expect(engine.metrics.currentSplitDistanceMeters, closeTo(150, 1));
+        expect(engine.metrics.currentSplitElapsed, const Duration(seconds: 30));
+      },
+    );
 
     test('tracks distance/time in the split still in progress', () {
       final engine = MetricsEngine();

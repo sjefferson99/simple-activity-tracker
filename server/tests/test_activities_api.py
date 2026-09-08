@@ -18,6 +18,27 @@ def test_upload_creates_an_activity_with_analysis(
     assert body["activity_type"] == "running"
 
 
+def test_upload_accepts_client_summary_splits_with_distance_m(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    """#43: newer app versions include each phone-reported split's distance
+    (constant for a distance-based preference, variable for a time-based
+    one) — the field is optional (older app versions never sent it) but
+    must round-trip when present."""
+    summary = make_summary()
+    summary["splits"] = [
+        {"index": 1, "duration_seconds": 300.0, "avg_speed_mps": 3.33, "distance_m": 1000.0}
+    ]
+    response = app_client.post(
+        "/api/v1/activities",
+        headers=auth_headers,
+        data={"summary": json.dumps(summary)},
+        files={"gpx": ("activity.gpx", sample_gpx_bytes, "application/gpx+xml")},
+    )
+    assert response.status_code == 201
+    assert response.json()["client_summary"]["splits"][0]["distance_m"] == 1000.0
+
+
 def test_upload_records_device_name_from_the_authenticating_token(
     app_client, auth_headers, sample_gpx_bytes
 ) -> None:
@@ -349,6 +370,116 @@ def test_upload_rejects_gpx_with_doctype(app_client, auth_headers) -> None:
     )
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_gpx"
+
+
+def _gpx_with_split_extension(split_type: str, split_value: int) -> bytes:
+    ns = "https://simple-activity-tracker.local/gpx-extensions"
+    return (
+        f'<?xml version="1.0"?><gpx version="1.1" xmlns:sat="{ns}">'
+        f"<extensions><sat:split_type>{split_type}</sat:split_type>"
+        f"<sat:split_value>{split_value}</sat:split_value></extensions>"
+        '<trk><trkseg><trkpt lat="51.5" lon="-0.1"><time>2026-01-01T07:00:00Z</time></trkpt>'
+        '<trkpt lat="51.51" lon="-0.1"><time>2026-01-01T07:05:00Z</time></trkpt>'
+        "</trkseg></trk></gpx>"
+    ).encode()
+
+
+def test_upload_with_split_extension_populates_activity_and_analysis(
+    app_client, auth_headers
+) -> None:
+    from app.db import get_session_factory
+    from app.models.activity import Activity
+
+    gpx = _gpx_with_split_extension("time_min", 5)
+    created = upload_sample_activity(app_client, auth_headers, gpx).json()
+
+    with get_session_factory()() as session:
+        activity = session.get(Activity, created["id"])
+        assert activity is not None
+        assert activity.split_type == "time_min"
+        assert activity.split_value == 5
+
+    assert created["analysis"]["result"]["split_type"] == "time_min"
+    assert created["analysis"]["result"]["split_value"] == 5
+
+
+def test_upload_with_no_split_extension_defaults_to_distance_km(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    from app.db import get_session_factory
+    from app.models.activity import Activity
+
+    created = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
+
+    with get_session_factory()() as session:
+        activity = session.get(Activity, created["id"])
+        assert activity is not None
+        assert activity.split_type is None
+        assert activity.split_value is None
+
+    assert created["analysis"]["result"]["split_type"] == "distance_km"
+    assert created["analysis"]["result"]["split_value"] == 1
+
+
+def test_analysis_endpoint_without_params_serves_cached_result(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    created = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
+    response = app_client.get(f"/api/v1/activities/{created['id']}/analysis", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["result"]["split_type"] == "distance_km"
+
+
+def test_analysis_endpoint_with_params_recomputes_without_persisting(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    from app.db import get_session_factory
+    from app.models.activity_analysis import ActivityAnalysis
+
+    created = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
+    cached_result = created["analysis"]["result"]
+
+    response = app_client.get(
+        f"/api/v1/activities/{created['id']}/analysis",
+        headers=auth_headers,
+        params={"split_type": "time_min", "split_value": 2},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result"]["split_type"] == "time_min"
+    assert body["result"]["split_value"] == 2
+    assert body["result"]["splits"] != cached_result["splits"]
+
+    with get_session_factory()() as session:
+        stored = session.get(ActivityAnalysis, created["id"])
+        assert stored is not None
+        assert stored.result["split_type"] == "distance_km"
+        assert stored.result["split_value"] == 1
+
+
+def test_analysis_endpoint_requires_both_split_params_together(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    created = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
+    response = app_client.get(
+        f"/api/v1/activities/{created['id']}/analysis",
+        headers=auth_headers,
+        params={"split_type": "time_min"},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_split"
+
+
+def test_analysis_endpoint_rejects_invalid_split_type(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    created = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
+    response = app_client.get(
+        f"/api/v1/activities/{created['id']}/analysis",
+        headers=auth_headers,
+        params={"split_type": "bogus", "split_value": 1},
+    )
+    assert response.status_code == 422
 
 
 def test_pagination_cursor_pages_through_results(

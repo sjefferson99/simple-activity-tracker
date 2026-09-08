@@ -85,7 +85,7 @@ th { color: var(--text-muted); font-weight: 500; font-size: 0.85rem; }
 
 label { display: block; margin-bottom: 0.3rem; color: var(--text-muted); font-size: 0.9rem; }
 
-input[type="text"], input[type="email"], input[type="password"], textarea, select {
+input[type="text"], input[type="email"], input[type="password"], input[type="number"], textarea, select {
   width: 100%;
   padding: 0.5rem 0.65rem;
   background: var(--bg);
@@ -189,6 +189,20 @@ button.secondary:hover, .button.secondary:hover { background: var(--bg); }
 
 .form-row { display: flex; gap: 0.75rem; align-items: flex-end; }
 .form-actions { display: flex; gap: 0.6rem; margin-top: 0.5rem; }
+.form-row select, .form-row input, .form-row textarea { margin-bottom: 0; }
+
+.split-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.split-controls label { display: inline; margin-bottom: 0; }
+.split-controls select, .split-controls input {
+  width: auto;
+  margin-bottom: 0;
+}
+.split-controls input[type="number"] { width: 4rem; text-align: center; }
+.split-controls select { min-width: 9rem; }
 
 .muted { color: var(--text-muted); }
 .text-right { text-align: right; }

@@ -9,9 +9,12 @@ ANALYSIS_VERSION = 2
 
 _MAX_IMPLIED_SPEED_MPS = 12.5  # ~2:08 min/km; faster than that is treated as a GPS jump
 _MOVING_SPEED_THRESHOLD_MPS = 0.5
-_SPLIT_METERS = 1000.0
 _SERIES_MAX_SAMPLES = 300
 _BEST_EFFORT_DISTANCES_METERS = (1000.0, 5000.0, 10000.0)
+
+_METERS_PER_MILE = 1609.344
+_DEFAULT_SPLIT_TYPE = "distance_km"
+_DEFAULT_SPLIT_VALUE = 1
 
 # Matches mobile MetricsEngine's _currentSpeedWindow: a per-step instant
 # speed (distance / dt between two consecutive fixes ~0.5-1.5s apart) is
@@ -86,10 +89,36 @@ def _build_steps(track: Track) -> list[_Step]:
     return steps
 
 
-def _compute_splits(steps: list[_Step], first_point: Point) -> list[dict[str, object]]:
+def _split_boundary_meters(split_type: str, split_value: int) -> float | None:
+    """The distance boundary a distance-mode split crosses, or None for a
+    time-mode split (which crosses a time boundary instead — see
+    _compute_splits)."""
+    if split_type == "distance_km":
+        return split_value * 1000.0
+    if split_type == "distance_mi":
+        return split_value * _METERS_PER_MILE
+    return None
+
+
+def _compute_splits(
+    steps: list[_Step],
+    first_point: Point,
+    split_type: str = _DEFAULT_SPLIT_TYPE,
+    split_value: int = _DEFAULT_SPLIT_VALUE,
+) -> list[dict[str, object]]:
     if not steps:
         return []
 
+    boundary_meters = _split_boundary_meters(split_type, split_value)
+    if boundary_meters is not None:
+        return _compute_distance_splits(steps, first_point, boundary_meters)
+    boundary_seconds = split_value * 60.0
+    return _compute_time_splits(steps, first_point, boundary_seconds)
+
+
+def _compute_distance_splits(
+    steps: list[_Step], first_point: Point, boundary_meters: float
+) -> list[dict[str, object]]:
     splits: list[dict[str, object]] = []
     builder = _SplitBuilder(
         index=1, start_distance_m=0.0, start_time_s=0.0, start_ele=first_point.ele
@@ -101,10 +130,14 @@ def _compute_splits(steps: list[_Step], first_point: Point) -> list[dict[str, ob
         builder.elevation_delta_m += _elevation_delta(prev_ele, step.point.ele)
         prev_ele = step.point.ele
 
-        next_boundary = builder.index * _SPLIT_METERS
-        if step.cum_distance_m >= next_boundary and step.distance_m > 0:
-            # Interpolate the crossing time — a point rarely lands exactly
-            # on the 1km boundary (mirrors mobile MetricsEngine's approach).
+        # A while loop, not if: a single sparse step (a gap between fixes)
+        # can span more than one split boundary, e.g. a backgrounded app
+        # resuming after several minutes — every boundary it crosses needs
+        # its own split, not just the first.
+        while step.cum_distance_m >= builder.index * boundary_meters and step.distance_m > 0:
+            next_boundary = builder.index * boundary_meters
+            # Interpolate the crossing time — a point rarely lands exactly on
+            # the boundary (mirrors mobile MetricsEngine's approach).
             overshoot = step.cum_distance_m - next_boundary
             fraction = 1 - (overshoot / step.distance_m)
             crossing_time_s = prev_cum_time + fraction * step.dt_s
@@ -117,6 +150,7 @@ def _compute_splits(steps: list[_Step], first_point: Point) -> list[dict[str, ob
                     "duration_seconds": duration_s,
                     "avg_speed_mps": avg_speed,
                     "elevation_delta_m": builder.elevation_delta_m,
+                    "distance_m": split_distance_m,
                 }
             )
             builder = _SplitBuilder(
@@ -127,6 +161,56 @@ def _compute_splits(steps: list[_Step], first_point: Point) -> list[dict[str, ob
             )
 
         prev_cum_time = step.cum_time_s
+
+    return splits
+
+
+def _compute_time_splits(
+    steps: list[_Step], first_point: Point, boundary_seconds: float
+) -> list[dict[str, object]]:
+    splits: list[dict[str, object]] = []
+    builder = _SplitBuilder(
+        index=1, start_distance_m=0.0, start_time_s=0.0, start_ele=first_point.ele
+    )
+    prev_cum_distance = 0.0
+    prev_ele = first_point.ele
+
+    for step in steps:
+        builder.elevation_delta_m += _elevation_delta(prev_ele, step.point.ele)
+        prev_ele = step.point.ele
+
+        # A while loop, not if — see _compute_distance_splits's identical
+        # comment: a single sparse step can cross more than one time
+        # boundary.
+        while step.cum_time_s >= builder.index * boundary_seconds and step.dt_s > 0:
+            next_boundary = builder.index * boundary_seconds
+            # Interpolate the crossing distance — the mirror image of the
+            # distance-mode loop's time interpolation (see
+            # _compute_distance_splits): here the boundary is time, so the
+            # unknown at the crossing point is how far the runner had gone.
+            overshoot_s = step.cum_time_s - next_boundary
+            fraction = 1 - (overshoot_s / step.dt_s)
+            crossing_distance_m = prev_cum_distance + fraction * step.distance_m
+            duration_s = next_boundary - builder.start_time_s
+            split_distance_m = crossing_distance_m - builder.start_distance_m
+            avg_speed = split_distance_m / duration_s if duration_s > 0 else 0.0
+            splits.append(
+                {
+                    "index": builder.index,
+                    "duration_seconds": duration_s,
+                    "avg_speed_mps": avg_speed,
+                    "elevation_delta_m": builder.elevation_delta_m,
+                    "distance_m": split_distance_m,
+                }
+            )
+            builder = _SplitBuilder(
+                index=builder.index + 1,
+                start_distance_m=crossing_distance_m,
+                start_time_s=next_boundary,
+                start_ele=step.point.ele,
+            )
+
+        prev_cum_distance = step.cum_distance_m
 
     return splits
 
@@ -289,7 +373,12 @@ def _bounds(track: Track) -> dict[str, float] | None:
 class AnalyzerV1:
     version: int = field(default=ANALYSIS_VERSION, init=False)
 
-    def analyze(self, track: Track) -> AnalysisResult:
+    def analyze(
+        self,
+        track: Track,
+        split_type: str = _DEFAULT_SPLIT_TYPE,
+        split_value: int = _DEFAULT_SPLIT_VALUE,
+    ) -> AnalysisResult:
         all_points = [p for segment in track.segments for p in segment.points]
         if not all_points:
             raise ValueError("Track has no points")
@@ -314,7 +403,9 @@ class AnalyzerV1:
             "moving_seconds": moving_s,
             "avg_moving_speed_mps": avg_moving_speed_mps,
             "elevation": _elevation_stats(smoothed),
-            "splits": _compute_splits(steps, all_points[0]),
+            "split_type": split_type,
+            "split_value": split_value,
+            "splits": _compute_splits(steps, all_points[0], split_type, split_value),
             "best_efforts": _best_efforts(steps),
             "series": _series(steps, smoothed, windowed_speeds, all_points[0]),
             "bounds": _bounds(track),

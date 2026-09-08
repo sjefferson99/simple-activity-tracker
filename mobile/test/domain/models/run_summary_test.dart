@@ -30,6 +30,7 @@ void main() {
     expect(summary.splits.first.index, 1);
     expect(summary.splits.first.durationSeconds, 300.0);
     expect(summary.splits.first.avgSpeedMps, 3.33);
+    expect(summary.splits.first.distanceMeters, 1000.0);
     expect(summary.sourcePlatform, 'android');
     expect(summary.sourceAppVersion, '1.0.0+1');
   });
@@ -48,7 +49,12 @@ void main() {
       distanceMeters: 3000.0,
       avgSpeedMps: 3.33,
       completedSplits: const [
-        Split(index: 1, duration: Duration(seconds: 300), avgSpeedMps: 3.33),
+        Split(
+          index: 1,
+          duration: Duration(seconds: 300),
+          avgSpeedMps: 3.33,
+          distanceMeters: 1000.0,
+        ),
       ],
       currentSplitElapsed: Duration.zero,
       currentSplitDistanceMeters: 0,
@@ -66,6 +72,19 @@ void main() {
 
     expect(summary.toJson(), fixture);
   });
+
+  test(
+    'fromJson defaults distanceMeters to 1000.0 for an old sidecar with no distance_m',
+    () {
+      final oldShape = Map<String, dynamic>.from(fixture);
+      oldShape['splits'] = [
+        {'index': 1, 'duration_seconds': 300.0, 'avg_speed_mps': 3.33},
+      ];
+
+      final summary = RunSummary.fromJson(oldShape);
+      expect(summary.splits.first.distanceMeters, 1000.0);
+    },
+  );
 
   test('toJson serializes local timestamps as UTC', () {
     final summary = RunSummary.fromMetrics(

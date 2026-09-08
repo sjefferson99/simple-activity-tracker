@@ -4,6 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gpx/gpx.dart';
 import 'package:simple_activity_tracker/core/files/run_gpx_log.dart';
 import 'package:simple_activity_tracker/domain/models/track_point.dart';
+import 'package:simple_activity_tracker/domain/tracking/split_preference.dart'
+    show SplitKind, SplitPreference;
+
+const _defaultSplitPreference = SplitPreference.defaultPreference;
 
 TrackPoint _point(double lat, double lon, DateTime time) => TrackPoint(
   latitude: lat,
@@ -27,7 +31,7 @@ void main() {
 
   test('flush writes a valid GPX file with the accepted points', () async {
     final file = File('${tempDir.path}/run.gpx');
-    final log = RunGpxLog(file);
+    final log = RunGpxLog(file, _defaultSplitPreference);
     final start = DateTime(2026, 1, 1, 9, 0, 0);
 
     log.addPoint(_point(51.5, -0.1, start));
@@ -44,7 +48,7 @@ void main() {
 
   test('startNewSegment begins a new trkseg for the next points', () async {
     final file = File('${tempDir.path}/run.gpx');
-    final log = RunGpxLog(file);
+    final log = RunGpxLog(file, _defaultSplitPreference);
     final start = DateTime(2026, 1, 1, 9, 0, 0);
 
     log.addPoint(_point(51.5, -0.1, start));
@@ -62,7 +66,7 @@ void main() {
     'finalizeAndFlush drops empty segments (e.g. an unused pause gap)',
     () async {
       final file = File('${tempDir.path}/run.gpx');
-      final log = RunGpxLog(file);
+      final log = RunGpxLog(file, _defaultSplitPreference);
       final start = DateTime(2026, 1, 1, 9, 0, 0);
 
       log.addPoint(_point(51.5, -0.1, start));
@@ -78,7 +82,7 @@ void main() {
     'concurrent flushes do not clobber each other and keep every point',
     () async {
       final file = File('${tempDir.path}/run.gpx');
-      final log = RunGpxLog(file);
+      final log = RunGpxLog(file, _defaultSplitPreference);
       final start = DateTime(2026, 1, 1, 9, 0, 0);
 
       log.addPoint(_point(51.5, -0.1, start));
@@ -105,7 +109,7 @@ void main() {
     'addPoint writes accuracy/speed diagnostics as GPX extensions',
     () async {
       final file = File('${tempDir.path}/run.gpx');
-      final log = RunGpxLog(file);
+      final log = RunGpxLog(file, _defaultSplitPreference);
       final start = DateTime(2026, 1, 1, 9, 0, 0);
 
       log.addPoint(
@@ -147,9 +151,28 @@ void main() {
     },
   );
 
+  test(
+    'flush writes the split preference as a root-level GPX extension',
+    () async {
+      final file = File('${tempDir.path}/run.gpx');
+      final log = RunGpxLog(
+        file,
+        const SplitPreference(kind: SplitKind.timeMin, value: 5),
+      );
+      final start = DateTime(2026, 1, 1, 9, 0, 0);
+
+      log.addPoint(_point(51.5, -0.1, start));
+      await log.flush();
+
+      final gpx = GpxReader().fromString(await file.readAsString());
+      expect(gpx.extensions['sat:split_type'], 'time_min');
+      expect(gpx.extensions['sat:split_value'], '5');
+    },
+  );
+
   test('flush is crash-safe: an interrupted temp write leaves the prior file intact', () async {
     final file = File('${tempDir.path}/run.gpx');
-    final log = RunGpxLog(file);
+    final log = RunGpxLog(file, _defaultSplitPreference);
     final start = DateTime(2026, 1, 1, 9, 0, 0);
 
     log.addPoint(_point(51.5, -0.1, start));

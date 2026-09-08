@@ -41,5 +41,12 @@ class Activity(Base):
     gpx_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     source_platform: Mapped[str] = mapped_column(String(50), nullable=False)
     source_app_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    # "distance_km" | "distance_mi" | "time_min" — mirrors mobile's SplitKind
+    # enum on the wire (mobile/lib/domain/tracking/split_preference.dart), read
+    # from the uploaded GPX's own extensions. Null for activities uploaded
+    # before this feature shipped, or with no preference set — treated as
+    # "distance_km" / 1 (see AnalyzerV1.analyze's defaults).
+    split_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    split_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)

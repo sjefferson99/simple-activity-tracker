@@ -79,6 +79,55 @@ def test_reanalyze_activity_id_that_does_not_exist_exits_with_an_error(app_clien
         reanalyze(activity_id="00000000-0000-0000-0000-000000000000", all_activities=False)
 
 
+def test_reanalyze_picks_up_gpx_split_extension_without_touching_activity_columns(
+    app_client, auth_headers
+) -> None:
+    """Reanalyze refreshes ActivityAnalysis.result's split_type/split_value
+    from the GPX (in case the analyzer changed), but deliberately leaves
+    Activity.split_type/split_value alone — those are set once at upload
+    time and stay upload-time-fixed, per the project's "pre-existing
+    defaults aren't backfilled" convention."""
+    from app.models.activity import Activity
+
+    ns = "https://simple-activity-tracker.local/gpx-extensions"
+    gpx = (
+        f'<?xml version="1.0"?><gpx version="1.1" xmlns:sat="{ns}">'
+        f"<extensions><sat:split_type>time_min</sat:split_type>"
+        f"<sat:split_value>5</sat:split_value></extensions>"
+        '<trk><trkseg><trkpt lat="51.5" lon="-0.1"><time>2026-01-01T07:00:00Z</time></trkpt>'
+        '<trkpt lat="51.51" lon="-0.1"><time>2026-01-01T07:05:00Z</time></trkpt>'
+        "</trkseg></trk></gpx>"
+    ).encode()
+
+    upload = upload_sample_activity(app_client, auth_headers, gpx)
+    activity_id = upload.json()["id"]
+    _stale_the_analysis(activity_id)
+
+    # Simulate an activity row set up before this GPX carried a split
+    # preference (or from an older client) — reanalyze must not touch these
+    # columns even though the GPX itself now has extensions.
+    with get_session_factory()() as session:
+        activity = session.get(Activity, activity_id)
+        assert activity is not None
+        activity.split_type = None
+        activity.split_value = None
+        session.commit()
+
+    reanalyze(activity_id=activity_id, all_activities=False)
+
+    with get_session_factory()() as session:
+        analysis = session.get(ActivityAnalysis, activity_id)
+        assert analysis is not None
+        assert analysis.result is not None
+        assert analysis.result["split_type"] == "time_min"
+        assert analysis.result["split_value"] == 5
+
+        activity = session.get(Activity, activity_id)
+        assert activity is not None
+        assert activity.split_type is None
+        assert activity.split_value is None
+
+
 def test_reanalyze_repopulates_the_cached_track(app_client, auth_headers, sample_gpx_bytes) -> None:
     """R8 in docs/SERVER-PRODUCTION-PLAN.md: reanalyze is the recovery path
     for rows analyzed before the track cache existed (track is null) — it

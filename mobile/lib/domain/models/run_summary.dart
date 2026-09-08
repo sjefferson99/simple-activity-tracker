@@ -61,6 +61,7 @@ class RunSummary {
             index: split.index,
             durationSeconds: split.duration.inMilliseconds / 1000,
             avgSpeedMps: split.avgSpeedMps,
+            distanceMeters: split.distanceMeters,
           ),
       ],
       sourcePlatform: sourcePlatform,
@@ -104,11 +105,13 @@ class RunSummarySplit {
   final int index;
   final double durationSeconds;
   final double avgSpeedMps;
+  final double distanceMeters;
 
   const RunSummarySplit({
     required this.index,
     required this.durationSeconds,
     required this.avgSpeedMps,
+    required this.distanceMeters,
   });
 
   factory RunSummarySplit.fromJson(Map<String, dynamic> json) =>
@@ -116,11 +119,16 @@ class RunSummarySplit {
         index: json['index'] as int,
         durationSeconds: (json['duration_seconds'] as num).toDouble(),
         avgSpeedMps: (json['avg_speed_mps'] as num).toDouble(),
+        // Older stored sidecars (before #43) never wrote this — default to
+        // 0 rather than making it nullable throughout the app, since the
+        // pre-#43 wire format always meant an implicit 1km split anyway.
+        distanceMeters: (json['distance_m'] as num?)?.toDouble() ?? 1000.0,
       );
 
   Map<String, dynamic> toJson() => {
     'index': index,
     'duration_seconds': durationSeconds,
     'avg_speed_mps': avgSpeedMps,
+    'distance_m': distanceMeters,
   };
 }

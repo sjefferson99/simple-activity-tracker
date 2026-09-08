@@ -23,6 +23,10 @@ class SplitSummary(BaseModel):
     index: int = Field(ge=1)
     duration_seconds: float = Field(ge=0)
     avg_speed_mps: float = Field(ge=0)
+    # Optional: older app versions (before #43's configurable splits) never
+    # sent this. Constant across every split for a distance-based
+    # preference, but varies per split for a time-based one.
+    distance_m: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
 class ActivitySource(BaseModel):
