@@ -7,7 +7,7 @@
   "distance_meters": 3000.0,
   "avg_speed_mps": 3.33,
   "splits": [
-    {"index": 1, "duration_seconds": 300.0, "avg_speed_mps": 3.33}
+    {"index": 1, "duration_seconds": 300.0, "avg_speed_mps": 3.33, "distance_m": 1000.0}
   ],
   "source": {"platform": "android", "app_version": "1.0.0+1"}
 }

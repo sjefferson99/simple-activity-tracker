@@ -130,8 +130,12 @@ def _compute_distance_splits(
         builder.elevation_delta_m += _elevation_delta(prev_ele, step.point.ele)
         prev_ele = step.point.ele
 
-        next_boundary = builder.index * boundary_meters
-        if step.cum_distance_m >= next_boundary and step.distance_m > 0:
+        # A while loop, not if: a single sparse step (a gap between fixes)
+        # can span more than one split boundary, e.g. a backgrounded app
+        # resuming after several minutes — every boundary it crosses needs
+        # its own split, not just the first.
+        while step.cum_distance_m >= builder.index * boundary_meters and step.distance_m > 0:
+            next_boundary = builder.index * boundary_meters
             # Interpolate the crossing time — a point rarely lands exactly on
             # the boundary (mirrors mobile MetricsEngine's approach).
             overshoot = step.cum_distance_m - next_boundary
@@ -175,8 +179,11 @@ def _compute_time_splits(
         builder.elevation_delta_m += _elevation_delta(prev_ele, step.point.ele)
         prev_ele = step.point.ele
 
-        next_boundary = builder.index * boundary_seconds
-        if step.cum_time_s >= next_boundary and step.dt_s > 0:
+        # A while loop, not if — see _compute_distance_splits's identical
+        # comment: a single sparse step can cross more than one time
+        # boundary.
+        while step.cum_time_s >= builder.index * boundary_seconds and step.dt_s > 0:
+            next_boundary = builder.index * boundary_seconds
             # Interpolate the crossing distance — the mirror image of the
             # distance-mode loop's time interpolation (see
             # _compute_distance_splits): here the boundary is time, so the

@@ -430,19 +430,12 @@ class _SplitPreferenceSection extends ConsumerWidget {
             const SizedBox(width: 8),
             SizedBox(
               width: 72,
-              child: TextFormField(
+              child: _SplitValueField(
                 key: ValueKey(preference.value),
-                initialValue: '${preference.value}',
-                keyboardType: TextInputType.number,
-                textAlign: TextAlign.center,
-                onFieldSubmitted: (text) {
-                  final value = int.tryParse(text);
-                  if (value != null && value > 0) {
-                    notifier.select(
-                      SplitPreference(kind: preference.kind, value: value),
-                    );
-                  }
-                },
+                initialValue: preference.value,
+                onCommit: (value) => notifier.select(
+                  SplitPreference(kind: preference.kind, value: value),
+                ),
               ),
             ),
             const SizedBox(width: 8),
@@ -458,6 +451,62 @@ class _SplitPreferenceSection extends ConsumerWidget {
     SplitKind.distanceMi => 'mi',
     SplitKind.timeMin => 'min',
   };
+}
+
+/// A number field that commits on submit *and* on losing focus (tapping
+/// away, e.g. onto the Km/Miles/Minutes segmented control) — a plain
+/// TextFormField only fires onFieldSubmitted on the keyboard's submit key,
+/// so a typed edit the user dismisses any other way was silently discarded.
+class _SplitValueField extends StatefulWidget {
+  final int initialValue;
+  final ValueChanged<int> onCommit;
+
+  const _SplitValueField({
+    super.key,
+    required this.initialValue,
+    required this.onCommit,
+  });
+
+  @override
+  State<_SplitValueField> createState() => _SplitValueFieldState();
+}
+
+class _SplitValueFieldState extends State<_SplitValueField> {
+  late final _controller = TextEditingController(
+    text: '${widget.initialValue}',
+  );
+
+  void _commit() {
+    final value = int.tryParse(_controller.text);
+    if (value != null && value > 0) {
+      widget.onCommit(value);
+    } else {
+      // Reject invalid/garbage input by reverting to the last known-good
+      // value, rather than leaving the field showing something that was
+      // never actually persisted.
+      _controller.text = '${widget.initialValue}';
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: _controller,
+      keyboardType: TextInputType.number,
+      textAlign: TextAlign.center,
+      onFieldSubmitted: (_) => _commit(),
+      onTapOutside: (_) {
+        FocusManager.instance.primaryFocus?.unfocus();
+        _commit();
+      },
+    );
+  }
 }
 
 class _SyncQueueSection extends ConsumerWidget {

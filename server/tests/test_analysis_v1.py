@@ -201,3 +201,53 @@ def test_time_min_split_distances_sum_to_the_completed_split_time() -> None:
     assert total_split_distance == pytest.approx(
         total_split_duration * (_EXPECTED_DISTANCE_M / _EXPECTED_MOVING_S), rel=0.05
     )
+
+
+def _sparse_track(total_distance_m: float, total_duration_s: float) -> Track:
+    """A track with a single huge step (two points, one gap) — e.g. a
+    backgrounded app resuming after several minutes, or a tunnel. Constant
+    implied speed = total_distance_m / total_duration_s throughout."""
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    lon_per_meter = 1 / 111195
+    points = [
+        Point(lat=0, lon=0, ele=None, time=start),
+        Point(
+            lat=0,
+            lon=total_distance_m * lon_per_meter,
+            ele=None,
+            time=start + timedelta(seconds=total_duration_s),
+        ),
+    ]
+    return Track(segments=[Segment(points=points)])
+
+
+def test_a_single_sparse_step_crossing_multiple_distance_boundaries_produces_every_split() -> None:
+    """Regression: _compute_distance_splits used to check the boundary with
+    `if` instead of `while`, so a single step spanning several split
+    boundaries (a sparse/gapped GPX — exactly what mobile's own plausibility
+    gate is designed to tolerate) only produced the first split crossed,
+    silently dropping the rest."""
+    # 2500m over 250s at 10 m/s crosses the 1km boundary twice (1000m, 2000m).
+    track = _sparse_track(total_distance_m=2500.0, total_duration_s=250.0)
+    result = AnalyzerV1().analyze(track, "distance_km", 1)
+    splits = result["splits"]
+    assert len(splits) == 2
+    assert splits[0]["index"] == 1
+    assert splits[1]["index"] == 2
+    for split in splits:
+        assert split["distance_m"] == pytest.approx(1000.0, rel=0.001)
+        assert split["duration_seconds"] == pytest.approx(100.0, abs=0.5)
+
+
+def test_a_single_sparse_step_crossing_multiple_time_boundaries_produces_every_split() -> None:
+    """Time-mode mirror of the distance-mode regression above."""
+    # 600m over 300s (2 m/s) crosses the 2-minute (120s) boundary twice.
+    track = _sparse_track(total_distance_m=600.0, total_duration_s=300.0)
+    result = AnalyzerV1().analyze(track, "time_min", 2)
+    splits = result["splits"]
+    assert len(splits) == 2
+    assert splits[0]["index"] == 1
+    assert splits[1]["index"] == 2
+    for split in splits:
+        assert split["duration_seconds"] == pytest.approx(120.0, abs=0.5)
+        assert split["distance_m"] == pytest.approx(240.0, rel=0.01)

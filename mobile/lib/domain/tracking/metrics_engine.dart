@@ -438,7 +438,14 @@ class MetricsEngine {
         Split(
           index: _completedSplits.length + 1,
           duration: splitDurationTarget,
-          avgSpeedMps: splitDistance / splitDurationTarget.inMilliseconds * 1000,
+          // A split covering measurable distance in no measurable time would
+          // divide by zero; report 0 rather than an infinite pace. Not
+          // reachable today (splitDurationTarget is always >=1 minute, per
+          // SplitPreference's positive-int contract) but guarded the same
+          // way as the distance-mode branch above for symmetry.
+          avgSpeedMps: splitDurationTarget.inMilliseconds > 0
+              ? splitDistance / splitDurationTarget.inMilliseconds * 1000
+              : 0,
           distanceMeters: splitDistance,
         ),
       );

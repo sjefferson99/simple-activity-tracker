@@ -18,6 +18,27 @@ def test_upload_creates_an_activity_with_analysis(
     assert body["activity_type"] == "running"
 
 
+def test_upload_accepts_client_summary_splits_with_distance_m(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    """#43: newer app versions include each phone-reported split's distance
+    (constant for a distance-based preference, variable for a time-based
+    one) — the field is optional (older app versions never sent it) but
+    must round-trip when present."""
+    summary = make_summary()
+    summary["splits"] = [
+        {"index": 1, "duration_seconds": 300.0, "avg_speed_mps": 3.33, "distance_m": 1000.0}
+    ]
+    response = app_client.post(
+        "/api/v1/activities",
+        headers=auth_headers,
+        data={"summary": json.dumps(summary)},
+        files={"gpx": ("activity.gpx", sample_gpx_bytes, "application/gpx+xml")},
+    )
+    assert response.status_code == 201
+    assert response.json()["client_summary"]["splits"][0]["distance_m"] == 1000.0
+
+
 def test_upload_records_device_name_from_the_authenticating_token(
     app_client, auth_headers, sample_gpx_bytes
 ) -> None:
