@@ -5,11 +5,12 @@ from app.analysis.analyzer import AnalysisResult
 from app.analysis.geo_math import haversine_distance_meters, speed_mps_between
 from app.analysis.track import Point, Track
 
-# 3: splits gained a `boundary` {t_s, lat, lon} crossing point (issue #45).
+# 4: splits' `boundary` gained `dist_m` (issue #58) — the chart's x-axis can
+# now be distance-based, and the boundary marker needs a matching x-value.
 # Bump this whenever the result shape or algorithm changes, then run
 # `simple-activity-tracker-server reanalyze --all` on each deployment so
 # stored analyses catch up — the web UI reads stored results as-is.
-ANALYSIS_VERSION = 3
+ANALYSIS_VERSION = 4
 
 _MAX_IMPLIED_SPEED_MPS = 12.5  # ~2:08 min/km; faster than that is treated as a GPS jump
 _MOVING_SPEED_THRESHOLD_MPS = 0.5
@@ -159,7 +160,12 @@ def _compute_distance_splits(
                     "avg_speed_mps": avg_speed,
                     "elevation_delta_m": builder.elevation_delta_m,
                     "distance_m": split_distance_m,
-                    "boundary": {"t_s": crossing_time_s, "lat": lat, "lon": lon},
+                    "boundary": {
+                        "t_s": crossing_time_s,
+                        "dist_m": next_boundary,
+                        "lat": lat,
+                        "lon": lon,
+                    },
                 }
             )
             builder = _SplitBuilder(
@@ -211,7 +217,12 @@ def _compute_time_splits(
                     "avg_speed_mps": avg_speed,
                     "elevation_delta_m": builder.elevation_delta_m,
                     "distance_m": split_distance_m,
-                    "boundary": {"t_s": next_boundary, "lat": lat, "lon": lon},
+                    "boundary": {
+                        "t_s": next_boundary,
+                        "dist_m": crossing_distance_m,
+                        "lat": lat,
+                        "lon": lon,
+                    },
                 }
             )
             builder = _SplitBuilder(
