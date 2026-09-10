@@ -20,6 +20,7 @@ TITLE_MAX_LENGTH = 200
 NOTES_MAX_LENGTH = 4000
 SPLITS_MAX_COUNT = 2000
 SUMMARY_MAX_BYTES = 256 * 1024
+TAG_NAME_MAX_LENGTH = 50
 
 
 class ValidationFailedError(ValueError):
@@ -48,4 +49,13 @@ def validate_name(name: str, *, field: str = "Name") -> str:
         raise ValidationFailedError(f"{field} is required")
     if len(candidate) > NAME_MAX_LENGTH:
         raise ValidationFailedError(f"{field} must be at most {NAME_MAX_LENGTH} characters")
+    return candidate
+
+
+def validate_tag_name(name: str) -> str:
+    candidate = name.strip()
+    if not candidate:
+        raise ValidationFailedError("Tag name is required")
+    if len(candidate) > TAG_NAME_MAX_LENGTH:
+        raise ValidationFailedError(f"Tag name must be at most {TAG_NAME_MAX_LENGTH} characters")
     return candidate

@@ -1,6 +1,6 @@
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -27,10 +27,12 @@ from app.api.v1.schemas import (
     ActivityOut,
     ActivityPatchRequest,
     ActivitySummary,
+    AddTagRequest,
     AnalysisOut,
     ExportManifestEntry,
     ExportRequest,
     ImportResult,
+    TagOut,
     TrackOut,
 )
 from app.audit import log_audit_event
@@ -39,16 +41,22 @@ from app.config import get_settings
 from app.deps import db_session
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
+from app.models.tag import Tag
 from app.repositories.activities import InvalidCursorError, SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
+from app.repositories.tags import SqlAlchemyTagRepository
 from app.storage.blob_store import LocalFileBlobStore
-from app.validation import SUMMARY_MAX_BYTES
+from app.validation import SUMMARY_MAX_BYTES, ValidationFailedError, validate_tag_name
 
 router = APIRouter(prefix="/api/v1/activities", tags=["activities"])
 
 
 def _blob_store() -> LocalFileBlobStore:
     return LocalFileBlobStore(Path(get_settings().data_dir))
+
+
+def _tag_out(tag: Tag) -> TagOut:
+    return TagOut(id=tag.id, name=tag.name)
 
 
 def _activity_out(activity: Activity, analysis: ActivityAnalysis | None) -> ActivityOut:
@@ -67,6 +75,7 @@ def _activity_out(activity: Activity, analysis: ActivityAnalysis | None) -> Acti
         created_at=activity.created_at,
         updated_at=activity.updated_at,
         analysis=_analysis_out(analysis),
+        tags=[_tag_out(t) for t in activity.tags],
     )
 
 
@@ -100,6 +109,7 @@ def list_activities(
             title=activity.title,
             distance_meters=activity.client_summary.get("distance_meters", 0.0),
             moving_seconds=activity.client_summary.get("moving_seconds", 0.0),
+            tags=[_tag_out(t) for t in activity.tags],
         )
         for activity in page.activities
     ]
@@ -118,6 +128,7 @@ class _NewActivity:
     title: str | None = None
     notes: str | None = None
     device_name: str | None = None
+    tags: list[str] = field(default_factory=list)
 
 
 def _insert_activity_with_gpx(
@@ -169,6 +180,10 @@ def _insert_activity_with_gpx(
         created_at=now,
         updated_at=now,
     )
+    if new_activity.tags:
+        tags_repo = SqlAlchemyTagRepository(session)
+        for tag_name in new_activity.tags:
+            activity.tags.append(tags_repo.get_or_create(user_id, tag_name))
     activities.add(activity)
     try:
         with session.begin_nested():
@@ -343,6 +358,15 @@ def delete_activity(
         # flush — flushing the analysis delete now guarantees it happens first.
         session.flush()
 
+    # Activity.tags IS a relationship(secondary=...), so SQLAlchemy does
+    # delete the activity_tags association rows automatically on activity
+    # delete — clearing explicitly here is defensive/explicit rather than
+    # strictly required, matching this file's general style of not relying
+    # on implicit ORM cascade ordering for anything security/data-integrity
+    # relevant.
+    activity.tags.clear()
+    session.flush()
+
     blob_key = activity.gpx_blob_key
     activity_id_for_audit = activity.id
     activities.delete(activity)
@@ -506,3 +530,42 @@ def import_activities(
         failed=summary.failed,
         items=summary.items,
     )
+
+
+@router.post("/{activity_id}/tags", response_model=ActivityOut, status_code=201)
+def add_tag(
+    activity_id: str,
+    user: CurrentUser,
+    session: Annotated[Session, Depends(db_session)],
+    body: AddTagRequest,
+) -> ActivityOut:
+    activity = SqlAlchemyActivityRepository(session).get_by_id_for_user(user.id, activity_id)
+    if activity is None:
+        raise api_error(404, "not_found", "Activity not found")
+    try:
+        name = validate_tag_name(body.name)
+    except ValidationFailedError as exc:
+        raise api_error(400, "invalid_tag_name", str(exc)) from exc
+
+    tag = SqlAlchemyTagRepository(session).get_or_create(user.id, name)
+    if tag not in activity.tags:
+        activity.tags.append(tag)
+    activity.updated_at = datetime.now(UTC)
+    analysis = SqlAlchemyActivityAnalysisRepository(session).get_by_activity_id(activity.id)
+    return _activity_out(activity, analysis)
+
+
+@router.delete("/{activity_id}/tags/{tag_id}", response_model=ActivityOut)
+def remove_tag(
+    activity_id: str,
+    tag_id: str,
+    user: CurrentUser,
+    session: Annotated[Session, Depends(db_session)],
+) -> ActivityOut:
+    activity = SqlAlchemyActivityRepository(session).get_by_id_for_user(user.id, activity_id)
+    if activity is None:
+        raise api_error(404, "not_found", "Activity not found")
+    activity.tags = [t for t in activity.tags if t.id != tag_id]
+    activity.updated_at = datetime.now(UTC)
+    analysis = SqlAlchemyActivityAnalysisRepository(session).get_by_activity_id(activity.id)
+    return _activity_out(activity, analysis)

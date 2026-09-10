@@ -33,6 +33,13 @@
             "title": "Started At",
             "type": "string"
           },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagOut"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
           "title": {
             "anyOf": [
               {
@@ -52,7 +59,8 @@
           "ended_at",
           "title",
           "distance_meters",
-          "moving_seconds"
+          "moving_seconds",
+          "tags"
         ],
         "title": "ActivityListItem",
         "type": "object"
@@ -156,6 +164,13 @@
             "title": "Started At",
             "type": "string"
           },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagOut"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
           "title": {
             "anyOf": [
               {
@@ -187,7 +202,8 @@
           "source_app_version",
           "created_at",
           "updated_at",
-          "analysis"
+          "analysis",
+          "tags"
         ],
         "title": "ActivityOut",
         "type": "object"
@@ -233,6 +249,21 @@
           }
         },
         "title": "ActivityPatchRequest",
+        "type": "object"
+      },
+      "AddTagRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 50,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AddTagRequest",
         "type": "object"
       },
       "AdminCreateUserRequest": {
@@ -644,6 +675,24 @@
           "user"
         ],
         "title": "LoginResponse",
+        "type": "object"
+      },
+      "TagOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "TagOut",
         "type": "object"
       },
       "TrackOut": {
@@ -1193,6 +1242,109 @@
           }
         },
         "summary": "Download Gpx",
+        "tags": [
+          "activities"
+        ]
+      }
+    },
+    "/api/v1/activities/{activity_id}/tags": {
+      "post": {
+        "operationId": "add_tag_api_v1_activities__activity_id__tags_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "activity_id",
+            "required": true,
+            "schema": {
+              "title": "Activity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTagRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Tag",
+        "tags": [
+          "activities"
+        ]
+      }
+    },
+    "/api/v1/activities/{activity_id}/tags/{tag_id}": {
+      "delete": {
+        "operationId": "remove_tag_api_v1_activities__activity_id__tags__tag_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "activity_id",
+            "required": true,
+            "schema": {
+              "title": "Activity Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Tag",
         "tags": [
           "activities"
         ]

@@ -2,10 +2,11 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import ForeignKey, Index, Integer, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
 from app.models.base import Base
+from app.models.tag import Tag, activity_tags
 from app.models.types import TZDateTime
 from app.models.user import _new_uuid
 
@@ -50,3 +51,9 @@ class Activity(Base):
     split_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
+    # selectin avoids N+1 on the activity list page, which renders every
+    # row's tags. No relationship() is declared from Tag back to Activity
+    # (mirrors the existing ActivityAnalysis/DeviceToken style of plain FKs
+    # with no ORM-level delete cascade) — deleting an Activity must delete
+    # its activity_tags rows explicitly first, same as ActivityAnalysis.
+    tags: Mapped[list[Tag]] = relationship(secondary=activity_tags, lazy="selectin")

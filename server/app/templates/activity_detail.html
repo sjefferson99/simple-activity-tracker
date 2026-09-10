@@ -126,6 +126,28 @@
 </div>
 
 <div class="card">
+  <h2>Tags</h2>
+  <div class="tag-chips">
+    {% for tag in activity.tags %}
+    <span class="badge">
+      {{ tag.name }}
+      <form hx-delete="/activities/{{ activity.id }}/tags/{{ tag.id }}" style="display:inline;">
+        <button type="submit" aria-label="Remove tag {{ tag.name }}" class="tag-remove">&times;</button>
+      </form>
+    </span>
+    {% else %}
+    <span class="muted">No tags yet.</span>
+    {% endfor %}
+  </div>
+  <form hx-post="/activities/{{ activity.id }}/tags" hx-target="#tag-add-result" style="margin-top:0.75rem;">
+    <label for="tag_name">Add tag</label>
+    <input type="text" id="tag_name" name="name" maxlength="50" placeholder="e.g. Strava">
+    <button type="submit">Add</button>
+  </form>
+  <div id="tag-add-result"></div>
+</div>
+
+<div class="card">
   <h2>Details</h2>
   <form hx-patch="/activities/{{ activity.id }}">
     <label for="title">Title</label>

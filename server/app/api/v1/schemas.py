@@ -9,6 +9,7 @@ from app.validation import (
     NOTES_MAX_LENGTH,
     PASSWORD_MAX_LENGTH,
     SPLITS_MAX_COUNT,
+    TAG_NAME_MAX_LENGTH,
     TITLE_MAX_LENGTH,
     ValidationFailedError,
     normalize_email,
@@ -120,6 +121,17 @@ class ChangePasswordRequest(BaseModel):
 # --- Activities ---
 
 
+class TagOut(BaseModel):
+    id: str
+    name: str
+
+
+class AddTagRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(max_length=TAG_NAME_MAX_LENGTH)
+
+
 class ActivityListItem(BaseModel):
     id: str
     activity_type: Literal["running", "cycling"]
@@ -128,6 +140,7 @@ class ActivityListItem(BaseModel):
     title: str | None
     distance_meters: float
     moving_seconds: float
+    tags: list[TagOut]
 
 
 class ActivityListResponse(BaseModel):
@@ -155,6 +168,7 @@ class ActivityOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     analysis: AnalysisOut
+    tags: list[TagOut]
 
 
 class ActivityPatchRequest(BaseModel):

@@ -5,6 +5,7 @@
     <div>
       <a href="/activities/{{ activity.id }}">{{ activity.title or activity.started_at.isoformat() }}</a>
       <span class="badge type-{{ activity.activity_type }}">{{ "Cycle" if activity.activity_type == "cycling" else "Run" }}</span>
+      {% for tag in activity.tags %}<span class="badge">{{ tag.name }}</span>{% endfor %}
       <div class="muted"><time datetime="{{ activity.started_at.isoformat() }}" class="local-time" data-format="date-time">{{ activity.started_at.isoformat() }}</time>{% if activity.device_name %} · {{ activity.device_name }}{% endif %}</div>
     </div>
   </div>
