@@ -36,8 +36,15 @@ from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
 from app.models.user import _new_uuid
 from app.repositories.activities import InvalidCursorError, SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
+from app.repositories.tags import SqlAlchemyTagRepository
 from app.storage.blob_store import LocalFileBlobStore
-from app.validation import NAME_MAX_LENGTH, NOTES_MAX_LENGTH, TITLE_MAX_LENGTH
+from app.validation import (
+    NAME_MAX_LENGTH,
+    NOTES_MAX_LENGTH,
+    TITLE_MAX_LENGTH,
+    ValidationFailedError,
+    validate_tag_name,
+)
 from app.web.deps import WebUser, require_htmx_header
 from app.web.templating import templates
 
@@ -65,6 +72,7 @@ def _activity_view(activity: Activity, analysis: ActivityAnalysis | None) -> dic
         "ended_at": activity.ended_at,
         "client_summary": activity.client_summary,
         "analysis": analysis_view,
+        "tags": activity.tags,
     }
 
 
@@ -249,6 +257,47 @@ def activity_patch(
     return Response(status_code=200, headers={"HX-Refresh": "true"})
 
 
+@router.post("/activities/{activity_id}/tags", dependencies=[Depends(require_htmx_header)])
+def activity_add_tag(
+    activity_id: str,
+    request: Request,
+    user: WebUser,
+    session: Annotated[Session, Depends(db_session)],
+    name: Annotated[str, Form()] = "",
+) -> Response:
+    activity = SqlAlchemyActivityRepository(session).get_by_id_for_user(user.id, activity_id)
+    if activity is None:
+        return Response(status_code=404)
+    try:
+        tag_name = validate_tag_name(name)
+    except ValidationFailedError:
+        return Response(status_code=400)
+
+    tag = SqlAlchemyTagRepository(session).get_or_create(user.id, tag_name)
+    if tag not in activity.tags:
+        activity.tags.append(tag)
+    activity.updated_at = datetime.now(UTC)
+    return Response(status_code=200, headers={"HX-Refresh": "true"})
+
+
+@router.delete(
+    "/activities/{activity_id}/tags/{tag_id}", dependencies=[Depends(require_htmx_header)]
+)
+def activity_remove_tag(
+    activity_id: str,
+    tag_id: str,
+    request: Request,
+    user: WebUser,
+    session: Annotated[Session, Depends(db_session)],
+) -> Response:
+    activity = SqlAlchemyActivityRepository(session).get_by_id_for_user(user.id, activity_id)
+    if activity is None:
+        return Response(status_code=404)
+    activity.tags = [t for t in activity.tags if t.id != tag_id]
+    activity.updated_at = datetime.now(UTC)
+    return Response(status_code=200, headers={"HX-Refresh": "true"})
+
+
 @router.delete("/activities/{activity_id}", dependencies=[Depends(require_htmx_header)])
 def activity_delete(
     activity_id: str,
@@ -268,6 +317,10 @@ def activity_delete(
         # See app/api/v1/activities.py:delete_activity — no relationship()
         # means the analysis delete must be flushed before the activity delete.
         session.flush()
+
+    # See app/api/v1/activities.py:delete_activity for why this is explicit.
+    activity.tags.clear()
+    session.flush()
 
     blob_key = activity.gpx_blob_key
     activity_id_for_audit = activity.id

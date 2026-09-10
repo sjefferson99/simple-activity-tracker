@@ -44,3 +44,7 @@ deploy/standalone-tls/certs/*.pem
 deploy/standalone-tls/backups/
 deploy/standalone-tls/secrets/
 .micropico
+
+# Personal Strava account export (real activity/personal data) used as a
+# manual test fixture for issue #61's importer — never commit this.
+/strava export/

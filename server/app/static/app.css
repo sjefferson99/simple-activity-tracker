@@ -184,6 +184,18 @@ button.secondary:hover, .button.secondary:hover { background: var(--bg); }
 .badge.type-running { background: rgba(15, 118, 110, 0.15); color: var(--accent-hover); }
 .badge.type-cycling { background: rgba(21, 128, 61, 0.15); color: var(--ok); }
 
+.tag-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.tag-remove {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 0 0 0.3rem;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.tag-remove:hover { color: var(--danger); }
+
 #map { height: 360px; border-radius: 8px; margin-bottom: 1.25rem; }
 .chart-container { position: relative; }
 
