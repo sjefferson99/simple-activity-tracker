@@ -5,7 +5,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -16,6 +26,12 @@ from app.activity_export import (
     export_activities_archive,
     read_import_archive,
     run_import,
+)
+from app.activity_import_jobs import create_job, get_job, run_strava_import_job
+from app.activity_import_strava import (
+    StravaImportError,
+    parse_activities_csv,
+    read_strava_export_archive,
 )
 from app.analysis.gpx_parser import GpxParseError, parse_gpx, parse_split_preference
 from app.analysis.track_sampling import DEFAULT_MAX_POINTS, sample_track
@@ -32,6 +48,8 @@ from app.api.v1.schemas import (
     ExportManifestEntry,
     ExportRequest,
     ImportResult,
+    StravaImportJobCreated,
+    StravaImportJobStatus,
     TagOut,
     TrackOut,
 )
@@ -180,13 +198,13 @@ def _insert_activity_with_gpx(
         created_at=now,
         updated_at=now,
     )
-    if new_activity.tags:
-        tags_repo = SqlAlchemyTagRepository(session)
-        for tag_name in new_activity.tags:
-            activity.tags.append(tags_repo.get_or_create(user_id, tag_name))
     activities.add(activity)
     try:
         with session.begin_nested():
+            if new_activity.tags:
+                tags_repo = SqlAlchemyTagRepository(session)
+                for tag_name in new_activity.tags:
+                    activity.tags.append(tags_repo.get_or_create(user_id, tag_name))
             session.flush()
     except IntegrityError:
         # begin_nested() only rolls back to the SAVEPOINT; the Session itself
@@ -254,6 +272,43 @@ def _insert_from_manifest_entry(
             title=entry.title,
             notes=entry.notes,
             device_name=entry.device_name,
+        ),
+        gpx_bytes,
+    )
+    return created
+
+
+def _insert_from_strava_row(
+    session: Session,
+    user_id: str,
+    client_activity_id: str,
+    activity_type: str,
+    started_at: datetime,
+    ended_at: datetime,
+    title: str | None,
+    tags: list[str],
+    gpx_bytes: bytes,
+) -> bool:
+    """Adapts _insert_activity_with_gpx to the StravaActivityInserter shape
+    run_strava_import() expects — see app/activity_import_strava.py. Follows
+    the same client_summary={}/source_platform convention as upload_gpx
+    (app/web/activities.py) for a non-phone source: no phone-reported
+    summary exists, so the activity list page's distance/time columns show
+    0.0 for these rows the same way they already do for manual GPX
+    uploads — pre-existing, accepted behavior, not new to this feature."""
+    _activity, _analysis, created = _insert_activity_with_gpx(
+        session,
+        user_id,
+        _NewActivity(
+            client_activity_id=client_activity_id,
+            activity_type=activity_type,
+            started_at=started_at,
+            ended_at=ended_at,
+            client_summary={},
+            source_platform="strava_import",
+            source_app_version="",
+            title=title,
+            tags=tags,
         ),
         gpx_bytes,
     )
@@ -529,6 +584,99 @@ def import_activities(
         skipped=summary.skipped,
         failed=summary.failed,
         items=summary.items,
+    )
+
+
+@router.post("/import/strava", response_model=StravaImportJobCreated, status_code=202)
+def import_strava(
+    request: Request,
+    user: CurrentUser,
+    background_tasks: BackgroundTasks,
+    archive: Annotated[UploadFile, File()],
+) -> StravaImportJobCreated:
+    """API equivalent of app/web/activities.py's import_strava — see
+    app/activity_import_strava.py for the CSV-matching/format-conversion
+    logic shared by both. The upfront validation (size check,
+    read_strava_export_archive, parse_activities_csv) is fast/cheap and
+    stays synchronous so a malformed upload still 400/413s immediately.
+    Once validated, the actual per-row import is handed to a BackgroundTask
+    (app/activity_import_jobs.py) the same way the web route already does,
+    rather than running inline on this request — a real export runs to
+    hundreds of activities and would otherwise blow past nginx's
+    proxy_read_timeout (see deploy/standalone-tls/nginx.conf) for API
+    clients exactly as it used to for the browser. No db_session dependency
+    here — the import doesn't touch the DB until the background task runs,
+    well after this request's session would already be closed. Poll
+    GET .../import/strava/{job_id}/status for progress and the final
+    ImportResult."""
+    settings = get_settings()
+    data = archive.file.read(settings.max_strava_import_bytes + 1)
+    if len(data) > settings.max_strava_import_bytes:
+        raise api_error(
+            413,
+            "archive_too_large",
+            f"Archive exceeds the {settings.max_strava_import_bytes}-byte limit. "
+            "Your Strava export only needs to keep activities.csv and the "
+            "activities/ folder for this import.",
+        )
+
+    try:
+        zip_archive = read_strava_export_archive(data, settings.max_strava_import_bytes)
+    except StravaImportError as exc:
+        raise api_error(400, "invalid_archive", str(exc)) from exc
+
+    try:
+        csv_rows = parse_activities_csv(zip_archive.read("activities.csv"))
+    except StravaImportError as exc:
+        zip_archive.close()
+        raise api_error(400, "invalid_archive", str(exc)) from exc
+
+    job = create_job(user.id, total=len(csv_rows))
+    background_tasks.add_task(
+        run_strava_import_job,
+        job.id,
+        user.id,
+        request.client.host if request.client else "unknown",
+        csv_rows,
+        zip_archive,
+    )
+
+    return StravaImportJobCreated(job_id=job.id, total=job.total)
+
+
+@router.get("/import/strava/{job_id}/status", response_model=StravaImportJobStatus)
+def import_strava_status(job_id: str, user: CurrentUser) -> StravaImportJobStatus:
+    """API equivalent of app/web/activities.py's import_strava_status —
+    polled by clients while a background import (see import_strava above) is
+    running."""
+    job = get_job(job_id)
+    if job is None or job.user_id != user.id:
+        # Same "unknown/expired job" treatment as the web route: not the
+        # requesting user's own job (or a since-evicted/restarted-process
+        # one) is indistinguishable from "never existed" to this caller.
+        raise api_error(404, "job_not_found", "This import job could not be found.")
+
+    if job.status in ("pending", "running"):
+        return StravaImportJobStatus(status=job.status, processed=job.processed, total=job.total)
+
+    if job.status == "error":
+        return StravaImportJobStatus(
+            status="error", processed=job.processed, total=job.total, error=job.error
+        )
+
+    summary = job.summary
+    if summary is None:  # pragma: no cover - defensive, mark_done always sets both together
+        raise api_error(500, "inconsistent_job_state", "This import job finished unexpectedly.")
+    return StravaImportJobStatus(
+        status="done",
+        processed=job.processed,
+        total=job.total,
+        result=ImportResult(
+            imported=summary.imported,
+            skipped=summary.skipped,
+            failed=summary.failed,
+            items=summary.items,
+        ),
     )
 
 

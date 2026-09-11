@@ -236,3 +236,104 @@ def test_deleting_a_user_removes_their_activities(
     response = app_client.get("/api/v1/admin/users", headers=auth_headers)
     emails = [u["email"] for u in response.json()]
     assert "target3@example.com" not in emails
+
+
+def test_deleting_a_user_with_tags_does_not_error(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    """Regression test: Tag.user_id has no ON DELETE CASCADE and no ORM
+    relationship() from User, so deleting a user who owns any Tag row (every
+    Strava import creates at least a "Strava" tag — see
+    app/activity_import_strava.py) used to raise an IntegrityError on the
+    final `DELETE FROM users` unless delete_user also clears/deletes the
+    target's tags first."""
+    from tests.conftest import upload_sample_activity
+
+    create = app_client.post(
+        "/api/v1/admin/users",
+        headers=auth_headers,
+        json={
+            "email": "target-tags@example.com",
+            "display_name": "TargetTags",
+            "password": "a-strong-password",
+            "is_admin": False,
+        },
+    )
+    target_id = create.json()["id"]
+
+    login = app_client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "target-tags@example.com",
+            "password": "a-strong-password",
+            "device_name": "x",
+        },
+    )
+    target_headers = {"Authorization": f"Bearer {login.json()['token']}"}
+    upload = upload_sample_activity(app_client, target_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    tag_response = app_client.post(
+        f"/api/v1/activities/{activity_id}/tags",
+        headers=target_headers,
+        json={"name": "a-tag"},
+    )
+    assert tag_response.status_code == 201
+
+    response = app_client.delete(f"/api/v1/admin/users/{target_id}", headers=auth_headers)
+    assert response.status_code == 204
+
+    response = app_client.get("/api/v1/admin/users", headers=auth_headers)
+    emails = [u["email"] for u in response.json()]
+    assert "target-tags@example.com" not in emails
+
+
+def test_web_deleting_a_user_with_tags_does_not_error(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    """Same regression as test_deleting_a_user_with_tags_does_not_error, but
+    against app/web/admin.py's delete_user — a separate route with its own
+    (previously separately buggy) copy of the same delete loop."""
+    from tests.conftest import upload_sample_activity
+
+    create = app_client.post(
+        "/api/v1/admin/users",
+        headers=auth_headers,
+        json={
+            "email": "web-target-tags@example.com",
+            "display_name": "WebTargetTags",
+            "password": "a-strong-password",
+            "is_admin": False,
+        },
+    )
+    target_id = create.json()["id"]
+
+    login = app_client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "web-target-tags@example.com",
+            "password": "a-strong-password",
+            "device_name": "x",
+        },
+    )
+    target_headers = {"Authorization": f"Bearer {login.json()['token']}"}
+    upload = upload_sample_activity(app_client, target_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    tag_response = app_client.post(
+        f"/api/v1/activities/{activity_id}/tags",
+        headers=target_headers,
+        json={"name": "a-tag"},
+    )
+    assert tag_response.status_code == 201
+
+    admin_web_login = app_client.post(
+        "/login",
+        data={"email": "admin@example.com", "password": "admin-password-123"},
+        headers={"X-Requested-With": "htmx"},
+    )
+    assert admin_web_login.status_code in (200, 303)
+
+    response = app_client.delete(f"/admin/users/{target_id}", headers={"X-Requested-With": "htmx"})
+    assert response.status_code == 200
+
+    users_page = app_client.get("/admin/users")
+    assert "web-target-tags@example.com" not in users_page.text

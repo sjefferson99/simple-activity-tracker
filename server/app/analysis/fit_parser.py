@@ -11,6 +11,14 @@ class FitParseError(Exception):
     pass
 
 
+class FitNoTrackPointsError(FitParseError):
+    """Raised specifically when parsing succeeded but the file has zero
+    usable (timestamped + positioned) record messages — most commonly a
+    genuinely GPS-less indoor/virtual activity, not a corrupt file. See
+    GpxNoTrackPointsError's docstring in gpx_parser.py for why this is its
+    own subclass."""
+
+
 def parse_fit(data: bytes) -> Track:
     """Parses FIT (Garmin/ANT binary) bytes into a Track, using the fitparse
     library (unlike GPX/TCX, FIT's binary framing makes hand-rolling
@@ -56,5 +64,5 @@ def parse_fit(data: bytes) -> Track:
 
     track = Track(segments=[Segment(points=points)] if points else [])
     if track.point_count == 0:
-        raise FitParseError("FIT file has no timestamped, positioned record messages")
+        raise FitNoTrackPointsError("FIT file has no timestamped, positioned record messages")
     return track

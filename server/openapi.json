@@ -454,6 +454,20 @@
         "title": "Body_import_activities_api_v1_activities_import_post",
         "type": "object"
       },
+      "Body_import_strava_api_v1_activities_import_strava_post": {
+        "properties": {
+          "archive": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Archive",
+            "type": "string"
+          }
+        },
+        "required": [
+          "archive"
+        ],
+        "title": "Body_import_strava_api_v1_activities_import_strava_post",
+        "type": "object"
+      },
       "Body_upload_activity_api_v1_activities_post": {
         "properties": {
           "gpx": {
@@ -675,6 +689,75 @@
           "user"
         ],
         "title": "LoginResponse",
+        "type": "object"
+      },
+      "StravaImportJobCreated": {
+        "description": "Returned by POST /activities/import/strava (202 Accepted): the client\npolls GET /activities/import/strava/{job_id}/status for progress/result,\nmirroring the web app's own background-job flow for the same import.",
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_id",
+          "total"
+        ],
+        "title": "StravaImportJobCreated",
+        "type": "object"
+      },
+      "StravaImportJobStatus": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "processed": {
+            "title": "Processed",
+            "type": "integer"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImportResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "processed",
+          "total"
+        ],
+        "title": "StravaImportJobStatus",
         "type": "object"
       },
       "TagOut": {
@@ -1000,6 +1083,91 @@
           }
         },
         "summary": "Import Activities",
+        "tags": [
+          "activities"
+        ]
+      }
+    },
+    "/api/v1/activities/import/strava": {
+      "post": {
+        "description": "API equivalent of app/web/activities.py's import_strava \u2014 see\napp/activity_import_strava.py for the CSV-matching/format-conversion\nlogic shared by both. The upfront validation (size check,\nread_strava_export_archive, parse_activities_csv) is fast/cheap and\nstays synchronous so a malformed upload still 400/413s immediately.\nOnce validated, the actual per-row import is handed to a BackgroundTask\n(app/activity_import_jobs.py) the same way the web route already does,\nrather than running inline on this request \u2014 a real export runs to\nhundreds of activities and would otherwise blow past nginx's\nproxy_read_timeout (see deploy/standalone-tls/nginx.conf) for API\nclients exactly as it used to for the browser. No db_session dependency\nhere \u2014 the import doesn't touch the DB until the background task runs,\nwell after this request's session would already be closed. Poll\nGET .../import/strava/{job_id}/status for progress and the final\nImportResult.",
+        "operationId": "import_strava_api_v1_activities_import_strava_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_strava_api_v1_activities_import_strava_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StravaImportJobCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Strava",
+        "tags": [
+          "activities"
+        ]
+      }
+    },
+    "/api/v1/activities/import/strava/{job_id}/status": {
+      "get": {
+        "description": "API equivalent of app/web/activities.py's import_strava_status \u2014\npolled by clients while a background import (see import_strava above) is\nrunning.",
+        "operationId": "import_strava_status_api_v1_activities_import_strava__job_id__status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StravaImportJobStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Strava Status",
         "tags": [
           "activities"
         ]

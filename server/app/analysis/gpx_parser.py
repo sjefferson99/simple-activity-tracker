@@ -10,6 +10,14 @@ class GpxParseError(Exception):
     pass
 
 
+class GpxNoTrackPointsError(GpxParseError):
+    """Raised specifically when parsing succeeded but the file has zero
+    usable (timestamped) points — distinct from a malformed/corrupt file, so
+    callers that care about that distinction (e.g. the Strava importer,
+    which treats a genuinely GPS-less activity as a normal skip rather than
+    a failure) can catch this subclass specifically."""
+
+
 def parse_gpx(data: bytes) -> Track:
     """Parses GPX bytes into a Track. Points with no timestamp are dropped —
     a Track without complete timing can't support any of the analysis this
@@ -53,7 +61,7 @@ def parse_gpx(data: bytes) -> Track:
 
     track = Track(segments=segments)
     if track.point_count == 0:
-        raise GpxParseError("GPX file has no timestamped track points")
+        raise GpxNoTrackPointsError("GPX file has no timestamped track points")
     return track
 
 

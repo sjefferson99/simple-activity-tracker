@@ -21,6 +21,7 @@ from app.models.user import User
 from app.repositories.activities import SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
+from app.repositories.tags import SqlAlchemyTagRepository
 from app.repositories.users import SqlAlchemyUserRepository
 from app.repositories.web_sessions import SqlAlchemyWebSessionRepository
 from app.storage.blob_store import LocalFileBlobStore
@@ -187,6 +188,7 @@ def delete_user(
 
     activities_repo = SqlAlchemyActivityRepository(session)
     analyses_repo = SqlAlchemyActivityAnalysisRepository(session)
+    tags_repo = SqlAlchemyTagRepository(session)
     blob_store = LocalFileBlobStore(Path(get_settings().data_dir))
 
     blob_keys: list[str] = []
@@ -202,11 +204,23 @@ def delete_user(
                 # means the analysis delete must be flushed before the
                 # activity delete, or the FK constraint fails.
                 session.flush()
+            # Same reasoning as delete_activity/activity_add_tag: the
+            # activity_tags association rows aren't the blocker (SQLAlchemy
+            # manages those via the secondary table automatically), but the
+            # user's own Tag rows are — Tag.user_id has no ON DELETE CASCADE
+            # and no relationship() from User, so a Tag row surviving past
+            # this loop makes the final repo.delete(target) below fail its
+            # FK constraint for any user who has ever tagged an activity
+            # (every Strava import creates a "Strava" tag).
+            activity.tags.clear()
             blob_keys.append(activity.gpx_blob_key)
             activities_repo.delete(activity)
         if page.next_cursor is None:
             break
         cursor = page.next_cursor
+
+    for tag in tags_repo.list_for_user(target.id):
+        session.delete(tag)
 
     SqlAlchemyDeviceTokenRepository(session).delete_all_for_user(target.id)
     SqlAlchemyWebSessionRepository(session).delete_all_for_user(target.id)

@@ -13,6 +13,7 @@ from app.models.user import User
 from app.repositories.activities import SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
+from app.repositories.tags import SqlAlchemyTagRepository
 from app.repositories.users import SqlAlchemyUserRepository
 from app.repositories.web_sessions import SqlAlchemyWebSessionRepository
 from app.storage.blob_store import LocalFileBlobStore
@@ -275,6 +276,7 @@ def admin_delete_user(
 
     activities_repo = SqlAlchemyActivityRepository(session)
     analyses_repo = SqlAlchemyActivityAnalysisRepository(session)
+    tags_repo = SqlAlchemyTagRepository(session)
     blob_store = LocalFileBlobStore(Path(get_settings().data_dir))
 
     blob_keys: list[str] = []
@@ -286,11 +288,19 @@ def admin_delete_user(
             if analysis is not None:
                 analyses_repo.delete(analysis)
                 session.flush()
+            # See the matching comment in app/api/v1/admin.py:delete_user —
+            # Tag.user_id has no ON DELETE CASCADE, so any tag owned by this
+            # user (e.g. from a Strava import) must be cleared/deleted before
+            # repo.delete(target) below, or that delete fails its FK check.
+            activity.tags.clear()
             blob_keys.append(activity.gpx_blob_key)
             activities_repo.delete(activity)
         if page.next_cursor is None:
             break
         cursor = page.next_cursor
+
+    for tag in tags_repo.list_for_user(target.id):
+        session.delete(tag)
 
     SqlAlchemyDeviceTokenRepository(session).delete_all_for_user(target.id)
     SqlAlchemyWebSessionRepository(session).delete_all_for_user(target.id)

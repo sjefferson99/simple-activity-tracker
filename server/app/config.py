@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     enable_api_docs: bool = False
     max_gpx_bytes: int = 20 * 1024 * 1024
     max_import_bytes: int = 200 * 1024 * 1024
+    # Separate from max_import_bytes (the SAT-native export/import ceiling)
+    # so this doesn't loosen or tighten that unrelated limit as a side
+    # effect. A full Strava account export is much larger than one user's
+    # activities need to be — only activities.csv and the activities/
+    # folder are ever read (see app/activity_import_strava.py), so the
+    # over-limit error tells the user to trim the zip to just those.
+    max_strava_import_bytes: int = 100 * 1024 * 1024
     secure_cookies: bool = True
     trusted_proxies: str = ""
     log_level: str = "info"
