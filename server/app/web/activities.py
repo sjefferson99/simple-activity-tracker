@@ -378,12 +378,23 @@ def activities_bulk_delete(
         analysis = analyses_repo.get_by_activity_id(activity.id)
         if analysis is not None:
             analyses_repo.delete(analysis)
-            session.flush()
         activity.tags.clear()
+        # Single flush per activity: the FK-ordering requirement (see
+        # activity_delete above) is only that the analysis delete lands
+        # before the activity delete, which one flush covering both
+        # already-queued deletes satisfies just as well as two.
         session.flush()
         blob_keys.append(activity.gpx_blob_key)
         deleted_ids.append(activity.id)
         activities_repo.delete(activity)
+
+    if not deleted_ids:
+        # Every submitted id was already gone (e.g. deleted from another
+        # tab between page load and submit) — nothing to commit, and a
+        # silent 200 would look identical to a real bulk delete succeeding.
+        raise HTTPException(
+            status_code=400, detail="None of the selected activities could be found"
+        )
 
     # See activity_delete above for why this is committed explicitly before
     # the synchronous blob deletes.

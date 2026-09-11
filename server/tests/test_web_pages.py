@@ -340,6 +340,21 @@ def test_bulk_delete_with_no_selection_is_400(app_client, sample_gpx_bytes, auth
     assert response.status_code == 400
 
 
+def test_bulk_delete_with_only_stale_ids_is_400(app_client, sample_gpx_bytes, auth_headers):
+    """A page open in another tab may have already deleted every selected
+    activity by the time this request lands — that must not look identical
+    to a successful bulk delete (a silent 200 would give no signal that
+    nothing was actually removed)."""
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.post(
+        "/activities/bulk-delete",
+        headers=HTMX_HEADERS,
+        data={"activity_ids": ["does-not-exist", "also-does-not-exist"]},
+    )
+    assert response.status_code == 400
+
+
 def test_bulk_delete_ignores_unknown_and_foreign_ids(app_client, sample_gpx_bytes, auth_headers):
     from tests.test_strava_import import _other_user_headers
 
