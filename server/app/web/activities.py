@@ -348,6 +348,56 @@ def activity_delete(
     return Response(status_code=200, headers={"HX-Redirect": "/"})
 
 
+@router.post("/activities/bulk-delete", dependencies=[Depends(require_htmx_header)])
+def activities_bulk_delete(
+    request: Request,
+    user: WebUser,
+    session: Annotated[Session, Depends(db_session)],
+    activity_ids: Annotated[list[str] | None, Form()] = None,
+) -> Response:
+    """Deletes every selected activity in one request (issue #65) — the same
+    per-activity cleanup as activity_delete above (analysis, tags, blob),
+    just looped. Unknown/foreign/already-deleted ids are silently skipped
+    rather than 404ing the whole request, matching export_activities'
+    reasoning: these ids only ever come from checkboxes rendered on the page
+    itself (partials/activity_list_items.html), so one going stale between
+    page load and submit should just shrink the batch, not error it out."""
+    if not activity_ids:
+        raise HTTPException(status_code=400, detail="Select at least one activity to delete")
+
+    activities_repo = SqlAlchemyActivityRepository(session)
+    analyses_repo = SqlAlchemyActivityAnalysisRepository(session)
+    blob_store = LocalFileBlobStore(Path(get_settings().data_dir))
+
+    blob_keys: list[str] = []
+    deleted_ids: list[str] = []
+    for activity_id in activity_ids:
+        activity = activities_repo.get_by_id_for_user(user.id, activity_id)
+        if activity is None:
+            continue
+        analysis = analyses_repo.get_by_activity_id(activity.id)
+        if analysis is not None:
+            analyses_repo.delete(analysis)
+            session.flush()
+        activity.tags.clear()
+        session.flush()
+        blob_keys.append(activity.gpx_blob_key)
+        deleted_ids.append(activity.id)
+        activities_repo.delete(activity)
+
+    # See activity_delete above for why this is committed explicitly before
+    # the synchronous blob deletes.
+    session.commit()
+    client_ip = request.client.host if request.client else "unknown"
+    for activity_id in deleted_ids:
+        log_audit_event(
+            "activity.deleted", actor_id=user.id, target_id=activity_id, client_ip=client_ip
+        )
+    for blob_key in blob_keys:
+        blob_store.delete(blob_key)
+    return Response(status_code=200, headers={"HX-Redirect": "/"})
+
+
 @router.get("/export")
 def export_activities(
     user: WebUser,

@@ -36,12 +36,19 @@
 </div>
 
 <div class="card">
-  <h2>Backup &amp; restore</h2>
-  <p class="muted">Export activities to a .zip backup file, or import one from another server. Importing
-  never overwrites an existing activity — anything already present is skipped.</p>
+  <h2>Activity actions</h2>
+  <p class="muted">Export activities to a .zip backup file, import one from another server, or delete
+  the ones you've selected below. Importing never overwrites an existing activity — anything already
+  present is skipped. Deleting cannot be undone.</p>
   <div class="toolbar">
     <a class="button secondary" href="/export">Export all</a>
     <button type="submit" form="export-form" class="secondary">Export selected</button>
+    <button type="button" class="danger"
+            hx-post="/activities/bulk-delete"
+            hx-include="#activity-list input[name='activity_ids']:checked"
+            hx-confirm="Delete the selected activities? This cannot be undone.">
+      Delete selected
+    </button>
   </div>
   <form id="import-form" hx-post="/import" hx-target="#import-result" hx-encoding="multipart/form-data" style="margin-top:0.75rem;">
     <label for="import-archive">Import from backup file</label>
