@@ -17,6 +17,12 @@ from app.activity_export import (
     read_import_archive,
     run_import,
 )
+from app.activity_import_strava import (
+    StravaImportError,
+    parse_activities_csv,
+    read_strava_export_archive,
+    run_strava_import,
+)
 from app.analysis.gpx_parser import GpxParseError, parse_gpx, parse_split_preference
 from app.analysis.track_sampling import DEFAULT_MAX_POINTS, sample_track
 from app.analysis.v1 import ANALYSIS_VERSION, AnalyzerV1
@@ -254,6 +260,43 @@ def _insert_from_manifest_entry(
             title=entry.title,
             notes=entry.notes,
             device_name=entry.device_name,
+        ),
+        gpx_bytes,
+    )
+    return created
+
+
+def _insert_from_strava_row(
+    session: Session,
+    user_id: str,
+    client_activity_id: str,
+    activity_type: str,
+    started_at: datetime,
+    ended_at: datetime,
+    title: str | None,
+    tags: list[str],
+    gpx_bytes: bytes,
+) -> bool:
+    """Adapts _insert_activity_with_gpx to the StravaActivityInserter shape
+    run_strava_import() expects — see app/activity_import_strava.py. Follows
+    the same client_summary={}/source_platform convention as upload_gpx
+    (app/web/activities.py) for a non-phone source: no phone-reported
+    summary exists, so the activity list page's distance/time columns show
+    0.0 for these rows the same way they already do for manual GPX
+    uploads — pre-existing, accepted behavior, not new to this feature."""
+    _activity, _analysis, created = _insert_activity_with_gpx(
+        session,
+        user_id,
+        _NewActivity(
+            client_activity_id=client_activity_id,
+            activity_type=activity_type,
+            started_at=started_at,
+            ended_at=ended_at,
+            client_summary={},
+            source_platform="strava_import",
+            source_app_version="",
+            title=title,
+            tags=tags,
         ),
         gpx_bytes,
     )
@@ -522,6 +565,64 @@ def import_activities(
             actor_id=user.id,
             client_ip=request.client.host if request.client else "unknown",
             count=str(summary.imported),
+        )
+
+    return ImportResult(
+        imported=summary.imported,
+        skipped=summary.skipped,
+        failed=summary.failed,
+        items=summary.items,
+    )
+
+
+@router.post("/import/strava", response_model=ImportResult)
+def import_strava(
+    request: Request,
+    user: CurrentUser,
+    session: Annotated[Session, Depends(db_session)],
+    archive: Annotated[UploadFile, File()],
+) -> ImportResult:
+    """API equivalent of app/web/activities.py's import_strava — see
+    app/activity_import_strava.py for the CSV-matching/format-conversion
+    logic shared by both."""
+    settings = get_settings()
+    data = archive.file.read(settings.max_strava_import_bytes + 1)
+    if len(data) > settings.max_strava_import_bytes:
+        raise api_error(
+            413,
+            "archive_too_large",
+            f"Archive exceeds the {settings.max_strava_import_bytes}-byte limit. "
+            "Your Strava export only needs to keep activities.csv and the "
+            "activities/ folder for this import.",
+        )
+
+    try:
+        zip_archive = read_strava_export_archive(data)
+    except StravaImportError as exc:
+        raise api_error(400, "invalid_archive", str(exc)) from exc
+
+    with zip_archive:
+        try:
+            csv_rows = parse_activities_csv(zip_archive.read("activities.csv"))
+        except StravaImportError as exc:
+            raise api_error(400, "invalid_archive", str(exc)) from exc
+
+        summary = run_strava_import(
+            session,
+            user.id,
+            csv_rows,
+            zip_archive,
+            settings.max_gpx_bytes,
+            _insert_from_strava_row,
+        )
+
+    if summary.imported:
+        log_audit_event(
+            "activity.imported",
+            actor_id=user.id,
+            client_ip=request.client.host if request.client else "unknown",
+            count=str(summary.imported),
+            source="strava",
         )
 
     return ImportResult(

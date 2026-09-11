@@ -1,9 +1,11 @@
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -21,15 +23,32 @@ from app.activity_export import (
     read_import_archive,
     run_import,
 )
+from app.activity_import_jobs import (
+    create_job,
+    get_job,
+    mark_done,
+    mark_error,
+    mark_running,
+    update_progress,
+)
+from app.activity_import_strava import (
+    StravaCsvRow,
+    StravaImportError,
+    parse_activities_csv,
+    read_strava_export_archive,
+    run_strava_import,
+)
 from app.analysis.gpx_parser import GpxParseError, guess_device_name, parse_gpx
 from app.analysis.v1 import AnalyzerV1
 from app.api.v1.activities import (
     _insert_activity_with_gpx,
     _insert_from_manifest_entry,
+    _insert_from_strava_row,
     _NewActivity,
 )
 from app.audit import log_audit_event
 from app.config import get_settings
+from app.db import get_session_factory
 from app.deps import db_session
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
@@ -432,6 +451,203 @@ def import_activities(
             count=str(summary.imported),
         )
 
+    return templates.TemplateResponse(
+        request,
+        "partials/import_result.html",
+        {
+            "user": user,
+            "imported": summary.imported,
+            "skipped": summary.skipped,
+            "failed": summary.failed,
+            "items": summary.items,
+        },
+    )
+
+
+def _run_strava_import_job(
+    job_id: str,
+    user_id: str,
+    client_ip: str,
+    csv_rows: list[StravaCsvRow],
+    zip_archive: zipfile.ZipFile,
+) -> None:
+    """The actual import loop, run outside the request/response cycle via
+    BackgroundTasks. Must NOT use the request's db_session (app/deps.py) —
+    that session is closed by FastAPI as soon as the response finishes
+    sending, which happens before this function even starts running. Opens
+    and owns its own session instead, mirroring db_session's own
+    commit-on-success/rollback-on-exception/always-close pattern (see
+    app/deps.py) since nothing else will do that for a background task.
+
+    Also owns closing zip_archive — the request handler deliberately leaves
+    it open (rather than the `with zip_archive:` the old synchronous path
+    used) since the archive has to stay readable for the whole import, which
+    now outlives the request."""
+    job = get_job(job_id)
+    if job is None:
+        zip_archive.close()
+        return  # evicted from the registry before the task got to run
+
+    mark_running(job_id)
+    session = get_session_factory()()
+    try:
+        with zip_archive:
+            summary = run_strava_import(
+                session,
+                user_id,
+                csv_rows,
+                zip_archive,
+                get_settings().max_gpx_bytes,
+                _insert_from_strava_row,
+                on_progress=lambda processed, total: update_progress(job_id, processed, total),
+            )
+        session.commit()
+    except Exception as exc:  # a background task has no request/response to surface this to
+        session.rollback()
+        mark_error(job_id, str(exc))
+        return
+    finally:
+        session.close()
+
+    if summary.imported:
+        log_audit_event(
+            "activity.imported",
+            actor_id=user_id,
+            client_ip=client_ip,
+            count=str(summary.imported),
+            source="strava",
+        )
+    mark_done(job_id, summary)
+
+
+@router.post("/import/strava", dependencies=[Depends(require_htmx_header)])
+def import_strava(
+    request: Request,
+    user: WebUser,
+    background_tasks: BackgroundTasks,
+    archive: Annotated[UploadFile, File()],
+) -> Response:
+    """Imports activities from a Strava account export .zip (issue #61) —
+    see app/activity_import_strava.py for the CSV-matching/format-conversion
+    logic. The upfront validation (size check, read_strava_export_archive,
+    parse_activities_csv) is fast/cheap and stays synchronous so a malformed
+    upload still 400/413s immediately with a friendly message. Once
+    validated, the actual per-row import — CPU-bound and, for a real export,
+    slow enough to blow past nginx's proxy_read_timeout (see
+    deploy/standalone-tls/nginx.conf) — is handed to a BackgroundTask so this
+    handler can return right away; the browser then polls
+    GET /import/strava/{job_id}/status (partials/import_strava_progress.html)
+    until it's done. No db_session dependency here (unlike every other route
+    in this file) — the import doesn't touch the DB until the background task
+    runs, well after this request's session would already be closed."""
+    settings = get_settings()
+    data = archive.file.read(settings.max_strava_import_bytes + 1)
+    if len(data) > settings.max_strava_import_bytes:
+        return templates.TemplateResponse(
+            request,
+            "partials/import_result.html",
+            {
+                "user": user,
+                "error": (
+                    f"Archive exceeds the {settings.max_strava_import_bytes}-byte limit. "
+                    "Your Strava export only needs to keep activities.csv and the "
+                    "activities/ folder for this import — try removing everything else "
+                    "(photos, routes, segments, and other data this feature doesn't use) "
+                    "and re-uploading."
+                ),
+            },
+            status_code=413,
+        )
+
+    try:
+        zip_archive = read_strava_export_archive(data)
+    except StravaImportError as exc:
+        return templates.TemplateResponse(
+            request,
+            "partials/import_result.html",
+            {"user": user, "error": str(exc)},
+            status_code=400,
+        )
+
+    try:
+        csv_rows = parse_activities_csv(zip_archive.read("activities.csv"))
+    except StravaImportError as exc:
+        zip_archive.close()
+        return templates.TemplateResponse(
+            request,
+            "partials/import_result.html",
+            {"user": user, "error": str(exc)},
+            status_code=400,
+        )
+
+    job = create_job(user.id, total=len(csv_rows))
+    background_tasks.add_task(
+        _run_strava_import_job,
+        job.id,
+        user.id,
+        request.client.host if request.client else "unknown",
+        csv_rows,
+        zip_archive,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "partials/import_strava_progress.html",
+        {"user": user, "job_id": job.id, "processed": 0, "total": job.total},
+    )
+
+
+@router.get("/import/strava/{job_id}/status")
+def import_strava_status(
+    job_id: str,
+    request: Request,
+    user: WebUser,
+) -> Response:
+    """Polled by partials/import_strava_progress.html (hx-trigger="every 2s")
+    while a background import (see import_strava above) is running. Once the
+    job reaches a terminal state, renders the exact same
+    partials/import_result.html the old synchronous path rendered — that
+    fragment has no polling trigger of its own, so swapping it in naturally
+    stops the polling (htmx convention: polling continues only as long as
+    the polling element itself keeps being re-rendered)."""
+    job = get_job(job_id)
+    if job is None or job.user_id != user.id:
+        # Unknown/expired job (process restarted, evicted, or someone else's
+        # id) shouldn't 500 a page a human is sitting in front of — render a
+        # plain error fragment with no further polling instead.
+        return templates.TemplateResponse(
+            request,
+            "partials/import_result.html",
+            {"user": user, "error": "This import job could not be found. It may have expired."},
+            status_code=404,
+        )
+
+    if job.status in ("pending", "running"):
+        return templates.TemplateResponse(
+            request,
+            "partials/import_strava_progress.html",
+            {"user": user, "job_id": job.id, "processed": job.processed, "total": job.total},
+        )
+
+    if job.status == "error":
+        return templates.TemplateResponse(
+            request,
+            "partials/import_result.html",
+            {"user": user, "error": f"Import failed: {job.error}"},
+            status_code=500,
+        )
+
+    summary = job.summary
+    if summary is None:
+        # Shouldn't happen — mark_done always sets summary together with
+        # status="done" — but rendering a friendly error beats a 500 if the
+        # registry is ever in an inconsistent state.
+        return templates.TemplateResponse(
+            request,
+            "partials/import_result.html",
+            {"user": user, "error": "This import job finished in an unexpected state."},
+            status_code=500,
+        )
     return templates.TemplateResponse(
         request,
         "partials/import_result.html",

@@ -43,6 +43,7 @@ deploy/standalone-tls/data/
 deploy/standalone-tls/certs/*.pem
 deploy/standalone-tls/backups/
 deploy/standalone-tls/secrets/
+deploy/standalone-tls/docker-compose.override.yml
 .micropico
 
 # Personal Strava account export (real activity/personal data) used as a

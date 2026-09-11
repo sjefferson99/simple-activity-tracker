@@ -454,6 +454,20 @@
         "title": "Body_import_activities_api_v1_activities_import_post",
         "type": "object"
       },
+      "Body_import_strava_api_v1_activities_import_strava_post": {
+        "properties": {
+          "archive": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Archive",
+            "type": "string"
+          }
+        },
+        "required": [
+          "archive"
+        ],
+        "title": "Body_import_strava_api_v1_activities_import_strava_post",
+        "type": "object"
+      },
       "Body_upload_activity_api_v1_activities_post": {
         "properties": {
           "gpx": {
@@ -1000,6 +1014,48 @@
           }
         },
         "summary": "Import Activities",
+        "tags": [
+          "activities"
+        ]
+      }
+    },
+    "/api/v1/activities/import/strava": {
+      "post": {
+        "description": "API equivalent of app/web/activities.py's import_strava \u2014 see\napp/activity_import_strava.py for the CSV-matching/format-conversion\nlogic shared by both.",
+        "operationId": "import_strava_api_v1_activities_import_strava_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_strava_api_v1_activities_import_strava_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Strava",
         "tags": [
           "activities"
         ]

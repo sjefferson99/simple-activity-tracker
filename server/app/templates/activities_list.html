@@ -50,4 +50,18 @@
   </form>
   <div id="import-result"></div>
 </div>
+
+<div class="card">
+  <h2>Import from Strava</h2>
+  <p class="muted">Upload your Strava data export .zip (download it from Strava's Settings &gt; My
+  Account &gt; Download or Delete Your Account). Every activity is imported and tagged "Strava"; rides
+  get a "cycling" tag, runs get a "running" tag. Already-imported activities are skipped, so it's safe
+  to re-upload the same export.</p>
+  <form id="import-strava-form" hx-post="/import/strava" hx-target="#import-strava-result" hx-encoding="multipart/form-data" style="margin-top:0.75rem;">
+    <label for="import-strava-archive">Strava export .zip</label>
+    <input type="file" id="import-strava-archive" name="archive" accept=".zip,application/zip" required>
+    <button type="submit">Import</button>
+  </form>
+  <div id="import-strava-result"></div>
+</div>
 {% endblock %}

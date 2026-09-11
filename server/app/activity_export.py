@@ -55,7 +55,7 @@ def _gpx_filename(activity: Activity) -> str:
     return f"{activity.client_activity_id}.gpx"
 
 
-def _failure_reason(exc: Exception) -> str:
+def failure_reason(exc: Exception) -> str:
     """A clean human-readable message for an ImportResultItem's `reason`.
     Plain str(exc) is fine for most exceptions, but insert() can raise an
     HTTPException built by app.api.v1.errors.api_error() (e.g. invalid_gpx
@@ -255,7 +255,7 @@ def run_import(
                 ImportResultItem(
                     client_activity_id=entry.client_activity_id,
                     status="failed",
-                    reason=_failure_reason(exc),
+                    reason=failure_reason(exc),
                 )
             )
             continue

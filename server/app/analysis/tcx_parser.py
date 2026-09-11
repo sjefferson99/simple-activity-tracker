@@ -11,6 +11,12 @@ class TcxParseError(Exception):
     pass
 
 
+class TcxNoTrackPointsError(TcxParseError):
+    """Raised specifically when parsing succeeded but the file has zero
+    usable (timestamped + positioned) points — see GpxNoTrackPointsError's
+    docstring in gpx_parser.py for why this is its own subclass."""
+
+
 def parse_tcx(data: bytes) -> Track:
     """Parses TCX (Garmin Training Center v2) bytes into a Track. Mirrors
     parse_gpx's contract: points missing a usable time or position are
@@ -77,7 +83,7 @@ def parse_tcx(data: bytes) -> Track:
 
     track = Track(segments=segments)
     if track.point_count == 0:
-        raise TcxParseError("TCX file has no timestamped, positioned track points")
+        raise TcxNoTrackPointsError("TCX file has no timestamped, positioned track points")
     return track
 
 
