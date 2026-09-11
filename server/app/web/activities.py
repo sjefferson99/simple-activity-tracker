@@ -1,4 +1,3 @@
-import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -23,32 +22,21 @@ from app.activity_export import (
     read_import_archive,
     run_import,
 )
-from app.activity_import_jobs import (
-    create_job,
-    get_job,
-    mark_done,
-    mark_error,
-    mark_running,
-    update_progress,
-)
+from app.activity_import_jobs import create_job, get_job, run_strava_import_job
 from app.activity_import_strava import (
-    StravaCsvRow,
     StravaImportError,
     parse_activities_csv,
     read_strava_export_archive,
-    run_strava_import,
 )
 from app.analysis.gpx_parser import GpxParseError, guess_device_name, parse_gpx
 from app.analysis.v1 import AnalyzerV1
 from app.api.v1.activities import (
     _insert_activity_with_gpx,
     _insert_from_manifest_entry,
-    _insert_from_strava_row,
     _NewActivity,
 )
 from app.audit import log_audit_event
 from app.config import get_settings
-from app.db import get_session_factory
 from app.deps import db_session
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
@@ -464,62 +452,6 @@ def import_activities(
     )
 
 
-def _run_strava_import_job(
-    job_id: str,
-    user_id: str,
-    client_ip: str,
-    csv_rows: list[StravaCsvRow],
-    zip_archive: zipfile.ZipFile,
-) -> None:
-    """The actual import loop, run outside the request/response cycle via
-    BackgroundTasks. Must NOT use the request's db_session (app/deps.py) —
-    that session is closed by FastAPI as soon as the response finishes
-    sending, which happens before this function even starts running. Opens
-    and owns its own session instead, mirroring db_session's own
-    commit-on-success/rollback-on-exception/always-close pattern (see
-    app/deps.py) since nothing else will do that for a background task.
-
-    Also owns closing zip_archive — the request handler deliberately leaves
-    it open (rather than the `with zip_archive:` the old synchronous path
-    used) since the archive has to stay readable for the whole import, which
-    now outlives the request."""
-    job = get_job(job_id)
-    if job is None:
-        zip_archive.close()
-        return  # evicted from the registry before the task got to run
-
-    mark_running(job_id)
-    session = get_session_factory()()
-    try:
-        with zip_archive:
-            summary = run_strava_import(
-                session,
-                user_id,
-                csv_rows,
-                zip_archive,
-                get_settings().max_gpx_bytes,
-                _insert_from_strava_row,
-                on_progress=lambda processed, total: update_progress(job_id, processed, total),
-            )
-        session.commit()
-    except Exception as exc:  # a background task has no request/response to surface this to
-        session.rollback()
-        mark_error(job_id, str(exc))
-        return
-    finally:
-        session.close()
-
-    if summary.imported:
-        log_audit_event(
-            "activity.imported",
-            actor_id=user_id,
-            client_ip=client_ip,
-            count=str(summary.imported),
-            source="strava",
-        )
-    mark_done(job_id, summary)
-
-
 @router.post("/import/strava", dependencies=[Depends(require_htmx_header)])
 def import_strava(
     request: Request,
@@ -560,7 +492,7 @@ def import_strava(
         )
 
     try:
-        zip_archive = read_strava_export_archive(data)
+        zip_archive = read_strava_export_archive(data, settings.max_strava_import_bytes)
     except StravaImportError as exc:
         return templates.TemplateResponse(
             request,
@@ -582,7 +514,7 @@ def import_strava(
 
     job = create_job(user.id, total=len(csv_rows))
     background_tasks.add_task(
-        _run_strava_import_job,
+        run_strava_import_job,
         job.id,
         user.id,
         request.client.host if request.client else "unknown",

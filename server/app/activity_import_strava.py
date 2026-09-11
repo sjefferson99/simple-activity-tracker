@@ -129,11 +129,17 @@ def parse_activities_csv(data: bytes) -> list[StravaCsvRow]:
     return rows
 
 
-def read_strava_export_archive(data: bytes) -> zipfile.ZipFile:
+def read_strava_export_archive(data: bytes, max_manifest_bytes: int) -> zipfile.ZipFile:
     """Opens+validates the zip and confirms activities.csv is present. Does
     NOT eagerly read every activity file — real exports run to hundreds of
     multi-MB FIT files, so entries are streamed one at a time by
-    run_strava_import instead of held in memory together."""
+    run_strava_import instead of held in memory together.
+
+    max_manifest_bytes guards activities.csv's own *declared* (uncompressed)
+    size before it's decompressed, the same zip-bomb guard
+    app/activity_export.py's read_import_archive applies to manifest.json —
+    a highly compressible CSV can otherwise reach >1000:1 compression ratios
+    well within the outer archive's own size limit."""
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:
@@ -141,29 +147,49 @@ def read_strava_export_archive(data: bytes) -> zipfile.ZipFile:
 
     if ACTIVITIES_CSV_NAME not in archive.namelist():
         raise StravaImportError(f"Archive is missing {ACTIVITIES_CSV_NAME}")
+
+    csv_info = archive.getinfo(ACTIVITIES_CSV_NAME)
+    if csv_info.file_size > max_manifest_bytes:
+        raise StravaImportError(
+            f"{ACTIVITIES_CSV_NAME} exceeds the {max_manifest_bytes}-byte limit"
+        )
     return archive
 
 
-def _decompress(raw: bytes) -> bytes:
+def _decompress(raw: bytes, max_bytes: int) -> bytes:
     """Strava's activity files are gzip-compressed, but detect the actual
     gzip magic number rather than trusting the .gz suffix blindly, in case
-    a future/partial export ever includes an uncompressed member."""
+    a future/partial export ever includes an uncompressed member.
+
+    max_bytes bounds the *decompressed* output, not just the (already
+    size-checked) compressed input — gzip's compression ratio is unbounded
+    (routinely >1000:1 on repetitive data), so a small, size-limit-passing
+    .gz member could otherwise expand to gigabytes via a single
+    gzip.decompress() call. Reads one chunk past the limit and rejects if
+    that chunk is non-empty, rather than materializing an unbounded buffer
+    first and checking its length after the fact."""
     if raw[:2] == _GZIP_MAGIC:
         try:
-            return gzip.decompress(raw)
+            with gzip.GzipFile(fileobj=io.BytesIO(raw)) as gz:
+                data = gz.read(max_bytes + 1)
         except (gzip.BadGzipFile, OSError) as exc:
             raise StravaImportError(f"Corrupt gzip data: {exc}") from exc
+        if len(data) > max_bytes:
+            raise StravaImportError(
+                f"Decompressed activity file exceeds the {max_bytes}-byte limit"
+            )
+        return data
     return raw
 
 
-def _to_gpx_bytes(filename: str, raw: bytes) -> bytes:
+def _to_gpx_bytes(filename: str, raw: bytes, max_decompressed_bytes: int) -> bytes:
     """Decompresses one activities/ member and returns GPX bytes ready for
     _insert_activity_with_gpx. GPX-sourced files pass through decompressed
     but otherwise byte-for-byte unchanged (no lossy re-serialization); TCX
     and FIT are parsed then converted via gpx_writer.track_to_gpx_bytes so
     the blob store/AnalyzerV1/download-as-GPX pipeline needs no format
     awareness downstream of this function."""
-    data = _decompress(raw)
+    data = _decompress(raw, max_decompressed_bytes)
     lower = filename.lower()
     if lower.endswith(".gpx.gz") or lower.endswith(".gpx"):
         try:
@@ -268,7 +294,9 @@ def run_strava_import(
             continue
 
         try:
-            gpx_bytes = _to_gpx_bytes(row.filename, zip_archive.read(row.filename))
+            gpx_bytes = _to_gpx_bytes(
+                row.filename, zip_archive.read(row.filename), max_activity_file_bytes
+            )
             track = parse_gpx(gpx_bytes)
         except StravaNoTrackDataError as exc:
             # A genuinely GPS-less activity (e.g. an indoor/virtual ride

@@ -232,6 +232,23 @@ class ImportResult(BaseModel):
     items: list[ImportResultItem]
 
 
+class StravaImportJobCreated(BaseModel):
+    """Returned by POST /activities/import/strava (202 Accepted): the client
+    polls GET /activities/import/strava/{job_id}/status for progress/result,
+    mirroring the web app's own background-job flow for the same import."""
+
+    job_id: str
+    total: int
+
+
+class StravaImportJobStatus(BaseModel):
+    status: Literal["pending", "running", "done", "error"]
+    processed: int
+    total: int
+    error: str | None = None
+    result: ImportResult | None = None
+
+
 # --- Admin ---
 
 
