@@ -300,6 +300,99 @@ def test_activity_delete_via_web_removes_activity(app_client, sample_gpx_bytes, 
     assert check.status_code == 404
 
 
+def test_bulk_delete_removes_only_selected_activities(app_client, sample_gpx_bytes, auth_headers):
+    first = upload_sample_activity(
+        app_client, auth_headers, sample_gpx_bytes, "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    ).json()
+    second = upload_sample_activity(
+        app_client, auth_headers, sample_gpx_bytes, "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    ).json()
+    kept = upload_sample_activity(
+        app_client, auth_headers, sample_gpx_bytes, "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+    ).json()
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.post(
+        "/activities/bulk-delete",
+        headers=HTMX_HEADERS,
+        data={"activity_ids": [first["id"], second["id"]]},
+    )
+    assert response.status_code == 200
+    assert response.headers.get("hx-redirect") == "/"
+
+    assert (
+        app_client.get(f"/api/v1/activities/{first['id']}", headers=auth_headers).status_code == 404
+    )
+    assert (
+        app_client.get(f"/api/v1/activities/{second['id']}", headers=auth_headers).status_code
+        == 404
+    )
+    assert (
+        app_client.get(f"/api/v1/activities/{kept['id']}", headers=auth_headers).status_code == 200
+    )
+
+
+def test_bulk_delete_with_no_selection_is_400(app_client, sample_gpx_bytes, auth_headers):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.post("/activities/bulk-delete", headers=HTMX_HEADERS, data={})
+    assert response.status_code == 400
+
+
+def test_bulk_delete_with_only_stale_ids_is_400(app_client, sample_gpx_bytes, auth_headers):
+    """A page open in another tab may have already deleted every selected
+    activity by the time this request lands — that must not look identical
+    to a successful bulk delete (a silent 200 would give no signal that
+    nothing was actually removed)."""
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.post(
+        "/activities/bulk-delete",
+        headers=HTMX_HEADERS,
+        data={"activity_ids": ["does-not-exist", "also-does-not-exist"]},
+    )
+    assert response.status_code == 400
+
+
+def test_bulk_delete_ignores_unknown_and_foreign_ids(app_client, sample_gpx_bytes, auth_headers):
+    from tests.test_strava_import import _other_user_headers
+
+    own = upload_sample_activity(
+        app_client, auth_headers, sample_gpx_bytes, "ffffffff-ffff-ffff-ffff-ffffffffffff"
+    ).json()
+    other_headers = _other_user_headers(app_client)
+    foreign = upload_sample_activity(
+        app_client, other_headers, sample_gpx_bytes, "11111111-2222-3333-4444-555555555555"
+    ).json()
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.post(
+        "/activities/bulk-delete",
+        headers=HTMX_HEADERS,
+        data={"activity_ids": [own["id"], foreign["id"], "does-not-exist"]},
+    )
+    assert response.status_code == 200
+
+    assert (
+        app_client.get(f"/api/v1/activities/{own['id']}", headers=auth_headers).status_code == 404
+    )
+    # The foreign activity (owned by a different user) must survive untouched.
+    assert (
+        app_client.get(f"/api/v1/activities/{foreign['id']}", headers=other_headers).status_code
+        == 200
+    )
+
+
+def test_bulk_delete_requires_htmx_header(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.post("/activities/bulk-delete", data={"activity_ids": [activity_id]})
+    assert response.status_code == 403
+
+
 def test_web_export_all_does_not_require_htmx_header(app_client, sample_gpx_bytes, auth_headers):
     upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
     _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
