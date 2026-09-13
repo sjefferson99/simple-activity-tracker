@@ -33,6 +33,16 @@ class ActivityAnalysis(Base):
     # at every place that sets `result` (upload/import, reanalyze CLI).
     distance_meters: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     moving_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    # Denormalized copies of result["start"]/result["end"] (see issue #76) so
+    # the activity list page's location search can filter by proximity with
+    # a plain column comparison instead of a JSON extract on every request.
+    # Null (not 0/0, which is a real place) for pending/failed analyses —
+    # kept in sync by app.analysis.v1.endpoints_from_result() at every place
+    # that sets `result` (upload/import, reanalyze CLI).
+    start_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    start_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    end_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    end_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
     computed_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
     # Cached output of sample_track() at DEFAULT_MAX_POINTS, computed once at
     # upload/reanalyze time instead of re-parsing the full GPX blob on every

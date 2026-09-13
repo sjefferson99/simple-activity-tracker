@@ -5,12 +5,12 @@ from app.analysis.analyzer import AnalysisResult
 from app.analysis.geo_math import haversine_distance_meters, speed_mps_between
 from app.analysis.track import Point, Track
 
-# 4: splits' `boundary` gained `dist_m` (issue #58) — the chart's x-axis can
-# now be distance-based, and the boundary marker needs a matching x-value.
-# Bump this whenever the result shape or algorithm changes, then run
+# 5: result gained `start`/`end` ({"lat", "lon"} of the first/last point,
+# issue #76) so activity search can filter by proximity to a run's start or
+# finish. Bump this whenever the result shape or algorithm changes, then run
 # `simple-activity-tracker-server reanalyze --all` on each deployment so
 # stored analyses catch up — the web UI reads stored results as-is.
-ANALYSIS_VERSION = 4
+ANALYSIS_VERSION = 5
 
 _MAX_IMPLIED_SPEED_MPS = 12.5  # ~2:08 min/km; faster than that is treated as a GPS jump
 _MOVING_SPEED_THRESHOLD_MPS = 0.5
@@ -28,6 +28,26 @@ def distance_and_duration_from_result(result: dict[str, object] | None) -> tuple
     if result is None:
         return 0.0, 0.0
     return float(result.get("distance_meters", 0.0)), float(result.get("moving_seconds", 0.0))  # type: ignore[arg-type]
+
+
+def endpoints_from_result(
+    result: dict[str, object] | None,
+) -> tuple[float | None, float | None, float | None, float | None]:
+    """Extracts the denormalized ActivityAnalysis.start_lat/start_lon/end_lat/end_lon
+    quadruple from an AnalyzerV1.analyze() result (issue #76) — shared by the
+    upload/import path and the `reanalyze` CLI, mirroring
+    distance_and_duration_from_result above. All-None for a missing/failed
+    analysis, matching the columns' own nullable default (null, not 0/0 —
+    (0, 0) is a real place off the coast of West Africa)."""
+    if result is None:
+        return None, None, None, None
+    start = result.get("start")
+    end = result.get("end")
+    start_lat = start.get("lat") if isinstance(start, dict) else None
+    start_lon = start.get("lon") if isinstance(start, dict) else None
+    end_lat = end.get("lat") if isinstance(end, dict) else None
+    end_lon = end.get("lon") if isinstance(end, dict) else None
+    return start_lat, start_lon, end_lat, end_lon
 
 
 _DEFAULT_SPLIT_TYPE = "distance_km"
@@ -459,6 +479,8 @@ class AnalyzerV1:
             "best_efforts": _best_efforts(steps),
             "series": _series(steps, smoothed, windowed_speeds, all_points[0]),
             "bounds": _bounds(track),
+            "start": {"lat": all_points[0].lat, "lon": all_points[0].lon},
+            "end": {"lat": all_points[-1].lat, "lon": all_points[-1].lon},
             "point_count": track.point_count,
             "segment_count": len(track.segments),
         }

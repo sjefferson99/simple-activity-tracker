@@ -300,6 +300,40 @@ def test_analysis_endpoint_returns_the_computed_result(
     assert response.json()["status"] == "done"
 
 
+def test_analysis_endpoint_returns_start_and_end_coordinates(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    """Issue #76: the analysis result carries the run's start/finish."""
+    created = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
+    response = app_client.get(f"/api/v1/activities/{created['id']}/analysis", headers=auth_headers)
+    result = response.json()["result"]
+    assert result["start"]["lat"] is not None
+    assert result["start"]["lon"] is not None
+    assert result["end"]["lat"] is not None
+    assert result["end"]["lon"] is not None
+
+
+def test_upload_populates_analysis_endpoint_coordinate_columns(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    """Issue #76: ActivityAnalysis.start_lat/start_lon/end_lat/end_lon are
+    kept in sync with result["start"]/result["end"] at upload time, the same
+    way distance_meters/moving_seconds already were for issue #75."""
+    from app.db import get_session_factory
+    from app.models.activity_analysis import ActivityAnalysis
+
+    created = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
+
+    with get_session_factory()() as session:
+        analysis = session.get(ActivityAnalysis, created["id"])
+        assert analysis is not None
+        assert analysis.result is not None
+        assert analysis.start_lat == analysis.result["start"]["lat"]
+        assert analysis.start_lon == analysis.result["start"]["lon"]
+        assert analysis.end_lat == analysis.result["end"]["lat"]
+        assert analysis.end_lon == analysis.result["end"]["lon"]
+
+
 def test_track_endpoint_returns_downsampled_points(
     app_client, auth_headers, sample_gpx_bytes
 ) -> None:
