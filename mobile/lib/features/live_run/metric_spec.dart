@@ -99,13 +99,18 @@ final MetricSpec _currentSplitSpec = MetricSpec(
 
 final MetricSpec _lastSplitSpec = MetricSpec(
   id: 'last_split',
-  label: _staticLabel('Last split'),
-  description: 'Moving time taken for the most recently completed split.',
+  label: (useKmh) => useKmh ? 'Last split speed' : 'Last split pace',
+  description:
+      'Average pace or speed for the most recently completed split. For a '
+      'time-based split preference every split has the same fixed duration, '
+      // #78: showing that duration told the user nothing new — pace/speed
+      // is the number that actually varies split-to-split there.
+      'so pace/speed (not duration) is what actually varies split-to-split.',
   valueOf: (metrics, currentSpeedMps, useKmh) {
     final last = metrics.lastCompletedSplit;
-    if (last == null) return '--:--';
+    if (last == null) return _speedOrPace(null, useKmh);
     // Split.index is already 1-based (see MetricsEngine).
-    return '#${last.index}  ${formatDuration(last.duration)}';
+    return '#${last.index}  ${_speedOrPace(last.avgSpeedMps, useKmh)}';
   },
 );
 
