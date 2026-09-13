@@ -59,4 +59,9 @@ class FakeRunStore implements RunStore {
     }
     return failedIds.length;
   }
+
+  @override
+  Future<void> deleteRecord(String clientRunId) async {
+    _records.remove(clientRunId);
+  }
 }

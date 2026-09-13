@@ -123,7 +123,10 @@ class LiveRunScreen extends ConsumerWidget {
                             onPressed: ref
                                 .read(_useKmhProvider.notifier)
                                 .toggle,
-                            child: Text(useKmh ? 'km/h' : 'min/km'),
+                            // Shows what tapping switches *to*, not the
+                            // current unit — e.g. while displaying km/h,
+                            // this reads "min/km".
+                            child: Text(useKmh ? 'min/km' : 'km/h'),
                           )
                         // Holds the row's height so the content below doesn't
                         // shift up when the toggle appears on starting a run.

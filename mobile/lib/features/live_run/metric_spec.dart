@@ -35,11 +35,17 @@ class MetricSpec {
   });
 }
 
-String Function(bool useKmh) _staticLabel(String text) => (_) => text;
+String Function(bool useKmh) _staticLabel(String text) =>
+    (_) => text;
 
+/// Formats speed/pace with its unit suffix ("18.0 km/h" / "3:20 /km") — every
+/// tile using this reads as a bare number/time otherwise, unlike
+/// Distance/Max speed's tiles which already spell their unit out.
 String _speedOrPace(double? mps, bool useKmh) {
-  if (mps == null) return useKmh ? '--.-' : '--:--';
-  return useKmh ? formatKmh(mps) : formatPace(paceSecPerKmFromMps(mps));
+  if (mps == null) return useKmh ? '--.- km/h' : '--:-- /km';
+  return useKmh
+      ? '${formatKmh(mps)} km/h'
+      : '${formatPace(paceSecPerKmFromMps(mps))} /km';
 }
 
 final MetricSpec _avgSpeedSpec = MetricSpec(
@@ -84,8 +90,9 @@ final MetricSpec _currentSplitSpec = MetricSpec(
       'at each split boundary.',
   valueOf: (metrics, currentSpeedMps, useKmh) {
     final elapsedSeconds = metrics.currentSplitElapsed.inMilliseconds / 1000;
-    if (elapsedSeconds <= 0) return _speedOrPace(null, useKmh);
-    final speed = metrics.currentSplitDistanceMeters / elapsedSeconds;
+    final speed = elapsedSeconds <= 0
+        ? null
+        : metrics.currentSplitDistanceMeters / elapsedSeconds;
     return _speedOrPace(speed, useKmh);
   },
 );

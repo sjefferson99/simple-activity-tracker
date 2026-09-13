@@ -9,10 +9,81 @@ MetricSpec _specFor(String id, ActivityMode mode) =>
 
 void main() {
   group('current_split label', () {
-    test('reads "Split speed" in km/h mode and "Split pace" in min/km mode', () {
+    test(
+      'reads "Split speed" in km/h mode and "Split pace" in min/km mode',
+      () {
+        final spec = _specFor('current_split', ActivityMode.running);
+        expect(spec.label(true), 'Split speed');
+        expect(spec.label(false), 'Split pace');
+      },
+    );
+  });
+
+  group('current_split value', () {
+    test('appends km/h in km/h mode', () {
       final spec = _specFor('current_split', ActivityMode.running);
-      expect(spec.label(true), 'Split speed');
-      expect(spec.label(false), 'Split pace');
+      final metrics = LiveMetrics(
+        elapsed: Duration.zero,
+        distanceMeters: 0,
+        avgSpeedMps: null,
+        completedSplits: const [],
+        currentSplitElapsed: const Duration(seconds: 100),
+        currentSplitDistanceMeters: 500,
+      );
+      expect(spec.valueOf(metrics, null, true), '18.0 km/h');
+    });
+
+    test('appends /km in min/km mode', () {
+      final spec = _specFor('current_split', ActivityMode.running);
+      final metrics = LiveMetrics(
+        elapsed: Duration.zero,
+        distanceMeters: 0,
+        avgSpeedMps: null,
+        completedSplits: const [],
+        currentSplitElapsed: const Duration(seconds: 100),
+        currentSplitDistanceMeters: 500,
+      );
+      expect(spec.valueOf(metrics, null, false), '3:20 /km');
+    });
+
+    test('shows placeholder with no elapsed time in the current split', () {
+      final spec = _specFor('current_split', ActivityMode.running);
+      expect(spec.valueOf(LiveMetrics.zero, null, true), '--.- km/h');
+      expect(spec.valueOf(LiveMetrics.zero, null, false), '--:-- /km');
+    });
+  });
+
+  group('avg_speed value', () {
+    test('appends km/h in km/h mode', () {
+      final spec = _specFor('avg_speed', ActivityMode.running);
+      const metrics = LiveMetrics(
+        elapsed: Duration.zero,
+        distanceMeters: 0,
+        avgSpeedMps: 5.0,
+        completedSplits: [],
+        currentSplitElapsed: Duration.zero,
+        currentSplitDistanceMeters: 0,
+      );
+      expect(spec.valueOf(metrics, null, true), '18.0 km/h');
+    });
+
+    test('appends /km in min/km mode', () {
+      final spec = _specFor('avg_speed', ActivityMode.running);
+      const metrics = LiveMetrics(
+        elapsed: Duration.zero,
+        distanceMeters: 0,
+        avgSpeedMps: 5.0,
+        completedSplits: [],
+        currentSplitElapsed: Duration.zero,
+        currentSplitDistanceMeters: 0,
+      );
+      expect(spec.valueOf(metrics, null, false), '3:20 /km');
+    });
+
+    test('shows placeholder with no average speed yet', () {
+      final spec = _specFor('avg_speed', ActivityMode.running);
+      expect(spec.valueOf(LiveMetrics.zero, null, true), '--.- km/h');
+      expect(spec.valueOf(LiveMetrics.zero, null, false), '--:-- /km');
     });
   });
 
