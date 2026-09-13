@@ -78,15 +78,17 @@ jobs:
         id: trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
-          # Not a named trivy-action input — trivy itself reads this env var
-          # (docs: configuration/#environment-variables). Drops the "Report
-          # Summary" table (one row per *scanned target*, e.g. every Python
-          # package's METADATA file — dozens of clean rows for this image)
-          # and keeps only the actual per-CVE findings table, which is the
-          # only part worth reading in a PR comment. Confirmed locally this
-          # trims the real output from 172 lines to 56 with no loss of
-          # findings.
+          # Neither is a named trivy-action input — trivy itself reads these
+          # env vars (docs: configuration/#environment-variables).
+          # TABLE_MODE=detailed drops the "Report Summary" table (one row
+          # per *scanned target*, e.g. every Python package's METADATA file
+          # — dozens of clean rows for this image) and keeps only the
+          # actual per-CVE findings table; DISABLE_VEX_NOTICE drops an
+          # unrelated boilerplate paragraph about VEX statements. Neither
+          # changes what's detected, only what's printed — confirmed live
+          # on PR #86's own comment: 172 lines down to 56, same 12 findings.
           TRIVY_TABLE_MODE: detailed
+          TRIVY_DISABLE_VEX_NOTICE: "true"
         with:
           image-ref: ${{ env.IMAGE_NAME }}:smoke-test
           severity: HIGH,CRITICAL
