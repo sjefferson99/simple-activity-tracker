@@ -82,7 +82,7 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
     """
     from app.analysis.gpx_parser import GpxParseError, parse_gpx, parse_split_preference
     from app.analysis.track_sampling import DEFAULT_MAX_POINTS, sample_track
-    from app.analysis.v1 import ANALYSIS_VERSION, AnalyzerV1
+    from app.analysis.v1 import ANALYSIS_VERSION, AnalyzerV1, distance_and_duration_from_result
     from app.db import get_session_factory
     from app.models.activity import Activity
     from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
@@ -134,6 +134,7 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
                 error = str(exc)
                 print(f"  {activity.id}: FAILED — {exc}")
 
+            distance_meters, moving_seconds = distance_and_duration_from_result(result)
             existing = session.get(ActivityAnalysis, activity.id)
             if existing is None:
                 existing = ActivityAnalysis(activity_id=activity.id, computed_at=datetime.now(UTC))
@@ -141,6 +142,8 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
             existing.analysis_version = ANALYSIS_VERSION
             existing.status = status
             existing.result = result
+            existing.distance_meters = distance_meters
+            existing.moving_seconds = moving_seconds
             existing.track = cached_track
             existing.error = error
             existing.computed_at = datetime.now(UTC)

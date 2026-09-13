@@ -18,6 +18,18 @@ _SERIES_MAX_SAMPLES = 300
 _BEST_EFFORT_DISTANCES_METERS = (1000.0, 5000.0, 10000.0)
 
 _METERS_PER_MILE = 1609.344
+
+
+def distance_and_duration_from_result(result: dict[str, object] | None) -> tuple[float, float]:
+    """Extracts the denormalized ActivityAnalysis.distance_meters/moving_seconds
+    pair from an AnalyzerV1.analyze() result — shared by the upload/import path
+    and the `reanalyze` CLI so both keep those columns in sync with `result`.
+    0/0 for a missing/failed analysis, matching the columns' own default."""
+    if result is None:
+        return 0.0, 0.0
+    return float(result.get("distance_meters", 0.0)), float(result.get("moving_seconds", 0.0))  # type: ignore[arg-type]
+
+
 _DEFAULT_SPLIT_TYPE = "distance_km"
 _DEFAULT_SPLIT_VALUE = 1
 
