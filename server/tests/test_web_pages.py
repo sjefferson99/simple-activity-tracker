@@ -251,15 +251,18 @@ def test_activity_list_sort_by_distance_ascending_and_descending(
 def test_activity_list_htmx_request_returns_only_the_list_region(
     app_client, sample_gpx_bytes, auth_headers
 ):
-    """Sort/page/per-page controls target #activity-list-region with
-    hx-select, extracting the fragment client-side — the server always
-    renders the full page template either way (see app/web/activities.py)."""
+    """Sort/page/per-page controls target #activity-list-region — an htmx
+    request from one of them gets just that fragment back (see
+    app/web/activities.py), not the whole page with its upload/import/
+    Strava/export cards, so a sort/page click stays cheap."""
     upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
     _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
 
-    response = app_client.get("/", headers=HTMX_HEADERS)
+    response = app_client.get("/", headers={"HX-Request": "true"})
     assert response.status_code == 200
     assert 'id="activity-list-region"' in response.text
+    assert 'id="upload-form"' not in response.text
+    assert "<h1>Activities</h1>" not in response.text
 
 
 def test_activity_list_controls_show_a_loading_indicator(

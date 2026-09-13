@@ -125,14 +125,18 @@ class SqlAlchemyActivityRepository:
         #75) — a LEFT JOIN against activity_analyses so activities with no
         analysis row yet (upload/analysis failed) still appear, sorted as if
         their distance were 0 (see ActivityAnalysis.distance_meters' own
-        default, which this mirrors via COALESCE for pre-migration rows)."""
-        base_query = select(Activity, ActivityAnalysis).outerjoin(
-            ActivityAnalysis, ActivityAnalysis.activity_id == Activity.id
-        )
-        count_stmt = select(func.count()).select_from(
-            select(Activity).where(Activity.user_id == user_id).subquery()
-        )
-        total = self._session.execute(count_stmt).scalar_one()
+        default, which this mirrors via COALESCE for pre-migration rows).
+        `page` is clamped to the real last page here (not just floored to 1
+        by the caller) so a stale/out-of-range page number — a bookmarked
+        URL, or activities deleted since — costs one extra query at most,
+        never a second full page+count round trip."""
+        total = self._session.execute(
+            select(func.count(Activity.id)).where(Activity.user_id == user_id)
+        ).scalar_one()
+
+        effective_per_page = per_page if per_page is not None else max(total, 1)
+        total_pages = max(1, -(-total // effective_per_page))
+        page = min(max(page, 1), total_pages)
 
         distance = func.coalesce(ActivityAnalysis.distance_meters, 0.0)
         primary_order: UnaryExpression[Any]
@@ -147,7 +151,9 @@ class SqlAlchemyActivityRepository:
         tiebreaker = Activity.id.asc() if direction == "asc" else Activity.id.desc()
 
         stmt = (
-            base_query.where(Activity.user_id == user_id)
+            select(Activity, ActivityAnalysis)
+            .outerjoin(ActivityAnalysis, ActivityAnalysis.activity_id == Activity.id)
+            .where(Activity.user_id == user_id)
             .order_by(primary_order, tiebreaker)
             .offset((page - 1) * per_page if per_page is not None else 0)
         )
@@ -155,8 +161,6 @@ class SqlAlchemyActivityRepository:
             stmt = stmt.limit(per_page)
 
         activities = [tuple(row) for row in self._session.execute(stmt).all()]
-        effective_per_page = per_page if per_page is not None else max(total, 1)
-        total_pages = max(1, -(-total // effective_per_page))
         return ActivityListPage(
             activities=activities,
             total=total,

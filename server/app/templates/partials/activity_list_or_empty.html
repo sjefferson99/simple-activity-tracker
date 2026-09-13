@@ -1,0 +1,18 @@
+{% if total %}
+<div id="activity-list-region">
+  {% include "partials/activity_list_controls.html" %}
+  <div class="card" id="activity-list">
+    <div id="activity-list-spinner" class="list-loading-spinner" role="status" aria-label="Loading"></div>
+    {% include "partials/activity_list_items.html" %}
+  </div>
+  {% include "partials/activity_list_pagination.html" %}
+</div>
+{% else %}
+<div id="activity-list-region">
+  <div class="card empty-state">
+    <p>No activities yet.</p>
+    <p>Sign in to the Simple Activity Tracker phone app and finish a run or ride — it'll show up here
+    automatically once uploaded.</p>
+  </div>
+</div>
+{% endif %}

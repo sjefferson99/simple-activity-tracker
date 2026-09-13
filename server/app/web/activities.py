@@ -145,17 +145,12 @@ def activity_list(
     dir_value: ActivityListDirection = "asc" if dir == "asc" else "desc"
 
     activities_repo = SqlAlchemyActivityRepository(session)
+    # list_for_user_page clamps page to [1, total_pages] itself, so a stale
+    # page number (rows deleted since, or a hand-edited URL) never needs a
+    # second query here — one call always returns a valid page.
     result = activities_repo.list_for_user_page(
         user.id, page=page_num, per_page=per_page_value, sort=sort_value, direction=dir_value
     )
-    if result.total and page_num > result.total_pages:
-        # A stale page number (rows deleted since, or a hand-edited URL)
-        # shouldn't 404/blank the page for a human browsing — clamp to the
-        # last real page instead.
-        page_num = result.total_pages
-        result = activities_repo.list_for_user_page(
-            user.id, page=page_num, per_page=per_page_value, sort=sort_value, direction=dir_value
-        )
 
     context = {
         "user": user,
@@ -169,10 +164,13 @@ def activity_list(
         "sort": sort_value,
         "dir": dir_value,
     }
-    # Sort/page/per-page controls (activity_list_controls.html,
-    # activity_list_pagination.html) target #activity-list-region with
-    # hx-select, so the full page template is rendered either way — htmx
-    # extracts just that fragment from the response on an htmx request.
+    # Sort/page/per-page controls all target #activity-list-region — for an
+    # htmx request from one of them, render just that fragment
+    # (activity_list_or_empty.html) instead of the whole page (upload/import/
+    # Strava/export cards included), so a sort/page click stays cheap even
+    # as more cards get added to the page over time.
+    if request.headers.get("hx-request") == "true":
+        return templates.TemplateResponse(request, "partials/activity_list_or_empty.html", context)
     return templates.TemplateResponse(request, "activities_list.html", context)
 
 

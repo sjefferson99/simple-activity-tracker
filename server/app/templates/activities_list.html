@@ -6,22 +6,7 @@
 <form id="export-form" action="/export" method="get">
   <input type="hidden" name="selection" value="1">
 </form>
-{% if total %}
-<div id="activity-list-region">
-  {% include "partials/activity_list_controls.html" %}
-  <div class="card" id="activity-list">
-    <div id="activity-list-spinner" class="list-loading-spinner" role="status" aria-label="Loading"></div>
-    {% include "partials/activity_list_items.html" %}
-  </div>
-  {% include "partials/activity_list_pagination.html" %}
-</div>
-{% else %}
-<div class="card empty-state">
-  <p>No activities yet.</p>
-  <p>Sign in to the Simple Activity Tracker phone app and finish a run or ride — it'll show up here
-  automatically once uploaded.</p>
-</div>
-{% endif %}
+{% include "partials/activity_list_or_empty.html" %}
 
 <div class="card">
   <h2>Upload a GPX</h2>
