@@ -9,6 +9,7 @@ import '../../core/auth/auth_state_controller.dart';
 import '../../core/sync/file_run_store.dart';
 import '../../core/sync/sync_service.dart';
 import '../../core/tracking/split_preference_controller.dart';
+import '../../core/units/units.dart';
 import '../../domain/models/run_record.dart';
 import '../../domain/models/sync_status.dart';
 import '../../domain/tracking/split_preference.dart';
@@ -339,7 +340,9 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
                           ? Icons.visibility_outlined
                           : Icons.visibility_off_outlined,
                     ),
-                    tooltip: _obscurePassword ? 'Show password' : 'Hide password',
+                    tooltip: _obscurePassword
+                        ? 'Show password'
+                        : 'Hide password',
                     onPressed: () =>
                         setState(() => _obscurePassword = !_obscurePassword),
                   ),
@@ -515,18 +518,22 @@ class _SyncQueueSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final queue = ref.watch(_syncQueueProvider);
-    final failedCount = queue.value
-            ?.where((r) => r.syncStatus is SyncStatusFailed)
-            .length ??
-        0;
+    final failedCount =
+        queue.value?.where((r) => r.syncStatus is SyncStatusFailed).length ?? 0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Sync queue', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
+        Text('Activities', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 4),
+        Text(
+          'Deleting an activity here only removes it from this phone — it '
+          'does not delete a copy already uploaded to the server.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 12),
         queue.when(
-          data: (records) => _QueueSummary(records: records),
+          data: (records) => _ActivityList(records: records),
           loading: () => const LinearProgressIndicator(),
           error: (error, _) => Text('$error'),
         ),
@@ -540,7 +547,8 @@ class _SyncQueueSection extends ConsumerWidget {
             if (failedCount > 0) ...[
               const SizedBox(width: 12),
               OutlinedButton(
-                onPressed: () => _confirmAndClear(context, ref, failedCount),
+                onPressed: () =>
+                    _confirmAndClearFailed(context, ref, failedCount),
                 child: const Text('Clear failed'),
               ),
             ],
@@ -550,9 +558,10 @@ class _SyncQueueSection extends ConsumerWidget {
     );
   }
 
-  /// Discarding a failed record deletes its local GPX/sidecar for good — the
-  /// activity's data doesn't exist anywhere else, so confirm before doing it.
-  Future<void> _confirmAndClear(
+  /// Discarding every failed record deletes each one's local GPX/sidecar for
+  /// good — the activity's data doesn't exist anywhere else on the phone, so
+  /// confirm before doing it.
+  Future<void> _confirmAndClearFailed(
     BuildContext context,
     WidgetRef ref,
     int failedCount,
@@ -587,57 +596,116 @@ class _SyncQueueSection extends ConsumerWidget {
   }
 }
 
-class _QueueSummary extends StatelessWidget {
+class _ActivityList extends ConsumerWidget {
   final List<RunRecord> records;
 
-  const _QueueSummary({required this.records});
+  const _ActivityList({required this.records});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     if (records.isEmpty) {
       return const Text('No activities recorded yet.');
     }
 
-    var pending = 0;
-    var uploading = 0;
-    var uploaded = 0;
-    var failed = 0;
-    for (final record in records) {
-      switch (record.syncStatus) {
-        case SyncStatusPending():
-          pending++;
-        case SyncStatusUploading():
-          uploading++;
-        case SyncStatusUploaded():
-          uploaded++;
-        case SyncStatusFailed():
-          failed++;
-      }
-    }
+    // Newest first for browsing/deleting — the reverse of RunStore's
+    // oldest-first upload-queue order, which only matters to SyncService.
+    final newestFirst = records.reversed.toList();
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '$uploaded uploaded, $pending queued, $failed failed'
-          '${uploading > 0 ? ', $uploading uploading' : ''}',
-        ),
-        if (failed > 0) ...[
-          const SizedBox(height: 8),
-          ...records
-              .whereType<RunRecord>()
-              .where((r) => r.syncStatus is SyncStatusFailed)
-              .map(
-                (r) => Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    '• ${(r.syncStatus as SyncStatusFailed).error}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-              ),
-        ],
+        for (final record in newestFirst)
+          _ActivityRow(
+            key: ValueKey(record.clientRunId),
+            record: record,
+            onDelete: () => _confirmAndDelete(context, ref, record),
+          ),
       ],
     );
+  }
+
+  /// A record's local GPX/sidecar is its only copy on this phone — deleting
+  /// it here never touches the server (issue #74: the two are managed
+  /// independently once uploaded), but is still permanent locally, so confirm
+  /// first.
+  Future<void> _confirmAndDelete(
+    BuildContext context,
+    WidgetRef ref,
+    RunRecord record,
+  ) async {
+    final isUploaded = record.syncStatus is SyncStatusUploaded;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete this activity?'),
+        content: Text(
+          isUploaded
+              ? 'This removes the activity from this phone only. The copy '
+                    'already uploaded to the server is not affected. This '
+                    'cannot be undone.'
+              : 'This permanently deletes the activity and its local GPX '
+                    'track from this phone. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await ref.read(runStoreProvider).deleteRecord(record.clientRunId);
+      // deleteRecord() doesn't go through SyncService, so _syncQueueProvider's
+      // statusChanges trigger never fires for it — force a re-read.
+      ref.invalidate(_syncQueueProvider);
+    }
+  }
+}
+
+class _ActivityRow extends StatelessWidget {
+  final RunRecord record;
+  final VoidCallback onDelete;
+
+  const _ActivityRow({super.key, required this.record, required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = record.summary;
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(
+        '${record.activityMode.label} • ${formatDistanceKm(summary.distanceMeters)} km',
+      ),
+      subtitle: Text(
+        '${_formatDate(summary.startedAt)} — ${_statusLabel(record.syncStatus)}',
+      ),
+      trailing: IconButton(
+        icon: const Icon(Icons.delete_outline),
+        tooltip: 'Delete this activity',
+        onPressed: onDelete,
+      ),
+    );
+  }
+
+  String _statusLabel(SyncStatus status) => switch (status) {
+    SyncStatusPending() => 'Queued for upload',
+    SyncStatusUploading() => 'Uploading…',
+    SyncStatusUploaded() => 'Uploaded',
+    SyncStatusFailed(:final retryable, :final error) =>
+      retryable ? 'Upload failed, will retry' : 'Upload failed: $error',
+  };
+
+  String _formatDate(DateTime utcDateTime) {
+    final local = utcDateTime.toLocal();
+    final y = local.year.toString().padLeft(4, '0');
+    final m = local.month.toString().padLeft(2, '0');
+    final d = local.day.toString().padLeft(2, '0');
+    final hh = local.hour.toString().padLeft(2, '0');
+    final mm = local.minute.toString().padLeft(2, '0');
+    return '$y-$m-$d $hh:$mm';
   }
 }

@@ -18,7 +18,10 @@ abstract class RunStore {
 
   Future<void> updateSyncStatus(String clientRunId, SyncStatus status);
 
-  Future<void> updateAnalysisResult(String clientRunId, Map<String, dynamic> analysisResult);
+  Future<void> updateAnalysisResult(
+    String clientRunId,
+    Map<String, dynamic> analysisResult,
+  );
 
   /// Deletes every record currently in [SyncStatusFailed], regardless of
   /// [SyncStatusFailed.retryable] — an explicit "give up on these" action
@@ -27,4 +30,11 @@ abstract class RunStore {
   /// Records still pending/uploading/uploaded are untouched. Returns the
   /// number of records removed.
   Future<int> clearFailed();
+
+  /// Deletes one record (sidecar + GPX) regardless of its sync status —
+  /// local-only, by design (issue #74): the phone and server keep
+  /// independent activity lists once a run has uploaded, so this never
+  /// calls the server to delete the corresponding activity there. A no-op
+  /// if no record matches [clientRunId].
+  Future<void> deleteRecord(String clientRunId);
 }

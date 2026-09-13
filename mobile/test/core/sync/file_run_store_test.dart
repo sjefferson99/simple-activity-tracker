@@ -250,6 +250,41 @@ void main() {
     expect(await store.listAll(), hasLength(1));
   });
 
+  test(
+    'deleteRecord deletes only the matching record, sidecar and gpx included',
+    () async {
+      final store = FileRunStore(runsDirPathOverride: tempDir.path);
+      final keep = _record('${tempDir.path}/keep.gpx');
+      final remove = _record(
+        '${tempDir.path}/remove.gpx',
+        syncStatus: const SyncStatusUploaded(serverRunId: 's1'),
+      );
+      await store.save(keep);
+      await store.save(remove);
+      for (final name in ['keep', 'remove']) {
+        await File('${tempDir.path}/$name.gpx').writeAsString('<gpx/>');
+      }
+
+      await store.deleteRecord(remove.clientRunId);
+
+      final remaining = await store.listAll();
+      expect(remaining.map((r) => r.clientRunId).toSet(), {keep.clientRunId});
+      expect(await File('${tempDir.path}/keep.gpx').exists(), isTrue);
+      expect(await File('${tempDir.path}/keep.json').exists(), isTrue);
+      expect(await File('${tempDir.path}/remove.gpx').exists(), isFalse);
+      expect(await File('${tempDir.path}/remove.json').exists(), isFalse);
+    },
+  );
+
+  test('deleteRecord is a no-op for an unknown clientRunId', () async {
+    final store = FileRunStore(runsDirPathOverride: tempDir.path);
+    await store.save(_record('${tempDir.path}/pending.gpx'));
+
+    await store.deleteRecord('does-not-exist');
+
+    expect(await store.listAll(), hasLength(1));
+  });
+
   test('listAll returns an empty list for a fresh runs directory', () async {
     // _runsDir() creates the directory on demand, so this also covers the
     // "didn't exist yet" case â€” it exists but is empty by the time listAll

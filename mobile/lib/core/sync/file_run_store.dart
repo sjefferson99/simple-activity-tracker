@@ -21,13 +21,15 @@ class FileRunStore implements RunStore {
   /// `flutter_test`.
   final String? _runsDirPathOverride;
 
-  FileRunStore({String? runsDirPathOverride}) : _runsDirPathOverride = runsDirPathOverride;
+  FileRunStore({String? runsDirPathOverride})
+    : _runsDirPathOverride = runsDirPathOverride;
 
   String _sidecarPathFor(String gpxPath) =>
       '${gpxPath.substring(0, gpxPath.length - '.gpx'.length)}.json';
 
   Future<Directory> _runsDir() async {
-    final path = _runsDirPathOverride ??
+    final path =
+        _runsDirPathOverride ??
         '${(await getApplicationDocumentsDirectory()).path}/runs';
     final dir = Directory(path);
     await dir.create(recursive: true);
@@ -51,7 +53,8 @@ class FileRunStore implements RunStore {
     await for (final entity in dir.list()) {
       if (entity is! File || !entity.path.endsWith('.json')) continue;
       try {
-        final json = jsonDecode(await entity.readAsString()) as Map<String, dynamic>;
+        final json =
+            jsonDecode(await entity.readAsString()) as Map<String, dynamic>;
         records.add(RunRecord.fromJson(json));
       } on Object {
         // A corrupt or half-written sidecar must not take down the whole
@@ -115,6 +118,18 @@ class FileRunStore implements RunStore {
       cleared++;
     }
     return cleared;
+  }
+
+  @override
+  Future<void> deleteRecord(String clientRunId) async {
+    final record = await _findByClientRunId(clientRunId);
+    if (record == null) return;
+    // Sidecar first, same ordering/reasoning as clearFailed(): if the GPX
+    // delete below fails partway, listAll() no longer surfaces this record
+    // at all, rather than resurrecting a half-cleared entry pointing at a
+    // GPX file that's already gone.
+    await _deleteIfExists(_sidecarPathFor(record.gpxPath));
+    await _deleteIfExists(record.gpxPath);
   }
 
   Future<void> _deleteIfExists(String path) async {
