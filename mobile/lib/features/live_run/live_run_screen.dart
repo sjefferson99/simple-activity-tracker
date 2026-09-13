@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import '../../core/tracking/activity_mode_controller.dart';
 import '../../core/units/units.dart';
 import '../../domain/models/live_metrics.dart';
+import '../../domain/models/split.dart' as domain;
 import '../../domain/tracking/activity_mode.dart';
 import '../../domain/tracking/run_phase.dart';
 import '../export_help/export_help_screen.dart';
@@ -23,6 +24,20 @@ class _UseKmhNotifier extends Notifier<bool> {
 
 final _useKmhProvider = NotifierProvider<_UseKmhNotifier, bool>(
   _UseKmhNotifier.new,
+);
+
+class _SplitsExpandedNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void toggle() => state = !state;
+}
+
+/// Collapsed by default so the fixed, non-scrolling live-run layout doesn't
+/// start out crowded — most of a run has few enough splits that the reader
+/// only wants the list once there's something worth reviewing.
+final _splitsExpandedProvider = NotifierProvider<_SplitsExpandedNotifier, bool>(
+  _SplitsExpandedNotifier.new,
 );
 
 /// Run/Cycle segmented toggle, always on the home screen (not tucked into
@@ -181,6 +196,12 @@ class LiveRunScreen extends ConsumerWidget {
                               unit: unit,
                               activityMode: runActivityMode,
                             ),
+                          ),
+                        if (metrics != null && !isCycling)
+                          _SplitsPanel(
+                            completedSplits: metrics.completedSplits,
+                            useKmh: useKmh,
+                            unit: unit,
                           ),
                         SizedBox(height: unit * 3),
                         _Controls(state: state, controller: controller),
@@ -351,6 +372,125 @@ class _MetricGrid extends StatelessWidget {
             ],
           ),
       ],
+    );
+  }
+}
+
+/// Collapsed row below the metric grid that expands into a scrollable list
+/// of every completed split. Hidden entirely for cycling (no split-pace
+/// concept — see the cycling [MetricSpec] layout) and while there are no
+/// completed splits yet, so it never claims space with nothing to show.
+class _SplitsPanel extends ConsumerWidget {
+  final List<domain.Split> completedSplits;
+  final bool useKmh;
+  final double unit;
+
+  const _SplitsPanel({
+    required this.completedSplits,
+    required this.useKmh,
+    required this.unit,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (completedSplits.isEmpty) return const SizedBox.shrink();
+
+    final expanded = ref.watch(_splitsExpandedProvider);
+    final theme = Theme.of(context);
+
+    return Column(
+      children: [
+        InkWell(
+          onTap: ref.read(_splitsExpandedProvider.notifier).toggle,
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: unit * 1.2),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Splits (${completedSplits.length})',
+                  style: TextStyle(
+                    fontSize: unit * 2.8,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                Icon(
+                  expanded ? Icons.expand_less : Icons.expand_more,
+                  color: theme.colorScheme.onSurfaceVariant,
+                  size: unit * 3.2,
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (expanded)
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: unit * 22),
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: completedSplits.length,
+              // Most recent split first — the one the runner just finished
+              // is what they want to check without scrolling.
+              itemBuilder: (context, index) => _SplitRow(
+                split: completedSplits[completedSplits.length - 1 - index],
+                useKmh: useKmh,
+                unit: unit,
+              ),
+              separatorBuilder: (context, index) => Divider(
+                height: 1,
+                color: theme.colorScheme.outlineVariant,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _SplitRow extends StatelessWidget {
+  final domain.Split split;
+  final bool useKmh;
+  final double unit;
+
+  const _SplitRow({required this.split, required this.useKmh, required this.unit});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final paceOrSpeed = useKmh
+        ? '${formatKmh(split.avgSpeedMps)} km/h'
+        : '${formatPace(paceSecPerKmFromMps(split.avgSpeedMps))} /km';
+
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: unit * 2, vertical: unit * 1.4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            '#${split.index}',
+            style: TextStyle(
+              fontSize: unit * 2.8,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          Text(
+            '${formatDistanceKm(split.distanceMeters)} km',
+            style: TextStyle(fontSize: unit * 2.8),
+          ),
+          Text(
+            formatDuration(split.duration),
+            style: TextStyle(fontSize: unit * 2.8),
+          ),
+          Text(
+            paceOrSpeed,
+            style: TextStyle(
+              fontSize: unit * 2.8,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
