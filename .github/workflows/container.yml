@@ -28,6 +28,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -92,6 +93,7 @@ jobs:
           output: trivy-results.txt
 
       - name: Flag any findings in the job summary
+        id: trivy_findings
         if: always()
         run: |
           # trivy writes the table to --output instead of stdout, so echo it
@@ -99,6 +101,7 @@ jobs:
           # shouldn't have to open the summary tab to see what was found.
           cat trivy-results.txt
           if [ -s trivy-results.txt ] && grep -q "Total: [1-9]" trivy-results.txt; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
             {
               echo "### :warning: Trivy found HIGH/CRITICAL OS package CVEs"
               echo
@@ -112,8 +115,38 @@ jobs:
               echo '```'
               cat trivy-results.txt
               echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
+            } | tee trivy-comment.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # A job summary is only ever seen if someone opens the run, which in
+      # practice means "in hindsight, if at all" — a PR comment lands in the
+      # same conversation feed and notification email as a human reviewer's
+      # comment, which is what actually gets read before merging. One sticky
+      # comment per PR: re-runs update it in place rather than piling up
+      # duplicates, and it's removed entirely once a later commit's scan
+      # comes back clean (a stale "here be dragons" comment is worse than
+      # none once it no longer reflects the current commit).
+      # Note for a future fork-originated PR: this workflow runs on
+      # `pull_request` (not `pull_request_target`), so GITHUB_TOKEN is
+      # read-only for a fork PR regardless of the `permissions:` block above
+      # — these two steps would then silently no-op rather than error. Not a
+      # concern for this single-owner repo today; worth knowing if that ever
+      # changes.
+      - name: Post/update PR comment with any findings
+        if: github.event_name == 'pull_request' && steps.trivy_findings.outputs.found == 'true'
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: trivy-scan
+          path: trivy-comment.md
+
+      - name: Remove stale PR comment when the scan is clean
+        if: github.event_name == 'pull_request' && steps.trivy_findings.outputs.found == 'false'
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: trivy-scan
+          delete: true
 
       - name: Validate deploy/standalone-tls/nginx.conf
         run: |
