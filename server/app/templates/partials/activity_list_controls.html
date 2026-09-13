@@ -1,0 +1,32 @@
+{% macro sort_link(label, sort_key) %}
+{% set new_dir = "asc" if sort == sort_key and dir == "desc" else "desc" %}
+<a href="/?page=1&per_page={{ per_page }}&sort={{ sort_key }}&dir={{ new_dir }}"
+   hx-get="/?page=1&per_page={{ per_page }}&sort={{ sort_key }}&dir={{ new_dir }}"
+   hx-target="#activity-list-region" hx-select="#activity-list-region" hx-swap="outerHTML" hx-push-url="true"
+   hx-indicator="#activity-list-spinner"
+   class="sort-link{% if sort == sort_key %} active{% endif %}">
+  {{ label }}{% if sort == sort_key %}<span class="sort-arrow">{{ "▲" if dir == "asc" else "▼" }}</span>{% endif %}
+</a>
+{% endmacro %}
+
+<div class="activity-list-controls toolbar">
+  <div class="sort-controls">
+    <span class="muted">Sort by:</span>
+    {{ sort_link("Date", "date") }}
+    {{ sort_link("Distance", "distance") }}
+  </div>
+  <div class="per-page-control">
+    <label for="per-page-select" class="muted">Rows per page:</label>
+    <select id="per-page-select"
+            hx-get="/"
+            hx-target="#activity-list-region" hx-select="#activity-list-region" hx-swap="outerHTML" hx-push-url="true"
+            hx-indicator="#activity-list-spinner"
+            hx-include="this"
+            name="per_page"
+            hx-vals='{"page": 1, "sort": "{{ sort }}", "dir": "{{ dir }}"}'>
+      <option value="20" {% if per_page == "20" %}selected{% endif %}>20</option>
+      <option value="100" {% if per_page == "100" %}selected{% endif %}>100</option>
+      <option value="all" {% if per_page == "all" %}selected{% endif %}>All</option>
+    </select>
+  </div>
+</div>

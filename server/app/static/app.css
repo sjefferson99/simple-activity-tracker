@@ -74,6 +74,67 @@ th { color: var(--text-muted); font-weight: 500; font-size: 0.85rem; }
 
 .toolbar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
 
+.activity-list-controls {
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+.sort-controls { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+.sort-link { color: var(--text); font-size: 0.9rem; }
+.sort-link.active { color: var(--accent); font-weight: 600; }
+.sort-arrow { margin-left: 0.2rem; font-size: 0.7rem; }
+.per-page-control { display: flex; gap: 0.5rem; align-items: center; }
+.per-page-control label { margin: 0; white-space: nowrap; }
+.per-page-control select {
+  width: auto;
+  margin-bottom: 0;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.pagination {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 0.75rem 0;
+}
+
+/* Sort/page/per-page controls (activity_list_controls.html,
+   activity_list_pagination.html) all set hx-indicator="#activity-list-spinner"
+   — htmx adds its requestClass (htmx-request) directly to that element for
+   the duration of the request. The spinner sits inside #activity-list
+   itself (activities_list.html), in the same spot the list rows occupy, so
+   it's visible regardless of which control (including a page-number link
+   far below the sort row) triggered the request — a spinner tucked up in
+   the sort controls is easy to miss when you've scrolled down to click a
+   page number. Its sibling rows are hidden for the same duration so the
+   stale list doesn't sit there looking unresponsive.
+*/
+.list-loading-spinner {
+  display: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin: 2rem auto;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: list-loading-spin 0.6s linear infinite;
+}
+.list-loading-spinner.htmx-request { display: block; }
+.list-loading-spinner.htmx-request ~ .activity-list-item { display: none; }
+@keyframes list-loading-spin { to { transform: rotate(360deg); } }
+.page-link {
+  min-width: 2rem;
+  text-align: center;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+.page-link:hover { background: var(--bg); }
+.page-link.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));

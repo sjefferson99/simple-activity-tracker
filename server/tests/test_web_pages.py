@@ -4,6 +4,7 @@ rule, admin 404s for non-admins, and the self/last-admin guards."""
 
 import json
 import zipfile
+from datetime import datetime
 from io import BytesIO
 
 from tests.conftest import upload_sample_activity
@@ -69,7 +70,23 @@ def test_activity_list_renders_for_signed_in_user(app_client, sample_gpx_bytes, 
 
     response = app_client.get("/")
     assert response.status_code == 200
-    assert "3.00 km" in response.text or "km" in response.text
+    assert "km" in response.text
+
+
+def test_activity_list_shows_analyzed_distance_not_phone_summary(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """Issue #75: the list page's distance/duration must come from the
+    server's own GPX analysis, not the phone-reported client_summary — the
+    upload fixture's client_summary claims exactly 3000m/900s, which differs
+    slightly from what AnalyzerV1 actually computes from the GPX track."""
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/")
+    assert response.status_code == 200
+    assert "3.02 km" in response.text
+    assert "3.00 km" not in response.text
 
 
 def test_activity_list_empty_state(app_client, auth_headers):
@@ -98,15 +115,168 @@ def test_favicon_is_served(app_client):
     assert "svg" in response.headers["content-type"]
 
 
-def test_activity_list_with_malformed_cursor_falls_back_to_first_page(
+def test_activity_list_with_malformed_pagination_params_falls_back_to_defaults(
     app_client, sample_gpx_bytes, auth_headers
 ):
     upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
     _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
 
-    response = app_client.get("/", params={"cursor": "garbage"})
+    response = app_client.get(
+        "/", params={"per_page": "garbage", "sort": "garbage", "dir": "garbage"}
+    )
     assert response.status_code == 200
     assert "km" in response.text
+
+
+def test_activity_list_stale_page_number_clamps_to_last_page(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """A bookmarked/hand-edited page number past the end (e.g. after
+    activities were deleted) shouldn't render a blank page — clamp to the
+    real last page, mirroring the old cursor fallback's "don't break the
+    page for a human browsing" reasoning."""
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"page": 99, "per_page": "20"})
+    assert response.status_code == 200
+    assert "km" in response.text
+
+
+def _set_activity_started_at_and_distance(
+    activity_id: str, started_at: str, distance_meters: float
+) -> None:
+    from app.db import get_session_factory
+    from app.models.activity import Activity
+    from app.models.activity_analysis import ActivityAnalysis
+
+    with get_session_factory()() as session:
+        activity = session.get(Activity, activity_id)
+        assert activity is not None
+        activity.started_at = datetime.fromisoformat(started_at)
+        analysis = session.get(ActivityAnalysis, activity_id)
+        assert analysis is not None
+        analysis.distance_meters = distance_meters
+        session.commit()
+
+
+def _upload_n_activities(app_client, auth_headers, sample_gpx_bytes, n: int) -> list[str]:
+    ids = []
+    for i in range(n):
+        upload = upload_sample_activity(
+            app_client,
+            auth_headers,
+            sample_gpx_bytes,
+            client_activity_id=f"22222222-2222-2222-2222-{i:012d}",
+        )
+        activity_id = upload.json()["id"]
+        _set_activity_started_at_and_distance(
+            activity_id, f"2026-01-{i + 1:02d}T00:00:00+00:00", float(i)
+        )
+        ids.append(activity_id)
+    return ids
+
+
+def test_activity_list_rows_per_page_20_and_100(app_client, sample_gpx_bytes, auth_headers):
+    _upload_n_activities(app_client, auth_headers, sample_gpx_bytes, 25)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"per_page": "20"})
+    assert response.status_code == 200
+    assert response.text.count("activity-list-item") == 20
+    assert '<a href="/?page=2' in response.text
+
+    response = app_client.get("/", params={"per_page": "100"})
+    assert response.status_code == 200
+    assert response.text.count("activity-list-item") == 25
+
+
+def test_activity_list_rows_per_page_all_shows_every_activity(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    _upload_n_activities(app_client, auth_headers, sample_gpx_bytes, 25)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"per_page": "all"})
+    assert response.status_code == 200
+    assert response.text.count("activity-list-item") == 25
+    assert "pagination" not in response.text
+
+
+def test_activity_list_page_two_shows_remaining_activities(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    _upload_n_activities(app_client, auth_headers, sample_gpx_bytes, 25)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"page": 2, "per_page": "20"})
+    assert response.status_code == 200
+    assert response.text.count("activity-list-item") == 5
+
+
+def test_activity_list_sort_by_date_ascending_and_descending(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    ids = _upload_n_activities(app_client, auth_headers, sample_gpx_bytes, 3)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"sort": "date", "dir": "asc"})
+    assert response.status_code == 200
+    positions = [response.text.index(f"/activities/{i}") for i in ids]
+    assert positions == sorted(positions)
+
+    response = app_client.get("/", params={"sort": "date", "dir": "desc"})
+    assert response.status_code == 200
+    positions = [response.text.index(f"/activities/{i}") for i in ids]
+    assert positions == sorted(positions, reverse=True)
+
+
+def test_activity_list_sort_by_distance_ascending_and_descending(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    ids = _upload_n_activities(app_client, auth_headers, sample_gpx_bytes, 3)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"sort": "distance", "dir": "asc"})
+    assert response.status_code == 200
+    positions = [response.text.index(f"/activities/{i}") for i in ids]
+    assert positions == sorted(positions)
+
+    response = app_client.get("/", params={"sort": "distance", "dir": "desc"})
+    assert response.status_code == 200
+    positions = [response.text.index(f"/activities/{i}") for i in ids]
+    assert positions == sorted(positions, reverse=True)
+
+
+def test_activity_list_htmx_request_returns_only_the_list_region(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """Sort/page/per-page controls target #activity-list-region with
+    hx-select, extracting the fragment client-side — the server always
+    renders the full page template either way (see app/web/activities.py)."""
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", headers=HTMX_HEADERS)
+    assert response.status_code == 200
+    assert 'id="activity-list-region"' in response.text
+
+
+def test_activity_list_controls_show_a_loading_indicator(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """Sort/page/per-page requests can take a couple of seconds against a
+    large activity list — every control must wire up the shared spinner
+    (id="activity-list-spinner") via hx-indicator so a click gives instant
+    feedback instead of looking unresponsive (feedback from manual review of
+    issue #75)."""
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/")
+    assert response.status_code == 200
+    assert 'id="activity-list-spinner"' in response.text
+    assert response.text.count('hx-indicator="#activity-list-spinner"') >= 2
 
 
 def test_activity_detail_renders_with_map_and_analysis(app_client, sample_gpx_bytes, auth_headers):

@@ -41,7 +41,11 @@ from app.deps import db_session
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
 from app.models.user import _new_uuid
-from app.repositories.activities import InvalidCursorError, SqlAlchemyActivityRepository
+from app.repositories.activities import (
+    ActivityListDirection,
+    ActivityListSort,
+    SqlAlchemyActivityRepository,
+)
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.repositories.tags import SqlAlchemyTagRepository
 from app.storage.blob_store import LocalFileBlobStore
@@ -83,27 +87,92 @@ def _activity_view(activity: Activity, analysis: ActivityAnalysis | None) -> dic
     }
 
 
+def _activity_list_view(activity: Activity, analysis: ActivityAnalysis | None) -> dict[str, Any]:
+    """Shapes an Activity + ActivityAnalysis pair for
+    partials/activity_list_items.html — distance/duration come from the
+    server's own GPX analysis (issue #75), not the phone-reported
+    client_summary, so every row shows real numbers regardless of what
+    uploaded it (a phone, a manual GPX upload, an import)."""
+    return {
+        "id": activity.id,
+        "title": activity.title,
+        "started_at": activity.started_at,
+        "device_name": activity.device_name,
+        "activity_type": activity.activity_type,
+        "tags": activity.tags,
+        "distance_meters": analysis.distance_meters if analysis is not None else 0.0,
+        "moving_seconds": analysis.moving_seconds if analysis is not None else 0.0,
+    }
+
+
+_PER_PAGE_CHOICES = (20, 100)
+
+
+def _parse_per_page(raw: str) -> int | None:
+    """None means "all" — see ActivityListPage.per_page. Any value other than
+    the offered choices (tampered URL, stale bookmark) falls back to the
+    default rather than 400ing a page a human is just browsing."""
+    if raw == "all":
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return _PER_PAGE_CHOICES[0]
+    return value if value in _PER_PAGE_CHOICES else _PER_PAGE_CHOICES[0]
+
+
 @router.get("/")
 def activity_list(
     request: Request,
     user: WebUser,
     session: Annotated[Session, Depends(db_session)],
-    cursor: str | None = None,
+    page: str = "1",
+    per_page: str = "20",
+    sort: str = "date",
+    dir: str = "desc",
 ) -> Response:
-    activities = SqlAlchemyActivityRepository(session)
+    # Every param is read as a plain str and validated/defaulted here rather
+    # than via FastAPI's own type/Literal coercion, so a tampered or stale
+    # query string (bad page number, unknown sort key) falls back to a
+    # sane default instead of 422ing a page a human is just browsing —
+    # matches the old cursor-based fallback's reasoning.
     try:
-        page = activities.list_for_user(user.id, limit=20, cursor=cursor)
-    except InvalidCursorError:
-        # A tampered or stale cursor in the URL shouldn't break the page for
-        # a human browsing — fall back to the first page rather than a 400.
-        page = activities.list_for_user(user.id, limit=20, cursor=None)
+        page_num = max(int(page), 1)
+    except ValueError:
+        page_num = 1
+    per_page_value = _parse_per_page(per_page)
+    sort_value: ActivityListSort = "distance" if sort == "distance" else "date"
+    dir_value: ActivityListDirection = "asc" if dir == "asc" else "desc"
+
+    activities_repo = SqlAlchemyActivityRepository(session)
+    result = activities_repo.list_for_user_page(
+        user.id, page=page_num, per_page=per_page_value, sort=sort_value, direction=dir_value
+    )
+    if result.total and page_num > result.total_pages:
+        # A stale page number (rows deleted since, or a hand-edited URL)
+        # shouldn't 404/blank the page for a human browsing — clamp to the
+        # last real page instead.
+        page_num = result.total_pages
+        result = activities_repo.list_for_user_page(
+            user.id, page=page_num, per_page=per_page_value, sort=sort_value, direction=dir_value
+        )
+
     context = {
         "user": user,
-        "activities": page.activities,
-        "next_cursor": page.next_cursor,
+        "activities": [
+            _activity_list_view(activity, analysis) for activity, analysis in result.activities
+        ],
+        "page": result.page,
+        "per_page": "all" if result.per_page is None else str(result.per_page),
+        "total_pages": result.total_pages,
+        "total": result.total,
+        "sort": sort_value,
+        "dir": dir_value,
     }
-    if request.headers.get("hx-request") == "true":
-        return templates.TemplateResponse(request, "partials/activity_list_items.html", context)
+    # Sort/page/per-page controls (activity_list_controls.html,
+    # activity_list_pagination.html) target #activity-list-region with
+    # hx-select, so the full page template is rendered either way — htmx
+    # extracts just that fragment from the response on an htmx request.
     return templates.TemplateResponse(request, "activities_list.html", context)
 
 

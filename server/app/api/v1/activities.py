@@ -35,7 +35,7 @@ from app.activity_import_strava import (
 )
 from app.analysis.gpx_parser import GpxParseError, parse_gpx, parse_split_preference
 from app.analysis.track_sampling import DEFAULT_MAX_POINTS, sample_track
-from app.analysis.v1 import ANALYSIS_VERSION, AnalyzerV1
+from app.analysis.v1 import ANALYSIS_VERSION, AnalyzerV1, distance_and_duration_from_result
 from app.api.v1.errors import api_error
 from app.api.v1.schemas import (
     ActivityListItem,
@@ -222,11 +222,14 @@ def _insert_activity_with_gpx(
         result = (
             AnalyzerV1().analyze(track, *split_pref) if split_pref else AnalyzerV1().analyze(track)
         )
+        distance_meters, moving_seconds = distance_and_duration_from_result(result)
         analysis = ActivityAnalysis(
             activity_id=activity.id,
             analysis_version=ANALYSIS_VERSION,
             status=AnalysisStatus.done,
             result=result,
+            distance_meters=distance_meters,
+            moving_seconds=moving_seconds,
             track=sample_track(track, max_points=DEFAULT_MAX_POINTS),
             computed_at=datetime.now(UTC),
         )

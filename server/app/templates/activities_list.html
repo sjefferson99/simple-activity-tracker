@@ -6,9 +6,14 @@
 <form id="export-form" action="/export" method="get">
   <input type="hidden" name="selection" value="1">
 </form>
-{% if activities %}
-<div class="card" id="activity-list">
-  {% include "partials/activity_list_items.html" %}
+{% if total %}
+<div id="activity-list-region">
+  {% include "partials/activity_list_controls.html" %}
+  <div class="card" id="activity-list">
+    <div id="activity-list-spinner" class="list-loading-spinner" role="status" aria-label="Loading"></div>
+    {% include "partials/activity_list_items.html" %}
+  </div>
+  {% include "partials/activity_list_pagination.html" %}
 </div>
 {% else %}
 <div class="card empty-state">
