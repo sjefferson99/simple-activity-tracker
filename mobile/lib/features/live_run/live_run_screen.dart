@@ -292,7 +292,7 @@ class _StatusLine extends StatelessWidget {
       LiveRunActive(phase: RunPhase.paused) => 'Paused',
       LiveRunActive(:final accuracyMeters) =>
         'Accuracy: ±${accuracyMeters.toStringAsFixed(0)} m',
-      LiveRunFinished() => 'Run finished',
+      LiveRunFinished() => 'Activity finished',
       LiveRunServiceDisabled() => 'Location services are turned off',
       LiveRunPermissionDenied(forever: true) =>
         'Location permission permanently denied',
@@ -437,10 +437,8 @@ class _SplitsPanel extends ConsumerWidget {
                 useKmh: useKmh,
                 unit: unit,
               ),
-              separatorBuilder: (context, index) => Divider(
-                height: 1,
-                color: theme.colorScheme.outlineVariant,
-              ),
+              separatorBuilder: (context, index) =>
+                  Divider(height: 1, color: theme.colorScheme.outlineVariant),
             ),
           ),
       ],
@@ -453,7 +451,11 @@ class _SplitRow extends StatelessWidget {
   final bool useKmh;
   final double unit;
 
-  const _SplitRow({required this.split, required this.useKmh, required this.unit});
+  const _SplitRow({
+    required this.split,
+    required this.useKmh,
+    required this.unit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -484,10 +486,7 @@ class _SplitRow extends StatelessWidget {
           ),
           Text(
             paceOrSpeed,
-            style: TextStyle(
-              fontSize: unit * 2.8,
-              fontWeight: FontWeight.w500,
-            ),
+            style: TextStyle(fontSize: unit * 2.8, fontWeight: FontWeight.w500),
           ),
         ],
       ),
@@ -579,41 +578,52 @@ class _Controls extends StatelessWidget {
         style: FilledButton.styleFrom(minimumSize: const Size(160, 56)),
         child: const Text('Start'),
       ),
-      LiveRunFinished(:final exportedTo, :final clientRunId) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (clientRunId != null) RunSyncSection(clientRunId: clientRunId),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Back to the idle screen — the only way to reach the
-              // run/cycle toggle again, which the home screen hides once a
-              // run is active or finished.
-              OutlinedButton(
-                onPressed: controller.goToIdle,
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(120, 56),
+      LiveRunFinished(
+        :final exportedTo,
+        :final clientRunId,
+        :final activityMode,
+      ) =>
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (clientRunId != null) RunSyncSection(clientRunId: clientRunId),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Back to the idle screen — the only way to reach the
+                // run/cycle toggle again, which the home screen hides once a
+                // run is active or finished.
+                OutlinedButton(
+                  onPressed: controller.goToIdle,
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(120, 56),
+                  ),
+                  child: const Text('Home'),
                 ),
-                child: const Text('Home'),
-              ),
-              const SizedBox(width: 16),
-              FilledButton(
-                onPressed: controller.startNewRun,
-                style: FilledButton.styleFrom(minimumSize: const Size(120, 56)),
-                child: const Text('New run'),
-              ),
-            ],
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => ExportHelpScreen(exportedTo: exportedTo),
-              ),
+                const SizedBox(width: 16),
+                FilledButton(
+                  onPressed: controller.startNewRun,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(120, 56),
+                  ),
+                  child: Text(
+                    activityMode == ActivityMode.cycling
+                        ? 'New ride'
+                        : 'New run',
+                  ),
+                ),
+              ],
             ),
-            child: const Text("Where's my file?"),
-          ),
-        ],
-      ),
+            TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ExportHelpScreen(exportedTo: exportedTo),
+                ),
+              ),
+              child: const Text("Where's my file?"),
+            ),
+          ],
+        ),
       // GPS may never get a fix (indoors, hardware issue). Offer a way out —
       // the wakelock and flush timer are already running by this point.
       LiveRunAcquiring() => Row(
