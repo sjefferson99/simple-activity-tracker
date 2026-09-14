@@ -224,6 +224,68 @@ more than trivial size. One plan item (or tightly related group, e.g. "S5 + D1 t
    `deploy/standalone-tls/`), confirm healthy, and reconcile local `main` with
    `origin/main` (`git checkout main && git pull`) before starting the next batch.
 
+### Stacked PRs (a feature split into dependent branches, e.g. #76's A→B→C)
+
+**What went wrong (2026-09-14, issue #76's three PRs — A: endpoint coordinates, B: text
+search, C: geo search/map picker).** Each PR genuinely depended on the previous one's code
+(B needed A's schema; C needed both A's and B's code, including a manual review-fix commit
+applied independently to both B's and C's branches), but they were opened as **separate
+GitHub PRs against each other's branches**, all left open simultaneously rather than merged
+one at a time. Merging them in order surfaced three real problems, each avoidable:
+
+1. **A closed PR when its base branch is deleted.** PR C was opened with `--base
+   server-76b-text-search` (the plan's own advice, so its diff would show only C's own
+   work rather than A+B+C combined). The moment B merged, GitHub auto-deleted
+   `server-76b-text-search` and — undocumented behavior worth remembering — **silently
+   closed PR C**, because a PR's base branch disappearing closes it rather than
+   retargeting it to `main`. A closed PR's base can't be edited and it can't be reopened
+   once its base is gone, so recovering meant opening a brand-new PR from the same
+   commits against `main` (issue #76 recovered as PR #90 from the closed #89) — same
+   content, different PR number, extra churn, and a stale link in `docs/`.
+2. **A duplicated fix became a real merge conflict.** The code review (a single pass over
+   the combined A+B+C diff) found one bug whose fix belonged on B's branch and one
+   documentation status line that made sense to update on either. Applying the same
+   conceptual fix to two open, unmerged branches independently — instead of fixing it once
+   on the earliest affected branch and rebasing everything downstream onto it — left two
+   branches with *different* text at the same line, which is a genuine conflict on merge,
+   not a git technicality: `git merge-tree` flagged it (`git merge` itself resolved it
+   fine by taking whichever side had actually changed relative to the merge-base, but that
+   was luck, not something to rely on).
+3. **A generic `gh pr merge` failure needs a follow-up query to diagnose, not a retry.**
+   `gh pr merge` on C failed with only "the merge commit cannot be cleanly created" — no
+   detail on what conflicted. `gh pr view <N> --json mergeable,mergeStateStatus` (and, to
+   see the actual conflicting hunk, a local `git merge-tree`) is what confirmed the real
+   cause (point 2 above) rather than a transient GitHub mergeability-cache lag, which the
+   bare error message alone can't distinguish.
+
+**The actual plan for next time:**
+
+- **Prefer one long-lived branch over N stacked PRs when steps are this tightly coupled.**
+  If step 2 cannot be tested without step 1's code, they are not independently reviewable
+  units — they are one feature with commit checkpoints. Do the whole thing as sequential
+  commits on **one branch**, one PR, and structure the PR description (or a scratch doc)
+  as "step 1 / step 2 / step 3" so the owner can still review and sign off on each step
+  before the next begins. This sidesteps every problem above: there is no base-branch-
+  deletion trap, no duplicated-fix-becomes-conflict risk, and no merge-order choreography
+  — one `gh pr merge` at the very end.
+- **If the steps really are independently useful (someone might want step 1 without step
+  2)**, keep separate PRs but target **all of them at `main`** from the start, not at each
+  other's branches — accept that an early PR's diff will look like "everything so far"
+  until the ones before it merge; that's a smaller cost than a silently closed PR. Rebase
+  each downstream branch onto `main` (not merge `main` in) immediately after each PR
+  merges, before doing any further work on it — this is the "pause between merges" that
+  keeps every open branch's diff small and its mergeability current, and turns a stacked
+  review-fix into a fast-forward instead of a conflict.
+- **A code review that spans multiple open branches applies its fix to exactly one
+  branch** — the earliest one that has the affected code — and every downstream branch
+  picks it up by rebasing onto that branch, never by re-applying the same conceptual fix
+  by hand a second time.
+- **Before merging PR N of a stack, `git fetch` and check `gh pr view <N> --json
+  mergeable,mergeStateStatus` is genuinely `MERGEABLE`/`CLEAN`**, not just that CI is
+  green — CI green and merge-clean are different questions, and this stack's real
+  conflict never showed up as a CI failure on either branch alone (each passed fine in
+  isolation; the conflict only existed *between* them).
+
 ## Architecture rules (from docs/PLAN.md §3 — follow strictly)
 
 - Feature-first layout under `mobile/lib/`: `app`, `core/{location,units,files}`, `domain/{models,tracking}`, `features/live_run`.
