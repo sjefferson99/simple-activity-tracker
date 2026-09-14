@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../../core/units/units.dart' show DistanceUnit;
 import '../../domain/tracking/split_preference.dart';
 
 const _splitKindKey = 'split_kind';
 const _splitValueKey = 'split_value';
+const _timeSplitDisplayUnitKey = 'split_time_display_unit';
 
 final splitPreferenceControllerProvider =
     NotifierProvider<SplitPreferenceController, SplitPreference>(
@@ -38,10 +40,18 @@ class SplitPreferenceController extends Notifier<SplitPreference> {
   Future<void> _load() async {
     final storedKind = await _storage.read(key: _splitKindKey);
     final storedValue = await _storage.read(key: _splitValueKey);
+    final storedUnit = await _storage.read(key: _timeSplitDisplayUnitKey);
     if (_userHasSelected) return;
-    final preference =
+    final base =
         SplitPreference.fromGpxValues(storedKind, storedValue) ??
         SplitPreference.defaultPreference;
+    final preference = SplitPreference(
+      kind: base.kind,
+      value: base.value,
+      timeSplitDisplayUnit: storedUnit == DistanceUnit.mi.name
+          ? DistanceUnit.mi
+          : DistanceUnit.km,
+    );
     if (preference != state) state = preference;
   }
 
@@ -49,9 +59,10 @@ class SplitPreferenceController extends Notifier<SplitPreference> {
     _userHasSelected = true;
     state = preference;
     await _storage.write(key: _splitKindKey, value: preference.gpxSplitType);
+    await _storage.write(key: _splitValueKey, value: '${preference.value}');
     await _storage.write(
-      key: _splitValueKey,
-      value: '${preference.value}',
+      key: _timeSplitDisplayUnitKey,
+      value: preference.timeSplitDisplayUnit.name,
     );
   }
 }

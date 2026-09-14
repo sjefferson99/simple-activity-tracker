@@ -1,3 +1,4 @@
+import '../../core/units/units.dart' show DistanceUnit;
 import '../../domain/models/live_metrics.dart';
 import '../../domain/tracking/activity_mode.dart';
 import '../../domain/tracking/run_phase.dart';
@@ -36,12 +37,20 @@ class LiveRunActive extends LiveRunState {
   /// LiveRunController.start()).
   final ActivityMode activityMode;
 
+  /// The distance unit implied by this run's split preference at start()
+  /// (issue #94) — km for a km split or a time split displayed in km, mi for
+  /// a mile split or a time split displayed in miles. Drives the initial
+  /// state of the speed/pace toggle on the live run screen; fixed for the
+  /// run's whole duration, same rationale as [activityMode].
+  final DistanceUnit distanceUnit;
+
   const LiveRunActive({
     required this.phase,
     required this.speedMps,
     required this.accuracyMeters,
     required this.metrics,
     required this.activityMode,
+    required this.distanceUnit,
   });
 }
 
@@ -51,6 +60,10 @@ class LiveRunFinished extends LiveRunState {
   /// The mode the finished run was recorded under — see
   /// [LiveRunActive.activityMode].
   final ActivityMode activityMode;
+
+  /// The distance unit the finished run was recorded under — see
+  /// [LiveRunActive.distanceUnit].
+  final DistanceUnit distanceUnit;
 
   /// Where the exported copy of this run's GPX file was written, in
   /// human-readable form (e.g. "Downloads/SimpleActivityTracker"), for showing in the
@@ -69,6 +82,7 @@ class LiveRunFinished extends LiveRunState {
   const LiveRunFinished({
     required this.metrics,
     required this.activityMode,
+    required this.distanceUnit,
     this.exportedTo,
     this.clientRunId,
   });
@@ -76,6 +90,7 @@ class LiveRunFinished extends LiveRunState {
   LiveRunFinished copyWith({String? exportedTo}) => LiveRunFinished(
     metrics: metrics,
     activityMode: activityMode,
+    distanceUnit: distanceUnit,
     exportedTo: exportedTo ?? this.exportedTo,
     clientRunId: clientRunId,
   );

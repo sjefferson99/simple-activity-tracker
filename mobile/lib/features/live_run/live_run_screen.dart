@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../core/tracking/activity_mode_controller.dart';
+import '../../core/tracking/split_preference_controller.dart';
 import '../../core/units/units.dart';
 import '../../domain/models/live_metrics.dart';
 import '../../domain/models/split.dart' as domain;
@@ -15,15 +16,30 @@ import 'live_run_state.dart';
 import 'metric_spec.dart';
 import 'run_insights.dart';
 
-class _UseKmhNotifier extends Notifier<bool> {
+/// The live run screen's speed/pace toggle. Starts at null (meaning: not yet
+/// pinned to a run) and is set to the run's initial [SpeedUnit] — derived
+/// from the run's split preference (issue #94) — the moment a run reaches
+/// [LiveRunActive]/[LiveRunFinished], via [_SpeedUnitNotifier.startRun].
+/// From there, tapping the toggle only ever cycles speed ⇄ pace within that
+/// run's distance unit (km-based or mile-based) — it never switches between
+/// km and miles mid-run, matching [LiveRunActive.distanceUnit]/
+/// [LiveRunActive.activityMode] being fixed for a run's whole duration.
+class _SpeedUnitNotifier extends Notifier<SpeedUnit?> {
   @override
-  bool build() => true;
+  SpeedUnit? build() => null;
 
-  void toggle() => state = !state;
+  /// Resets the toggle to [unit]'s initial (speed, not pace) member — called
+  /// once per run, when the run's distance unit becomes known.
+  void startRun(DistanceUnit unit) => state = SpeedUnit.initialFor(unit);
+
+  void toggle() {
+    final current = state;
+    if (current != null) state = current.toggled;
+  }
 }
 
-final _useKmhProvider = NotifierProvider<_UseKmhNotifier, bool>(
-  _UseKmhNotifier.new,
+final _speedUnitProvider = NotifierProvider<_SpeedUnitNotifier, SpeedUnit?>(
+  _SpeedUnitNotifier.new,
 );
 
 class _SplitsExpandedNotifier extends Notifier<bool> {
@@ -86,11 +102,48 @@ class LiveRunScreen extends ConsumerWidget {
     };
     final isCycling = runActivityMode == ActivityMode.cycling;
 
-    // Cycling has no pace concept — the toggle is forced to km/h and hidden
-    // rather than just disabled, so a run started in cycling mode never
-    // shows a min/km readout even if useKmh was left false from a previous
-    // running-mode session.
-    final useKmh = isCycling || ref.watch(_useKmhProvider);
+    // The distance unit this run's splits (and therefore its speed/pace/
+    // elevation display) use — fixed once the run starts, same rationale as
+    // runActivityMode (issue #94). Before a run starts, falls back to the
+    // live split-preference setting.
+    final runDistanceUnit = switch (state) {
+      LiveRunActive(:final distanceUnit) => distanceUnit,
+      LiveRunFinished(:final distanceUnit) => distanceUnit,
+      _ => ref.watch(splitPreferenceControllerProvider).effectiveDistanceUnit,
+    };
+
+    // Pins the toggle to this run's distance unit the moment it becomes
+    // available, so a run started with mile splits opens on mph rather than
+    // whatever unit a previous running-mode session left the toggle on.
+    // Runs (never fired for the idle/acquiring states this reaches before a
+    // run has one) — _speedUnitProvider only resets here, so a manual tap
+    // via toggle() persists across ticks within the same run.
+    ref.listen(liveRunControllerProvider, (previous, next) {
+      final unit = switch (next) {
+        LiveRunActive(:final distanceUnit) => distanceUnit,
+        LiveRunFinished(:final distanceUnit) => distanceUnit,
+        _ => null,
+      };
+      final wasActive =
+          previous is LiveRunActive || previous is LiveRunFinished;
+      if (unit != null && !wasActive) {
+        ref.read(_speedUnitProvider.notifier).startRun(unit);
+      }
+    });
+
+    // Cycling has no pace concept — the toggle is forced to the speed-only
+    // member and hidden rather than just disabled, so a run started in
+    // cycling mode never shows a pace readout even if the toggle was left on
+    // pace from a previous running-mode session. Falls back to this run's
+    // initial unit until the listener above has fired at least once (e.g.
+    // the very first frame of LiveRunActive).
+    final speedUnit =
+        ref.watch(_speedUnitProvider) ?? SpeedUnit.initialFor(runDistanceUnit);
+    final effectiveUnit = isCycling
+        ? (speedUnit.distanceUnit == DistanceUnit.mi
+              ? SpeedUnit.mph
+              : SpeedUnit.kmh)
+        : speedUnit;
 
     // Before a run starts there is no reading to show or unit to toggle, so
     // the idle screen is just its Start button. The same applies to the
@@ -136,12 +189,12 @@ class LiveRunScreen extends ConsumerWidget {
                     showsReadout && !isCycling
                         ? TextButton(
                             onPressed: ref
-                                .read(_useKmhProvider.notifier)
+                                .read(_speedUnitProvider.notifier)
                                 .toggle,
                             // Shows what tapping switches *to*, not the
                             // current unit — e.g. while displaying km/h,
                             // this reads "min/km".
-                            child: Text(useKmh ? 'min/km' : 'km/h'),
+                            child: Text(effectiveUnit.toggled.suffix),
                           )
                         // Holds the row's height so the content below doesn't
                         // shift up when the toggle appears on starting a run.
@@ -180,8 +233,8 @@ class LiveRunScreen extends ConsumerWidget {
                             flex: metrics == null ? 5 : 3,
                             child: _PrimarySpeedReadout(
                               state: state,
-                              useKmh: useKmh,
-                              unit: unit,
+                              unit: effectiveUnit,
+                              sizeUnit: unit,
                             ),
                           )
                         else
@@ -192,7 +245,7 @@ class LiveRunScreen extends ConsumerWidget {
                             flex: 5,
                             child: _MetricGrid(
                               metrics: metrics,
-                              useKmh: useKmh,
+                              speedUnit: effectiveUnit,
                               unit: unit,
                               activityMode: runActivityMode,
                             ),
@@ -200,7 +253,7 @@ class LiveRunScreen extends ConsumerWidget {
                         if (metrics != null && !isCycling)
                           _SplitsPanel(
                             completedSplits: metrics.completedSplits,
-                            useKmh: useKmh,
+                            speedUnit: effectiveUnit,
                             unit: unit,
                           ),
                         SizedBox(height: unit * 3),
@@ -224,13 +277,13 @@ class LiveRunScreen extends ConsumerWidget {
 
 class _PrimarySpeedReadout extends StatelessWidget {
   final LiveRunState state;
-  final bool useKmh;
-  final double unit;
+  final SpeedUnit unit;
+  final double sizeUnit;
 
   const _PrimarySpeedReadout({
     required this.state,
-    required this.useKmh,
     required this.unit,
+    required this.sizeUnit,
   });
 
   @override
@@ -238,11 +291,17 @@ class _PrimarySpeedReadout extends StatelessWidget {
     final speedMps = state is LiveRunActive
         ? (state as LiveRunActive).speedMps
         : null;
-    final text = speedMps != null
-        ? (useKmh
-              ? formatKmh(speedMps)
-              : formatPace(paceSecPerKmFromMps(speedMps)))
-        : (useKmh ? '--.-' : '--:--');
+    final text = speedMps == null
+        ? (unit.isPace ? '--:--' : '--.-')
+        : unit.isPace
+        ? formatPace(
+            unit == SpeedUnit.minMi
+                ? paceSecPerMileFromMps(speedMps)
+                : paceSecPerKmFromMps(speedMps),
+          )
+        : unit == SpeedUnit.mph
+        ? formatMph(speedMps)
+        : formatKmh(speedMps);
 
     // The number you read at arm's length mid-run, so it gets the largest
     // size on the screen. scaleDown only shrinks if a value would not
@@ -256,7 +315,7 @@ class _PrimarySpeedReadout extends StatelessWidget {
             child: Text(
               text,
               style: TextStyle(
-                fontSize: unit * 15,
+                fontSize: sizeUnit * 15,
                 fontWeight: FontWeight.w300,
                 height: 1.1,
                 color: Theme.of(context).colorScheme.onSurface,
@@ -265,9 +324,9 @@ class _PrimarySpeedReadout extends StatelessWidget {
           ),
         ),
         Text(
-          useKmh ? 'km/h' : 'min/km',
+          unit.suffix,
           style: TextStyle(
-            fontSize: unit * 4,
+            fontSize: sizeUnit * 4,
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
@@ -325,13 +384,13 @@ class _StatusLine extends StatelessWidget {
 
 class _MetricGrid extends StatelessWidget {
   final LiveMetrics metrics;
-  final bool useKmh;
+  final SpeedUnit speedUnit;
   final double unit;
   final ActivityMode activityMode;
 
   const _MetricGrid({
     required this.metrics,
-    required this.useKmh,
+    required this.speedUnit,
     required this.unit,
     required this.activityMode,
   });
@@ -362,9 +421,9 @@ class _MetricGrid extends StatelessWidget {
                 Expanded(
                   flex: 2,
                   child: _MetricTile(
-                    label: spec.label(useKmh),
+                    label: spec.label(speedUnit),
                     description: spec.description,
-                    value: spec.valueOf(metrics, null, useKmh),
+                    value: spec.valueOf(metrics, null, speedUnit),
                     unit: unit,
                   ),
                 ),
@@ -382,12 +441,12 @@ class _MetricGrid extends StatelessWidget {
 /// completed splits yet, so it never claims space with nothing to show.
 class _SplitsPanel extends ConsumerWidget {
   final List<domain.Split> completedSplits;
-  final bool useKmh;
+  final SpeedUnit speedUnit;
   final double unit;
 
   const _SplitsPanel({
     required this.completedSplits,
-    required this.useKmh,
+    required this.speedUnit,
     required this.unit,
   });
 
@@ -434,7 +493,7 @@ class _SplitsPanel extends ConsumerWidget {
               // is what they want to check without scrolling.
               itemBuilder: (context, index) => _SplitRow(
                 split: completedSplits[completedSplits.length - 1 - index],
-                useKmh: useKmh,
+                speedUnit: speedUnit,
                 unit: unit,
               ),
               separatorBuilder: (context, index) =>
@@ -448,21 +507,22 @@ class _SplitsPanel extends ConsumerWidget {
 
 class _SplitRow extends StatelessWidget {
   final domain.Split split;
-  final bool useKmh;
+  final SpeedUnit speedUnit;
   final double unit;
 
   const _SplitRow({
     required this.split,
-    required this.useKmh,
+    required this.speedUnit,
     required this.unit,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final paceOrSpeed = useKmh
-        ? '${formatKmh(split.avgSpeedMps)} km/h'
-        : '${formatPace(paceSecPerKmFromMps(split.avgSpeedMps))} /km';
+    final paceOrSpeed = formatSpeedOrPace(split.avgSpeedMps, speedUnit);
+    final distanceText = speedUnit.distanceUnit == DistanceUnit.mi
+        ? '${formatDistanceMi(split.distanceMeters)} mi'
+        : '${formatDistanceKm(split.distanceMeters)} km';
 
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: unit * 2, vertical: unit * 1.4),
@@ -476,10 +536,7 @@ class _SplitRow extends StatelessWidget {
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
-          Text(
-            '${formatDistanceKm(split.distanceMeters)} km',
-            style: TextStyle(fontSize: unit * 2.8),
-          ),
+          Text(distanceText, style: TextStyle(fontSize: unit * 2.8)),
           Text(
             formatDuration(split.duration),
             style: TextStyle(fontSize: unit * 2.8),
@@ -511,6 +568,12 @@ class _MetricTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    // Distance shows both km and mi stacked (issue #94: both are used by
+    // runners at the same time, and two shorter lines fit the tile better
+    // than one long "X km / Y mi" line) — every other tile's value is a
+    // single line.
+    final valueLines = value.split('\n').length;
+
     // Tap (not long-press, which is reserved for Stop) shows what the
     // number measures, then fades — no modal to dismiss mid-run.
     return Tooltip(
@@ -535,11 +598,12 @@ class _MetricTile extends StatelessWidget {
               fit: BoxFit.scaleDown,
               child: Text(
                 value,
-                maxLines: 1,
+                textAlign: TextAlign.center,
+                maxLines: valueLines,
                 style: TextStyle(
-                  fontSize: unit * 7,
+                  fontSize: valueLines > 1 ? unit * 4.5 : unit * 7,
                   fontWeight: FontWeight.w400,
-                  height: 1.1,
+                  height: 1.15,
                   color: theme.colorScheme.onSurface,
                 ),
               ),

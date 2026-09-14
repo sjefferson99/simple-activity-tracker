@@ -9,11 +9,12 @@ import '../../domain/tracking/activity_mode.dart';
 class MetricSpec {
   final String id;
 
-  /// Most tiles have a fixed label regardless of the km/h ⇄ min/km toggle;
+  /// Most tiles have a fixed label regardless of the speed/pace toggle;
   /// [_currentSplitSpec] is the exception ("Split pace" only makes sense in
-  /// min/km — it reads "Split speed" in km/h mode), so every spec's label is
-  /// a function of [useKmh] even though most ignore the argument.
-  final String Function(bool useKmh) label;
+  /// a pace-flavored [SpeedUnit] — it reads "Split speed" otherwise), so
+  /// every spec's label is a function of [SpeedUnit] even though most ignore
+  /// the argument.
+  final String Function(SpeedUnit unit) label;
 
   /// One or two plain sentences on what the number actually measures — shown
   /// on tapping the tile. Worth spelling out for anything ambiguous (Time is
@@ -23,7 +24,7 @@ class MetricSpec {
   final String Function(
     LiveMetrics metrics,
     double? currentSpeedMps,
-    bool useKmh,
+    SpeedUnit unit,
   )
   valueOf;
 
@@ -35,18 +36,8 @@ class MetricSpec {
   });
 }
 
-String Function(bool useKmh) _staticLabel(String text) =>
+String Function(SpeedUnit unit) _staticLabel(String text) =>
     (_) => text;
-
-/// Formats speed/pace with its unit suffix ("18.0 km/h" / "3:20 /km") — every
-/// tile using this reads as a bare number/time otherwise, unlike
-/// Distance/Max speed's tiles which already spell their unit out.
-String _speedOrPace(double? mps, bool useKmh) {
-  if (mps == null) return useKmh ? '--.- km/h' : '--:-- /km';
-  return useKmh
-      ? '${formatKmh(mps)} km/h'
-      : '${formatPace(paceSecPerKmFromMps(mps))} /km';
-}
 
 final MetricSpec _avgSpeedSpec = MetricSpec(
   id: 'avg_speed',
@@ -54,8 +45,8 @@ final MetricSpec _avgSpeedSpec = MetricSpec(
   description:
       'Average pace or speed over moving time only — time spent stationary '
       'or without usable GPS is excluded.',
-  valueOf: (metrics, currentSpeedMps, useKmh) =>
-      _speedOrPace(metrics.avgSpeedMps, useKmh),
+  valueOf: (metrics, currentSpeedMps, unit) =>
+      formatSpeedOrPace(metrics.avgSpeedMps, unit),
 );
 
 /// Wall-clock since Start (minus pauses), not moving time — a tile that
@@ -67,7 +58,7 @@ final MetricSpec _elapsedSpec = MetricSpec(
   description:
       'Time since you pressed Start, not counting pauses. Keeps counting '
       'while you are stationary or have no GPS fix.',
-  valueOf: (metrics, currentSpeedMps, useKmh) =>
+  valueOf: (metrics, currentSpeedMps, unit) =>
       formatDuration(metrics.elapsedWallClock),
 );
 
@@ -77,64 +68,75 @@ final MetricSpec _distanceSpec = MetricSpec(
   description:
       'Distance from accepted GPS fixes. Fixes with poor accuracy, '
       'implausible jumps, or stationary jitter are not counted.',
-  valueOf: (metrics, currentSpeedMps, useKmh) =>
-      '${formatDistanceKm(metrics.distanceMeters)} km / '
+  // Both km and miles are always shown, stacked, regardless of the run's
+  // distance unit — runners commonly use both at the same time (issue #94).
+  valueOf: (metrics, currentSpeedMps, unit) =>
+      '${formatDistanceKm(metrics.distanceMeters)} km\n'
       '${formatDistanceMi(metrics.distanceMeters)} mi',
 );
 
 final MetricSpec _currentSplitSpec = MetricSpec(
   id: 'current_split',
-  label: (useKmh) => useKmh ? 'Split speed' : 'Split pace',
+  label: (unit) => unit.isPace ? 'Split pace' : 'Split speed',
   description:
       'Pace or speed over the current split so far, by moving time. Resets '
       'at each split boundary.',
-  valueOf: (metrics, currentSpeedMps, useKmh) {
+  valueOf: (metrics, currentSpeedMps, unit) {
     final elapsedSeconds = metrics.currentSplitElapsed.inMilliseconds / 1000;
     final speed = elapsedSeconds <= 0
         ? null
         : metrics.currentSplitDistanceMeters / elapsedSeconds;
-    return _speedOrPace(speed, useKmh);
+    return formatSpeedOrPace(speed, unit);
   },
 );
 
 final MetricSpec _lastSplitSpec = MetricSpec(
   id: 'last_split',
-  label: (useKmh) => useKmh ? 'Last split speed' : 'Last split pace',
+  label: (unit) => unit.isPace ? 'Last split pace' : 'Last split speed',
   description:
       'Average pace or speed for the most recently completed split. For a '
       'time-based split preference every split has the same fixed duration, '
       // #78: showing that duration told the user nothing new — pace/speed
       // is the number that actually varies split-to-split there.
       'so pace/speed (not duration) is what actually varies split-to-split.',
-  valueOf: (metrics, currentSpeedMps, useKmh) {
+  valueOf: (metrics, currentSpeedMps, unit) {
     final last = metrics.lastCompletedSplit;
-    if (last == null) return _speedOrPace(null, useKmh);
+    if (last == null) return formatSpeedOrPace(null, unit);
     // Split.index is already 1-based (see MetricsEngine).
-    return '#${last.index}  ${_speedOrPace(last.avgSpeedMps, useKmh)}';
+    return '#${last.index}  ${formatSpeedOrPace(last.avgSpeedMps, unit)}';
   },
 );
 
 /// Cycling has no notion of a 1km "split pace" the way running does — swapped
-/// for max speed instead. Always shows km/h regardless of the [useKmh]
-/// toggle (which cycling mode forces to km/h anyway — see LiveRunScreen).
+/// for max speed instead. Follows the same speed unit (km/h vs mph) as every
+/// other tile, driven by the run's split preference (issue #94) rather than
+/// a manual toggle — cycling mode hides pace entirely (see LiveRunScreen),
+/// so [unit] is always a speed-flavored member here, never a pace one.
 final MetricSpec _maxSpeedSpec = MetricSpec(
   id: 'max_speed',
   label: _staticLabel('Max speed'),
   description: 'Fastest speed between two accepted GPS fixes this ride.',
-  valueOf: (metrics, currentSpeedMps, useKmh) {
+  valueOf: (metrics, currentSpeedMps, unit) {
     final maxSpeedMps = metrics.maxSpeedMps;
-    return maxSpeedMps == null ? '--.-' : formatKmh(maxSpeedMps);
+    if (maxSpeedMps == null) return '--.-';
+    return unit.distanceUnit == DistanceUnit.mi
+        ? '${formatMph(maxSpeedMps)} mph'
+        : '${formatKmh(maxSpeedMps)} km/h';
   },
 );
 
 final MetricSpec _elevationGainSpec = MetricSpec(
   id: 'elevation_gain',
-  label: _staticLabel('Elevation gain (m)'),
+  label: (unit) => unit.distanceUnit == DistanceUnit.mi
+      ? 'Elevation gain (ft)'
+      : 'Elevation gain (m)',
   description:
       'Total climb from GPS altitude between accepted fixes — a rough live '
       'figure; the server computes a smoothed one after upload.',
-  valueOf: (metrics, currentSpeedMps, useKmh) =>
-      formatMeters(metrics.elevationGainMeters),
+  valueOf: (metrics, currentSpeedMps, unit) =>
+      unit.distanceUnit == DistanceUnit.mi
+      ? formatFeet(metrics.elevationGainMeters)
+      : formatMeters(metrics.elevationGainMeters),
 );
 
 /// The Phase 1 static layout, used for [ActivityMode.running]. `avg_speed`,
@@ -149,7 +151,7 @@ final List<MetricSpec> _runningMetricSpecs = [
 ];
 
 /// [ActivityMode.cycling] swaps the two split-pace tiles (which cycling mode
-/// hides the whole km/h ⇄ min/km toggle for — pace isn't a cycling concept)
+/// hides the whole speed/pace toggle for — pace isn't a cycling concept)
 /// for max speed and elevation gain.
 final List<MetricSpec> _cyclingMetricSpecs = [
   _avgSpeedSpec,

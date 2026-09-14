@@ -9,7 +9,7 @@ import '../../core/auth/auth_state_controller.dart';
 import '../../core/sync/file_run_store.dart';
 import '../../core/sync/sync_service.dart';
 import '../../core/tracking/split_preference_controller.dart';
-import '../../core/units/units.dart';
+import '../../core/units/units.dart' show DistanceUnit, formatDistanceKm;
 import '../../domain/models/run_record.dart';
 import '../../domain/models/sync_status.dart';
 import '../../domain/tracking/split_preference.dart';
@@ -423,7 +423,11 @@ class _SplitPreferenceSection extends ConsumerWidget {
           showSelectedIcon: false,
           selected: {preference.kind},
           onSelectionChanged: (selection) => notifier.select(
-            SplitPreference(kind: selection.first, value: preference.value),
+            SplitPreference(
+              kind: selection.first,
+              value: preference.value,
+              timeSplitDisplayUnit: preference.timeSplitDisplayUnit,
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -437,7 +441,11 @@ class _SplitPreferenceSection extends ConsumerWidget {
                 key: ValueKey(preference.value),
                 initialValue: preference.value,
                 onCommit: (value) => notifier.select(
-                  SplitPreference(kind: preference.kind, value: value),
+                  SplitPreference(
+                    kind: preference.kind,
+                    value: value,
+                    timeSplitDisplayUnit: preference.timeSplitDisplayUnit,
+                  ),
                 ),
               ),
             ),
@@ -445,6 +453,42 @@ class _SplitPreferenceSection extends ConsumerWidget {
             Text(_unitLabel(preference.kind)),
           ],
         ),
+        if (preference.kind == SplitKind.timeMin) ...[
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Text('Display units'),
+              const SizedBox(width: 8),
+              SegmentedButton<DistanceUnit>(
+                segments: const [
+                  ButtonSegment(
+                    value: DistanceUnit.km,
+                    label: SizedBox(
+                      width: 72,
+                      child: Center(child: Text('Km', softWrap: false)),
+                    ),
+                  ),
+                  ButtonSegment(
+                    value: DistanceUnit.mi,
+                    label: SizedBox(
+                      width: 72,
+                      child: Center(child: Text('Miles', softWrap: false)),
+                    ),
+                  ),
+                ],
+                showSelectedIcon: false,
+                selected: {preference.timeSplitDisplayUnit},
+                onSelectionChanged: (selection) => notifier.select(
+                  SplitPreference(
+                    kind: preference.kind,
+                    value: preference.value,
+                    timeSplitDisplayUnit: selection.first,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ],
     );
   }
