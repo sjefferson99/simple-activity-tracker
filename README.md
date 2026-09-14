@@ -12,6 +12,19 @@ A cross-platform running app in Flutter: live GPS speed and pace, distance, kilo
 - [docs/MOBILE-QUALITY-PLAN.md](docs/MOBILE-QUALITY-PLAN.md) — review findings and the action plan to bring the mobile app to internal-testing code quality.
 - [CLAUDE.md](CLAUDE.md) — current build status and toolchain notes for anyone (human or otherwise) working on the codebase.
 
+## Installing the mobile app on your phone
+
+**Android:** download the latest `.apk` from the
+[Releases page](https://github.com/sjefferson99/simple-activity-tracker/releases)
+and sideload it — no computer or toolchain needed. See
+[docs/deploy-guide.md](docs/deploy-guide.md#installing-on-android) for
+step-by-step instructions, including how to allow installing from outside
+the Play Store.
+
+**iPhone:** needs building from source on a Mac (an Apple restriction, not
+this app's choice) — see
+[docs/deploy-guide.md](docs/deploy-guide.md#installing-on-iphone-needs-a-mac).
+
 ## Commands
 
 Mobile app (from `mobile/`):
@@ -69,22 +82,39 @@ somewhere reachable — see Deployment above for that.
 
 ### Cutting a release
 
-Every merge to `main` already publishes `ghcr.io/sjefferson99/simple-activity-tracker-server`
-as `:latest` and an immutable `sha-<short-commit>` tag — this is enough for normal use (see
-"Updating and rolling back" in [deploy/standalone-tls/README.md](deploy/standalone-tls/README.md)).
-A versioned release additionally tags the image `vX.Y.Z` and `vX.Y`, for a stable name that
-doesn't shift when `main` moves:
+One `vX.Y.Z` tag is the release for the whole repo — server and mobile app together,
+even on a version bump that only touched one of them. Pushing (or publishing, from the
+GitHub UI) a `v*.*.*` tag triggers both `container.yml` and `mobile-release.yml`:
+
+- **Server** (`container.yml`): every merge to `main` already publishes
+  `ghcr.io/sjefferson99/simple-activity-tracker-server` as `:latest` and an immutable
+  `sha-<short-commit>` tag — this is enough for normal use (see "Updating and rolling
+  back" in [deploy/standalone-tls/README.md](deploy/standalone-tls/README.md)). A
+  versioned release additionally tags the image `vX.Y.Z` and `vX.Y`, for a stable name
+  that doesn't shift when `main` moves. Every image — `:latest`, `sha-*`, and semver
+  alike — is stamped with OCI labels (`org.opencontainers.image.source/revision/version`)
+  via [docker/metadata-action](https://github.com/docker/metadata-action), so `docker
+  inspect` on any pulled image shows exactly which commit and version it came from.
+  `:latest` only ever tracks `main`, not a release tag — a `v*.*.*` push produces
+  `vX.Y.Z`/`vX.Y` alongside whatever `sha-<short-commit>` matches that same commit,
+  without moving `:latest`.
+- **Mobile** (`mobile-release.yml`): builds a release APK (`flutter build apk --release`,
+  debug-signed — see `mobile/android/app/build.gradle.kts`) and attaches it to the
+  GitHub Release for that same tag, ready to sideload per
+  [docs/deploy-guide.md](docs/deploy-guide.md#installing-on-android). It never touches
+  the release's title or body, so write those by hand.
+
+To cut a release:
 
 ```
-# bump version in server/pyproject.toml first, commit it, then:
+# bump version in server/pyproject.toml first if the server changed, commit it, then
+# either:
 git tag vX.Y.Z
 git push origin vX.Y.Z
+# ...or create the tag from the GitHub UI: Releases → Draft a new release → type a new
+# tag "vX.Y.Z" targeting main → write release notes → Publish. Either way, publishing
+# the tag is what triggers both workflows above.
 ```
 
-`container.yml` builds and pushes the semver tags on any `v*.*.*` tag push (multi-arch,
-same as every other build) and stamps every image — `:latest`, `sha-*`, and semver alike —
-with OCI labels (`org.opencontainers.image.source/revision/version`) via
-[docker/metadata-action](https://github.com/docker/metadata-action), so `docker inspect`
-on any pulled image shows exactly which commit and version it came from. `:latest` only
-ever tracks `main`, not a release tag — a `v*.*.*` push produces `vX.Y.Z`/`vX.Y` alongside
-whatever `sha-<short-commit>` matches that same commit, without moving `:latest`.
+The mobile build takes a few minutes, so the APK asset typically appears on the release
+a little after the release itself goes live — not a sign anything failed.

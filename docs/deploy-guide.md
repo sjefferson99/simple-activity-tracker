@@ -1,20 +1,18 @@
 # Installing Simple Activity Tracker on your own phone
 
-This guide walks you through building this app from source and installing it
-on your own iPhone or Android phone. You don't need to know how to code —
-just follow the steps in order and copy-paste the commands exactly as shown.
+This guide walks you through installing the app on your own iPhone or Android
+phone. You don't need to know how to code.
 
-Two important things to know before you start:
-
-- **You'll need a computer** — a Mac for iPhone, any computer for Android.
-  Apple only allows an app to be installed by whoever compiles it, so there's
-  no way around this for iPhone.
-- **On iPhone, the app stops working after 7 days** unless you're paying for
-  an Apple Developer account ($99/year). This is an Apple restriction on free
-  developer accounts, nothing to do with this app. When it stops opening,
-  just repeat the "install to your phone" step below (5 minutes) and it'll
-  work for another 7 days. Android has no such limit — install it once and
-  it keeps working.
+- **Android is the easy path**: download a ready-made file and tap to
+  install — no computer, no toolchain, about 5 minutes. See "Installing on
+  Android" below.
+- **iPhone requires building from source on a Mac**, because Apple only
+  allows an app to be installed by whoever compiles it — there's no way
+  around this. **On iPhone, the app also stops working after 7 days** unless
+  you're paying for an Apple Developer account ($99/year), an Apple
+  restriction on free developer accounts, nothing to do with this app. When
+  it stops opening, just repeat the "install to your phone" step (5 minutes)
+  and it'll work for another 7 days.
 
 Pick the section for your phone below. Each one is self-contained.
 
@@ -181,15 +179,55 @@ another 7 days. Everything else on this list only needs doing once.
 
 ---
 
-## Installing on Android (any computer — Mac, Windows, or Linux)
+## Installing on Android
 
-### What you'll need
+The easiest way: download a ready-built copy of the app (called an "APK")
+straight to your phone and install it — no computer needed.
+
+### Step 1: Download the APK
+
+1. On your Android phone, open a browser and go to the project's
+   [Releases page](https://github.com/sjefferson99/simple-activity-tracker/releases).
+2. Open the latest release at the top of the list.
+3. Under **Assets**, tap the file ending in `.apk` (named something like
+   `simple-activity-tracker-1.0.0.apk`) to download it.
+
+### Step 2: Allow installing this app
+
+Android blocks installing apps from outside the Play Store by default — this
+is normal and expected for an app like this one that isn't published there.
+
+1. After the download finishes, tap the downloaded file (from your browser's
+   downloads notification, or in the Files app).
+2. Android will show a warning and offer a link to **Settings** — tap it.
+3. Turn on **Allow from this source** for the app you downloaded with (your
+   browser, or Files). The exact wording and screens vary a little by phone
+   manufacturer and Android version, but it's always under
+   **Settings → Apps → [that app] → Install unknown apps**.
+4. Go back and tap the downloaded file again — you'll now see the normal
+   Android install screen. Tap **Install**.
+
+For general background on what this setting does and why Android has it, see
+Google's own help page: [Install apps from unknown sources](https://support.google.com/android/answer/9298831).
+
+**You're done.** Open Simple Activity Tracker from your home screen. There's
+no expiry — once it's installed, it stays installed. A newer version will
+appear on the same Releases page in future — repeat these steps with the new
+`.apk` to update (it installs over the old one and keeps your data).
+
+### Alternative: build from source
+
+You don't need this unless you want to build the app yourself (e.g. from an
+in-progress branch rather than a release). It needs a full Android
+development toolchain and takes 45–60 minutes to set up.
+
+#### What you'll need
 
 - A Windows, Mac, or Linux computer
 - Your Android phone and a USB cable
 - About 45–60 minutes, mostly spent waiting for downloads
 
-### Step 1: Install Android Studio
+#### Step 1: Install Android Studio
 
 1. Download Android Studio from
    [developer.android.com/studio](https://developer.android.com/studio) and
@@ -202,7 +240,7 @@ another 7 days. Everything else on this list only needs doing once.
 4. Click the **SDK Tools** tab and check the box for **Android SDK
    Command-line Tools (latest)**, then click **Apply** to install it.
 
-### Step 2: Install Flutter
+#### Step 2: Install Flutter
 
 - **On a Mac:** open **Terminal** (press <kbd>Cmd</kbd>+<kbd>Space</kbd>,
   type "Terminal") and run:
@@ -217,7 +255,7 @@ another 7 days. Everything else on this list only needs doing once.
   [docs.flutter.dev/get-started/install/linux](https://docs.flutter.dev/get-started/install/linux)
   and follow the instructions there.
 
-### Step 3: Get the app's source code
+#### Step 3: Get the app's source code
 
 If you were given a link to this project on GitHub, download it — click the
 green **Code** button, then **Download ZIP**, then unzip it somewhere easy to
@@ -225,7 +263,7 @@ find, like your Desktop.
 
 (If you were sent a `.zip` file directly instead, just unzip that.)
 
-### Step 4: Open a terminal in the project folder
+#### Step 4: Open a terminal in the project folder
 
 - **On a Mac:** in Terminal, type `cd ` (with a space), then drag the
   unzipped folder into the window and press Return.
@@ -246,7 +284,7 @@ flutter --version
 
 If that prints a version number, Flutter is working.
 
-### Step 5: Accept Android SDK licenses and fetch dependencies
+#### Step 5: Accept Android SDK licenses and fetch dependencies
 
 ```
 flutter doctor --android-licenses
@@ -258,7 +296,7 @@ Type `y` and press Return for each license it shows you. Then:
 flutter pub get
 ```
 
-### Step 6: Connect your Android phone
+#### Step 6: Connect your Android phone
 
 1. On your phone, go to **Settings → About phone**, find **Build number**,
    and tap it 7 times — this unlocks **Developer options**.
@@ -272,7 +310,7 @@ flutter pub get
    ```
    Your phone should be listed by name.
 
-### Step 7: Build and install to your phone
+#### Step 7: Build and install to your phone
 
 ```
 flutter run --release
