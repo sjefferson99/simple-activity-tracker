@@ -21,8 +21,8 @@ class ExportHelpScreen extends StatelessWidget {
           children: [
             Text(
               Platform.isIOS
-                  ? 'Every activity is saved as a GPX file — a standard format most mapping and running sites can open. On iPhone, it lives in the Files app.'
-                  : 'Every activity is saved as a GPX file — a standard format most mapping and running sites can open. On Android, a copy is placed in your Downloads folder so you can find it easily.',
+                  ? 'Every activity is saved as a GPX file — a standard format most mapping and fitness sites can open. On iPhone, it lives in the Files app.'
+                  : 'Every activity is saved as a GPX file — a standard format most mapping and fitness sites can open. On Android, a copy is placed in your Downloads folder so you can find it easily.',
               style: Theme.of(context).textTheme.bodyLarge,
             ),
             const SizedBox(height: 28),

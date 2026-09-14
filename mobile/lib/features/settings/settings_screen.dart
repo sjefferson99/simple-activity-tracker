@@ -391,8 +391,8 @@ class _SplitPreferenceSection extends ConsumerWidget {
         Text('Splits', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         Text(
-          'Choose how splits are measured for new runs, recorded with each '
-          'run and used as the default when viewing it on the web.',
+          'Choose how splits are measured for new activities, recorded with '
+          'each activity and used as the default when viewing it on the web.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 12),
