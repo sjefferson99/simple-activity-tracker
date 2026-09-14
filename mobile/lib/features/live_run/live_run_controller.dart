@@ -18,6 +18,7 @@ import '../../core/sync/file_run_store.dart';
 import '../../core/sync/sync_service.dart';
 import '../../core/tracking/activity_mode_controller.dart';
 import '../../core/tracking/split_preference_controller.dart';
+import '../../core/units/units.dart' show DistanceUnit;
 import '../../domain/geo_math.dart';
 import '../../domain/models/live_metrics.dart';
 import '../../domain/models/run_record.dart';
@@ -213,6 +214,8 @@ class LiveRunController extends Notifier<LiveRunState> {
     final clientRunId = _clientRunId;
     final startedAt = _startedAt;
     final activityMode = _activityMode;
+    final distanceUnit =
+        _splitPreference?.effectiveDistanceUnit ?? DistanceUnit.km;
     final finishedRunToken = _runToken;
     await _disposeRun();
 
@@ -253,6 +256,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     state = LiveRunFinished(
       metrics: metrics,
       activityMode: activityMode ?? ActivityMode.running,
+      distanceUnit: distanceUnit,
       clientRunId: clientRunId,
     );
     // Fire-and-forget — a slow or failed upload must never delay the
@@ -387,6 +391,7 @@ class LiveRunController extends Notifier<LiveRunState> {
       // only ever null before a run has started, at which point nothing
       // reaches LiveRunActive.
       activityMode: _activityMode ?? ActivityMode.running,
+      distanceUnit: _splitPreference?.effectiveDistanceUnit ?? DistanceUnit.km,
     );
   }
 }

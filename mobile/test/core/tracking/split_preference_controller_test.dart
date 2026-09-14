@@ -4,6 +4,8 @@ import 'package:flutter_secure_storage/test/test_flutter_secure_storage_platform
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:simple_activity_tracker/core/tracking/split_preference_controller.dart';
+import 'package:simple_activity_tracker/core/units/units.dart'
+    show DistanceUnit;
 import 'package:simple_activity_tracker/domain/tracking/split_preference.dart';
 
 ProviderContainer _container(Map<String, String> backing) {
@@ -16,23 +18,20 @@ ProviderContainer _container(Map<String, String> backing) {
 }
 
 void main() {
-  test(
-    'defaults to 1km before storage has loaded, and stays there with nothing stored',
-    () async {
-      final container = _container({});
-      expect(
-        container.read(splitPreferenceControllerProvider),
-        SplitPreference.defaultPreference,
-      );
+  test('defaults to 1km before storage has loaded, and stays there with nothing stored', () async {
+    final container = _container({});
+    expect(
+      container.read(splitPreferenceControllerProvider),
+      SplitPreference.defaultPreference,
+    );
 
-      // Let the async _load() in build() resolve.
-      await pumpEventQueue();
-      expect(
-        container.read(splitPreferenceControllerProvider),
-        SplitPreference.defaultPreference,
-      );
-    },
-  );
+    // Let the async _load() in build() resolve.
+    await pumpEventQueue();
+    expect(
+      container.read(splitPreferenceControllerProvider),
+      SplitPreference.defaultPreference,
+    );
+  });
 
   test('loads a previously persisted preference on build', () async {
     final container = _container({
@@ -106,6 +105,69 @@ void main() {
       expect(
         container.read(splitPreferenceControllerProvider),
         const SplitPreference(kind: SplitKind.distanceKm, value: 3),
+      );
+    },
+  );
+
+  test(
+    'select persists timeSplitDisplayUnit and a fresh controller loads it',
+    () async {
+      final container = _container({});
+      await container
+          .read(splitPreferenceControllerProvider.notifier)
+          .select(
+            const SplitPreference(
+              kind: SplitKind.timeMin,
+              value: 5,
+              timeSplitDisplayUnit: DistanceUnit.mi,
+            ),
+          );
+
+      expect(
+        container.read(splitPreferenceControllerProvider),
+        const SplitPreference(
+          kind: SplitKind.timeMin,
+          value: 5,
+          timeSplitDisplayUnit: DistanceUnit.mi,
+        ),
+      );
+
+      final storage = const FlutterSecureStorage();
+      expect(await storage.read(key: 'split_time_display_unit'), 'mi');
+
+      // A fresh controller (simulating an app restart) picks up the same
+      // backing store and loads the persisted display unit.
+      final restarted = _container(await storage.readAll());
+      restarted.read(splitPreferenceControllerProvider);
+      await pumpEventQueue();
+      expect(
+        restarted.read(splitPreferenceControllerProvider),
+        const SplitPreference(
+          kind: SplitKind.timeMin,
+          value: 5,
+          timeSplitDisplayUnit: DistanceUnit.mi,
+        ),
+      );
+    },
+  );
+
+  test(
+    'defaults timeSplitDisplayUnit to km when nothing is stored for it',
+    () async {
+      final container = _container({
+        'split_kind': 'time_min',
+        'split_value': '10',
+      });
+      container.read(splitPreferenceControllerProvider);
+      await pumpEventQueue();
+
+      expect(
+        container.read(splitPreferenceControllerProvider),
+        const SplitPreference(kind: SplitKind.timeMin, value: 10),
+      );
+      expect(
+        container.read(splitPreferenceControllerProvider).timeSplitDisplayUnit,
+        DistanceUnit.km,
       );
     },
   );

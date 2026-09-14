@@ -1,15 +1,65 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:simple_activity_tracker/core/units/units.dart'
+    show DistanceUnit;
 import 'package:simple_activity_tracker/domain/tracking/split_preference.dart';
 
 void main() {
+  group('effectiveDistanceUnit', () {
+    test('a km split is always km, regardless of timeSplitDisplayUnit', () {
+      expect(
+        const SplitPreference(
+          kind: SplitKind.distanceKm,
+          value: 1,
+          timeSplitDisplayUnit: DistanceUnit.mi,
+        ).effectiveDistanceUnit,
+        DistanceUnit.km,
+      );
+    });
+
+    test('a mile split is always mi, regardless of timeSplitDisplayUnit', () {
+      expect(
+        const SplitPreference(
+          kind: SplitKind.distanceMi,
+          value: 1,
+          timeSplitDisplayUnit: DistanceUnit.km,
+        ).effectiveDistanceUnit,
+        DistanceUnit.mi,
+      );
+    });
+
+    test('a time split follows timeSplitDisplayUnit', () {
+      expect(
+        const SplitPreference(
+          kind: SplitKind.timeMin,
+          value: 5,
+          timeSplitDisplayUnit: DistanceUnit.mi,
+        ).effectiveDistanceUnit,
+        DistanceUnit.mi,
+      );
+      expect(
+        const SplitPreference(
+          kind: SplitKind.timeMin,
+          value: 5,
+        ).effectiveDistanceUnit,
+        DistanceUnit.km,
+      );
+    });
+  });
+
   group('gpxSplitType', () {
     test('maps each SplitKind to its wire value', () {
       expect(
-        const SplitPreference(kind: SplitKind.distanceKm, value: 1).gpxSplitType,
+        const SplitPreference(
+          kind: SplitKind.distanceKm,
+          value: 1,
+        ).gpxSplitType,
         'distance_km',
       );
       expect(
-        const SplitPreference(kind: SplitKind.distanceMi, value: 1).gpxSplitType,
+        const SplitPreference(
+          kind: SplitKind.distanceMi,
+          value: 1,
+        ).gpxSplitType,
         'distance_mi',
       );
       expect(
@@ -34,11 +84,13 @@ void main() {
       );
     });
 
-    test('round-trips a valid time_min pair', () {
+    test('round-trips a valid time_min pair, defaulting to km display', () {
+      final preference = SplitPreference.fromGpxValues('time_min', '10');
       expect(
-        SplitPreference.fromGpxValues('time_min', '10'),
+        preference,
         const SplitPreference(kind: SplitKind.timeMin, value: 10),
       );
+      expect(preference!.timeSplitDisplayUnit, DistanceUnit.km);
     });
 
     test('returns null for an unrecognized split type', () {
