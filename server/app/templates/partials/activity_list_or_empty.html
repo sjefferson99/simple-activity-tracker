@@ -1,11 +1,20 @@
 {% if total %}
 <div id="activity-list-region">
+  {% include "partials/activity_filter_errors.html" %}
   {% include "partials/activity_list_controls.html" %}
   <div class="card" id="activity-list">
     <div id="activity-list-spinner" class="list-loading-spinner" role="status" aria-label="Loading"></div>
     {% include "partials/activity_list_items.html" %}
   </div>
   {% include "partials/activity_list_pagination.html" %}
+</div>
+{% elif filters_active %}
+<div id="activity-list-region">
+  {% include "partials/activity_filter_errors.html" %}
+  <div class="card empty-state">
+    <p>No activities match your search.</p>
+    <p><a href="/">Clear filters</a> to see every activity.</p>
+  </div>
 </div>
 {% else %}
 <div id="activity-list-region">

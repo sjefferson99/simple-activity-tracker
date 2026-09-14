@@ -5,14 +5,52 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, Protocol
 
-from sqlalchemy import UnaryExpression, func, select
+from sqlalchemy import Select, UnaryExpression, exists, func, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.selectable import Exists
 
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis
+from app.models.tag import Tag, activity_tags
 
 ActivityListSort = Literal["date", "distance"]
 ActivityListDirection = Literal["asc", "desc"]
+
+# LIKE needs its wildcard/escape characters escaped in user-supplied text, or
+# a search for a literal "%" or "_" would behave as a wildcard instead —
+# see ActivityListFilters/_apply_filters below.
+_LIKE_ESCAPE = "\\"
+_MAX_TEXT_TERMS = 10
+_MAX_TEXT_CHARS = 200
+
+
+def _escape_like(term: str) -> str:
+    return (
+        term.replace(_LIKE_ESCAPE, _LIKE_ESCAPE * 2)
+        .replace("%", f"{_LIKE_ESCAPE}%")
+        .replace("_", f"{_LIKE_ESCAPE}_")
+    )
+
+
+@dataclass(frozen=True)
+class ActivityListFilters:
+    """Optional filters for `list_for_user_page` (issue #76). Every field
+    defaults to "no filter" so existing callers (and every pre-#76 test) are
+    unaffected. `text` matches title, notes, or any attached tag's name —
+    every whitespace-separated term must match *something* (not necessarily
+    the same column), case-insensitively. `min_m`/`max_m` bound the same
+    denormalized distance the list already sorts and displays (issue #75).
+    The location filter (lat/lon/radius/geo) arrives in a follow-up PR."""
+
+    text: str | None = None
+    min_m: float | None = None
+    max_m: float | None = None
+
+    def is_active(self) -> bool:
+        return bool(self.text) or self.min_m is not None or self.max_m is not None
+
+
+_NO_FILTERS = ActivityListFilters()
 
 
 class InvalidCursorError(ValueError):
@@ -71,6 +109,7 @@ class ActivityRepository(Protocol):
         per_page: int | None,
         sort: ActivityListSort,
         direction: ActivityListDirection,
+        filters: ActivityListFilters = _NO_FILTERS,
     ) -> ActivityListPage: ...
     def delete(self, activity: Activity) -> None: ...
 
@@ -120,19 +159,27 @@ class SqlAlchemyActivityRepository:
         per_page: int | None,
         sort: ActivityListSort,
         direction: ActivityListDirection,
+        filters: ActivityListFilters = _NO_FILTERS,
     ) -> ActivityListPage:
-        """Page-numbered, sortable listing for the web activity list (issue
-        #75) — a LEFT JOIN against activity_analyses so activities with no
-        analysis row yet (upload/analysis failed) still appear, sorted as if
-        their distance were 0 (see ActivityAnalysis.distance_meters' own
-        default, which this mirrors via COALESCE for pre-migration rows).
-        `page` is clamped to the real last page here (not just floored to 1
-        by the caller) so a stale/out-of-range page number — a bookmarked
-        URL, or activities deleted since — costs one extra query at most,
-        never a second full page+count round trip."""
-        total = self._session.execute(
-            select(func.count(Activity.id)).where(Activity.user_id == user_id)
-        ).scalar_one()
+        """Page-numbered, sortable, filterable listing for the web activity
+        list (issues #75, #76) — a LEFT JOIN against activity_analyses so
+        activities with no analysis row yet (upload/analysis failed) still
+        appear, sorted/filtered as if their distance were 0 (see
+        ActivityAnalysis.distance_meters' own default, which this mirrors
+        via COALESCE for pre-migration rows). `page` is clamped to the real
+        last page here (not just floored to 1 by the caller) so a stale/
+        out-of-range page number — a bookmarked URL, activities deleted
+        since, or a filter that now matches fewer rows — costs one extra
+        query at most, never a second full page+count round trip.
+
+        The count and page queries are both derived from one filtered base
+        statement (`_filtered_base`) so they can never drift apart — a bug
+        where the count ignored a filter the page query applied (or vice
+        versa) would silently show the wrong total_pages/total."""
+        base = self._filtered_base(user_id, filters)
+        base_subquery = base.subquery()
+
+        total = self._session.execute(select(func.count()).select_from(base_subquery)).scalar_one()
 
         effective_per_page = per_page if per_page is not None else max(total, 1)
         total_pages = max(1, -(-total // effective_per_page))
@@ -152,8 +199,9 @@ class SqlAlchemyActivityRepository:
 
         stmt = (
             select(Activity, ActivityAnalysis)
+            .select_from(base_subquery)
+            .join(Activity, Activity.id == base_subquery.c.id)
             .outerjoin(ActivityAnalysis, ActivityAnalysis.activity_id == Activity.id)
-            .where(Activity.user_id == user_id)
             .order_by(primary_order, tiebreaker)
             .offset((page - 1) * per_page if per_page is not None else 0)
         )
@@ -168,6 +216,49 @@ class SqlAlchemyActivityRepository:
             per_page=per_page,
             total_pages=total_pages,
         )
+
+    def _filtered_base(self, user_id: str, filters: ActivityListFilters) -> Select[tuple[str]]:
+        """The set of activity ids matching `user_id` plus every active
+        filter — the single source of truth both the count and the page
+        query in list_for_user_page build on, so they can't disagree about
+        which rows match. Selects just `Activity.id`: the outer queries
+        re-select the full rows/columns they need, this only decides *which*
+        ones."""
+        stmt = (
+            select(Activity.id)
+            .outerjoin(ActivityAnalysis, ActivityAnalysis.activity_id == Activity.id)
+            .where(Activity.user_id == user_id)
+        )
+
+        if filters.text:
+            terms = filters.text.split()[:_MAX_TEXT_TERMS]
+            for term in terms:
+                term = term[:_MAX_TEXT_CHARS]
+                pattern = f"%{_escape_like(term.lower())}%"
+                tag_match: Exists = exists(
+                    select(1)
+                    .select_from(activity_tags)
+                    .join(Tag, Tag.id == activity_tags.c.tag_id)
+                    .where(
+                        activity_tags.c.activity_id == Activity.id,
+                        func.lower(Tag.name).like(pattern, escape=_LIKE_ESCAPE),
+                    )
+                )
+                stmt = stmt.where(
+                    or_(
+                        func.lower(Activity.title).like(pattern, escape=_LIKE_ESCAPE),
+                        func.lower(Activity.notes).like(pattern, escape=_LIKE_ESCAPE),
+                        tag_match,
+                    )
+                )
+
+        distance = func.coalesce(ActivityAnalysis.distance_meters, 0.0)
+        if filters.min_m is not None:
+            stmt = stmt.where(distance >= filters.min_m)
+        if filters.max_m is not None:
+            stmt = stmt.where(distance <= filters.max_m)
+
+        return stmt
 
     def delete(self, activity: Activity) -> None:
         self._session.delete(activity)
