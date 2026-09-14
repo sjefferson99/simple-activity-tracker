@@ -1,6 +1,8 @@
 import '../../core/units/units.dart';
+import '../../domain/models/current_split_info.dart';
 import '../../domain/models/live_metrics.dart';
 import '../../domain/tracking/activity_mode.dart';
+import '../../domain/tracking/split_target.dart';
 
 /// Describes one metric tile: how to label it and how to derive its display
 /// string from the current run state. The Phase 1 layout below is a fixed
@@ -28,11 +30,23 @@ class MetricSpec {
   )
   valueOf;
 
+  /// A second line of text under [valueOf]'s value (issue #99) — the split's
+  /// size/target and, once a verdict is available, the delta text. Null for
+  /// every tile except the split tiles.
+  final String? Function(LiveMetrics metrics, SpeedUnit unit)? detail;
+
+  /// Whether this tile's split is on/off its target, driving the tile's
+  /// background tint (issue #99) — null when there is no target (or no
+  /// tile-level notion of a target at all, i.e. every non-split tile).
+  final SplitVerdict? Function(LiveMetrics metrics)? verdict;
+
   const MetricSpec({
     required this.id,
     required this.label,
     required this.description,
     required this.valueOf,
+    this.detail,
+    this.verdict,
   });
 }
 
@@ -75,19 +89,53 @@ final MetricSpec _distanceSpec = MetricSpec(
       '${formatDistanceMi(metrics.distanceMeters)} mi',
 );
 
+/// The current split's average speed so far, by moving time — null if the
+/// split has had no moving time yet. This is the figure both the tile's
+/// value and its target verdict are judged on (issue #99): never
+/// instantaneous/chip speed, which is too noisy to color a tile with.
+double? _currentSplitAvgSpeedMps(LiveMetrics metrics) {
+  final elapsedSeconds = metrics.currentSplitElapsed.inMilliseconds / 1000;
+  return elapsedSeconds <= 0
+      ? null
+      : metrics.currentSplitDistanceMeters / elapsedSeconds;
+}
+
+String _formatSplitSize(CurrentSplitInfo split, SpeedUnit unit) =>
+    switch (split.sizeKind) {
+      SplitSizeKind.distanceMeters =>
+        formatSplitSizeMeters(split.size, unit.distanceUnit),
+      SplitSizeKind.durationSeconds => formatSplitSizeSeconds(split.size),
+    };
+
 final MetricSpec _currentSplitSpec = MetricSpec(
   id: 'current_split',
   label: (unit) => unit.isPace ? 'Split pace' : 'Split speed',
   description:
       'Pace or speed over the current split so far, by moving time. Resets '
-      'at each split boundary.',
-  valueOf: (metrics, currentSpeedMps, unit) {
-    final elapsedSeconds = metrics.currentSplitElapsed.inMilliseconds / 1000;
-    final speed = elapsedSeconds <= 0
-        ? null
-        : metrics.currentSplitDistanceMeters / elapsedSeconds;
-    return formatSpeedOrPace(speed, unit);
+      'at each split boundary. When the split has a target, the tile turns '
+      'green when you are within 5% of it and red otherwise, with an arrow '
+      'showing which way to adjust.',
+  valueOf: (metrics, currentSpeedMps, unit) =>
+      formatSpeedOrPace(_currentSplitAvgSpeedMps(metrics), unit),
+  detail: (metrics, unit) {
+    final split = metrics.currentSplit;
+    final sizeText = _formatSplitSize(split, unit);
+    final countText = split.plannedCount != null
+        ? '${split.index}/${split.plannedCount}'
+        : '${split.index}';
+    final header = 'Split $countText · $sizeText';
+    final target = split.targetSpeedMps;
+    if (target == null) return header;
+
+    final avg = _currentSplitAvgSpeedMps(metrics);
+    if (avg == null) return '$header @ ${formatTargetForEditing(target, unit)}';
+    return '$header\n${formatSpeedDelta(avg, target, unit)}';
   },
+  verdict: (metrics) => splitVerdict(
+    avgSpeedMps: _currentSplitAvgSpeedMps(metrics),
+    targetSpeedMps: metrics.currentSplit.targetSpeedMps,
+    elapsedInSplit: metrics.currentSplitElapsed,
+  ),
 );
 
 final MetricSpec _lastSplitSpec = MetricSpec(
@@ -98,12 +146,36 @@ final MetricSpec _lastSplitSpec = MetricSpec(
       'time-based split preference every split has the same fixed duration, '
       // #78: showing that duration told the user nothing new — pace/speed
       // is the number that actually varies split-to-split there.
-      'so pace/speed (not duration) is what actually varies split-to-split.',
+      'so pace/speed (not duration) is what actually varies split-to-split. '
+      'When the split had a target, green/red shows whether it was met.',
   valueOf: (metrics, currentSpeedMps, unit) {
     final last = metrics.lastCompletedSplit;
     if (last == null) return formatSpeedOrPace(null, unit);
     // Split.index is already 1-based (see MetricsEngine).
     return '#${last.index}  ${formatSpeedOrPace(last.avgSpeedMps, unit)}';
+  },
+  detail: (metrics, unit) {
+    final last = metrics.lastCompletedSplit;
+    final target = last?.targetSpeedMps;
+    if (last == null || target == null) return null;
+    return formatSpeedDelta(last.avgSpeedMps, target, unit);
+  },
+  verdict: (metrics) {
+    final last = metrics.lastCompletedSplit;
+    if (last == null) return null;
+    // splitVerdict still applies its grace threshold against the split's
+    // own duration — for any split long enough to be worth targeting in
+    // practice this always passes, since a completed split's average is
+    // already its final, settled figure (unlike the in-progress split
+    // tile, whose grace exists because its average is still noisy this
+    // early). A custom plan could in principle define a split shorter than
+    // the grace period, in which case it simply shows no verdict, the same
+    // as it would have while in progress.
+    return splitVerdict(
+      avgSpeedMps: last.avgSpeedMps,
+      targetSpeedMps: last.targetSpeedMps,
+      elapsedInSplit: last.duration,
+    );
   },
 );
 

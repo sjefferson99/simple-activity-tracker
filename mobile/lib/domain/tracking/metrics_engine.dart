@@ -1,11 +1,12 @@
 import '../geo_math.dart';
+import '../models/current_split_info.dart';
 import '../models/live_metrics.dart';
 import '../models/split.dart';
 import '../models/track_point.dart';
 import 'activity_mode.dart';
+import 'split_plan.dart';
 import 'split_preference.dart';
 
-const double _metersPerMile = 1609.344;
 const double _maxAcceptableAccuracyMeters = 25;
 
 /// The two plausibility thresholds [MetricsEngine] checks every accepted
@@ -172,26 +173,26 @@ class _StationaryDetector {
 class MetricsEngine {
   final _PlausibilityLimits _limits;
 
-  /// The split boundary this run is measured against — resolved once at
-  /// construction from [splitPreference] into either a distance (km/mi) or a
-  /// duration (minutes), never both. Read-once-at-start, same as [mode]: a
-  /// mid-run preference change (disabled in the UI, but this is the actual
-  /// guarantee) can't affect an in-progress run.
-  final double? _splitDistanceMeters;
-  final Duration? _splitDurationTarget;
+  /// The split plan this run is measured against — read once at
+  /// construction, same as [mode]: a mid-run preference change (disabled in
+  /// the UI, but this is the actual guarantee) can't affect an in-progress
+  /// run. Whether splits are sized by distance (km/mi) or duration (minutes)
+  /// comes from [SplitPlan.base]'s kind, never both.
+  final SplitPlan _plan;
+  final bool _isTimeMode;
 
   MetricsEngine({
     ActivityMode mode = ActivityMode.running,
-    SplitPreference splitPreference = SplitPreference.defaultPreference,
+    SplitPlan splitPlan = SplitPlan.defaultPlan,
+    SplitPreference? splitPreference,
   }) : _limits = _PlausibilityLimits.forMode(mode),
-       _splitDistanceMeters = switch (splitPreference.kind) {
-         SplitKind.distanceKm => splitPreference.value * 1000.0,
-         SplitKind.distanceMi => splitPreference.value * _metersPerMile,
-         SplitKind.timeMin => null,
-       },
-       _splitDurationTarget = splitPreference.kind == SplitKind.timeMin
-           ? Duration(minutes: splitPreference.value)
-           : null;
+       // splitPreference is kept as a convenience wrapper for callers/tests
+       // that only need a rolling plan — it wins over splitPlan if both are
+       // given, which should never happen outside a test double.
+       _plan = splitPreference != null
+           ? SplitPlan(base: splitPreference)
+           : splitPlan,
+       _isTimeMode = (splitPreference ?? splitPlan.base).kind == SplitKind.timeMin;
 
   final _StationaryDetector _stationaryDetector = _StationaryDetector();
   TrackPoint? _lastAccepted;
@@ -362,24 +363,34 @@ class MetricsEngine {
   }
 
   void _applySegment(double segmentDistance, Duration segmentDuration) {
-    if (_splitDurationTarget != null) {
+    if (_isTimeMode) {
       _applySegmentTimeMode(segmentDistance, segmentDuration);
     } else {
       _applySegmentDistanceMode(segmentDistance, segmentDuration);
     }
   }
 
+  /// Splits may vary in size (issue #99's custom plans), so each loop
+  /// iteration below looks up the size of the split it is about to
+  /// complete — [_plan.sizeOf]/[_plan.targetOf] with `_completedSplits.
+  /// length` as the 0-based index of the split-in-progress — rather than
+  /// reusing one constant across the whole run. This matters even for a
+  /// plain rolling plan, which is just every index mapping to the same
+  /// size/target, but is essential for a custom plan: a single GPS gap can
+  /// straddle several short splits of *different* sizes, and each one must
+  /// be closed at its own boundary, not the previous split's.
   void _applySegmentDistanceMode(
     double segmentDistance,
     Duration segmentDuration,
   ) {
-    final splitDistanceMeters = _splitDistanceMeters!;
     var remainingDistance = segmentDistance;
     var elapsedBefore = _movingElapsed;
+    var splitDistanceMeters = _plan.sizeOf(_completedSplits.length);
 
     while (_totalDistanceMeters + remainingDistance >=
             _splitStartDistanceMeters + splitDistanceMeters &&
         remainingDistance > 0) {
+      final splitIndex = _completedSplits.length;
       final distanceIntoSplit =
           (_splitStartDistanceMeters + splitDistanceMeters) -
           _totalDistanceMeters;
@@ -390,7 +401,7 @@ class MetricsEngine {
       final splitDuration = crossingElapsed - _splitStartElapsed;
       _completedSplits.add(
         Split(
-          index: _completedSplits.length + 1,
+          index: splitIndex + 1,
           duration: splitDuration,
           // A split covering measurable distance in no measurable time would
           // divide by zero; report 0 rather than an infinite pace.
@@ -398,6 +409,7 @@ class MetricsEngine {
               ? splitDistanceMeters / splitDuration.inMilliseconds * 1000
               : 0,
           distanceMeters: splitDistanceMeters,
+          targetSpeedMps: _plan.targetOf(splitIndex),
         ),
       );
 
@@ -408,6 +420,9 @@ class MetricsEngine {
 
       remainingDistance -= distanceIntoSplit;
       segmentDuration = segmentDuration - crossingDuration;
+      // Re-evaluated for the *next* split, now that this one is complete —
+      // the size a custom plan gives split N+1 may differ from split N's.
+      splitDistanceMeters = _plan.sizeOf(_completedSplits.length);
     }
 
     _totalDistanceMeters += remainingDistance;
@@ -417,15 +432,17 @@ class MetricsEngine {
   /// The mirror image of [_applySegmentDistanceMode]: the boundary is a
   /// fixed elapsed-time target, so instead of interpolating the crossing
   /// *time* by fraction of the segment's distance, this interpolates the
-  /// crossing *distance* by fraction of the segment's duration.
+  /// crossing *distance* by fraction of the segment's duration. See that
+  /// method's doc for why the split size is looked up fresh each iteration.
   void _applySegmentTimeMode(double segmentDistance, Duration segmentDuration) {
-    final splitDurationTarget = _splitDurationTarget!;
     var remainingDuration = segmentDuration;
     var distanceBefore = _totalDistanceMeters;
+    var splitDurationTarget = _durationOf(_completedSplits.length);
 
     while (_movingElapsed + remainingDuration >=
             _splitStartElapsed + splitDurationTarget &&
         remainingDuration > Duration.zero) {
+      final splitIndex = _completedSplits.length;
       final durationIntoSplit =
           (_splitStartElapsed + splitDurationTarget) - _movingElapsed;
       final fraction =
@@ -436,17 +453,18 @@ class MetricsEngine {
       final splitDistance = crossingTotalDistance - _splitStartDistanceMeters;
       _completedSplits.add(
         Split(
-          index: _completedSplits.length + 1,
+          index: splitIndex + 1,
           duration: splitDurationTarget,
           // A split covering measurable distance in no measurable time would
           // divide by zero; report 0 rather than an infinite pace. Not
-          // reachable today (splitDurationTarget is always >=1 minute, per
-          // SplitPreference's positive-int contract) but guarded the same
-          // way as the distance-mode branch above for symmetry.
+          // reachable with a rolling plan (whole minutes, always >=1) but a
+          // custom time plan's size is caller-validated to be > 0 seconds
+          // too — guarded here for symmetry with the distance-mode branch.
           avgSpeedMps: splitDurationTarget.inMilliseconds > 0
               ? splitDistance / splitDurationTarget.inMilliseconds * 1000
               : 0,
           distanceMeters: splitDistance,
+          targetSpeedMps: _plan.targetOf(splitIndex),
         ),
       );
 
@@ -457,11 +475,20 @@ class MetricsEngine {
 
       remainingDuration -= durationIntoSplit;
       segmentDistance -= crossingDistance;
+      splitDurationTarget = _durationOf(_completedSplits.length);
     }
 
     _totalDistanceMeters = distanceBefore + segmentDistance;
     _movingElapsed += remainingDuration;
   }
+
+  /// [_plan.sizeOf] returns seconds for a time-kind plan — converted here
+  /// rather than in [SplitPlan] itself, which stays Duration-agnostic so it
+  /// can express distance-kind sizes in the same `double` shape.
+  Duration _durationOf(int splitIndex) => Duration(
+    microseconds: (_plan.sizeOf(splitIndex) * Duration.microsecondsPerSecond)
+        .round(),
+  );
 
   double? _avgSpeedMps() {
     if (_movingElapsed <= Duration.zero) return null;
@@ -469,6 +496,7 @@ class MetricsEngine {
   }
 
   LiveMetrics _buildMetrics() {
+    final splitIndex = _completedSplits.length;
     return LiveMetrics(
       elapsed: _movingElapsed,
       distanceMeters: _totalDistanceMeters,
@@ -477,6 +505,15 @@ class MetricsEngine {
       currentSplitElapsed: _movingElapsed - _splitStartElapsed,
       currentSplitDistanceMeters:
           _totalDistanceMeters - _splitStartDistanceMeters,
+      currentSplit: CurrentSplitInfo(
+        index: splitIndex + 1,
+        plannedCount: _plan.plannedCount,
+        sizeKind: _isTimeMode
+            ? SplitSizeKind.durationSeconds
+            : SplitSizeKind.distanceMeters,
+        size: _plan.sizeOf(splitIndex),
+        targetSpeedMps: _plan.targetOf(splitIndex),
+      ),
       maxSpeedMps: _maxSpeedMps,
       elevationGainMeters: _elevationGainMeters,
     );

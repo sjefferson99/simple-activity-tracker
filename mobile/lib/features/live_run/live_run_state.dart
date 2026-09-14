@@ -44,6 +44,11 @@ class LiveRunActive extends LiveRunState {
   /// run's whole duration, same rationale as [activityMode].
   final DistanceUnit distanceUnit;
 
+  /// This run's "targets as pace/speed" preference at start() (issue #99),
+  /// used only to seed the speed/pace toggle's initial member — fixed for
+  /// the run's whole duration, same rationale as [activityMode].
+  final bool prefersPace;
+
   const LiveRunActive({
     required this.phase,
     required this.speedMps,
@@ -51,6 +56,7 @@ class LiveRunActive extends LiveRunState {
     required this.metrics,
     required this.activityMode,
     required this.distanceUnit,
+    this.prefersPace = true,
   });
 }
 
@@ -64,6 +70,10 @@ class LiveRunFinished extends LiveRunState {
   /// The distance unit the finished run was recorded under — see
   /// [LiveRunActive.distanceUnit].
   final DistanceUnit distanceUnit;
+
+  /// The "targets as pace/speed" preference the run was recorded under —
+  /// see [LiveRunActive.prefersPace].
+  final bool prefersPace;
 
   /// Where the exported copy of this run's GPX file was written, in
   /// human-readable form (e.g. "Downloads/SimpleActivityTracker"), for showing in the
@@ -83,6 +93,7 @@ class LiveRunFinished extends LiveRunState {
     required this.metrics,
     required this.activityMode,
     required this.distanceUnit,
+    this.prefersPace = true,
     this.exportedTo,
     this.clientRunId,
   });
@@ -91,6 +102,7 @@ class LiveRunFinished extends LiveRunState {
     metrics: metrics,
     activityMode: activityMode,
     distanceUnit: distanceUnit,
+    prefersPace: prefersPace,
     exportedTo: exportedTo ?? this.exportedTo,
     clientRunId: clientRunId,
   );

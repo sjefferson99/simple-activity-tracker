@@ -138,3 +138,145 @@ String formatSpeedOrPace(double? mps, SpeedUnit unit) {
 }
 
 String _paceSuffix(SpeedUnit unit) => unit == SpeedUnit.minMi ? 'mi' : 'km';
+
+/// Formats how far off target [avgMps] is from [targetMps], as the
+/// correction the runner should make (issue #99 D7) — the arrow always
+/// points the direction to move the *value being displayed*, not "up" for
+/// faster: too fast means slow down (▼ for speed, but for pace a slower
+/// pace is a *higher* number, so the pace arrow is ▲ in that case — see
+/// below), too slow means speed up. Returns "on target" within
+/// [splitTargetTolerance] of the target.
+///
+/// This is the delta as shown next to a split's actual pace/speed, not the
+/// on/off-target boolean itself — see `splitVerdict` in
+/// `domain/tracking/split_target.dart`, which this deliberately does not
+/// depend on (units.dart has no dependents in `domain/`, only the reverse).
+String formatSpeedDelta(double avgMps, double targetMps, SpeedUnit unit) {
+  const tolerance = 0.05; // mirrors splitTargetTolerance; duplicated to keep
+  // units.dart dependency-free of domain/tracking — see doc above.
+  final ratio = avgMps / targetMps;
+  if (ratio >= 1 - tolerance && ratio <= 1 + tolerance) return 'on target';
+
+  final tooFast = ratio > 1;
+  if (unit.isPace) {
+    // A faster pace is a *smaller* number (e.g. 4:30 is faster than 5:00),
+    // so "too fast" means the displayed pace value needs to go UP to slow
+    // down — arrow up. "Too slow" means the value needs to go DOWN to speed
+    // up — arrow down. This is the inverse of the speed-unit case below.
+    final avgPaceSec = unit == SpeedUnit.minMi
+        ? paceSecPerMileFromMps(avgMps)
+        : paceSecPerKmFromMps(avgMps);
+    final targetPaceSec = unit == SpeedUnit.minMi
+        ? paceSecPerMileFromMps(targetMps)
+        : paceSecPerKmFromMps(targetMps);
+    if (avgPaceSec == null || targetPaceSec == null) return 'on target';
+    final deltaSeconds = (avgPaceSec - targetPaceSec).abs().round();
+    final arrow = tooFast ? '▲' : '▼';
+    final direction = tooFast ? 'fast' : 'slow';
+    return '$arrow $deltaSeconds s/${_paceSuffix(unit)} $direction';
+  } else {
+    // A faster speed is a *larger* number, so "too fast" means the
+    // displayed value needs to go DOWN — arrow down. "Too slow" needs it to
+    // go UP — arrow up.
+    final avgDisplay = unit == SpeedUnit.mph ? mphFromMps(avgMps) : kmhFromMps(avgMps);
+    final targetDisplay = unit == SpeedUnit.mph
+        ? mphFromMps(targetMps)
+        : kmhFromMps(targetMps);
+    final delta = (avgDisplay - targetDisplay).abs();
+    final arrow = tooFast ? '▼' : '▲';
+    final direction = tooFast ? 'fast' : 'slow';
+    return '$arrow ${delta.toStringAsFixed(1)} ${unit.suffix} $direction';
+  }
+}
+
+/// Formats a split size for display — [sizeMeters] for a distance-kind
+/// split (whole metres under 1km/1mi, otherwise decimal km/mi matching
+/// [distanceUnit]) or [sizeSeconds] for a time-kind split (as `m:ss`).
+String formatSplitSizeMeters(double sizeMeters, DistanceUnit distanceUnit) {
+  if (distanceUnit == DistanceUnit.mi) {
+    final miles = milesFromMeters(sizeMeters);
+    if (miles < 0.1) return '${feetFromMeters(sizeMeters).round()} ft';
+    return '${_trimDecimal(miles)} mi';
+  }
+  if (sizeMeters < 1000) return '${sizeMeters.round()} m';
+  return '${_trimDecimal(sizeMeters / 1000)} km';
+}
+
+String formatSplitSizeSeconds(double sizeSeconds) =>
+    formatMinSec(Duration(milliseconds: (sizeSeconds * 1000).round()));
+
+/// Formats a decimal value trimmed of trailing zeros beyond 2 decimal
+/// places (e.g. "1", "1.5", "0.25"), used for split-size distances where a
+/// whole "1 km" reads better than "1.00 km".
+String _trimDecimal(double value) {
+  final fixed = value.toStringAsFixed(2);
+  return fixed.replaceFirst(RegExp(r'\.?0+$'), '');
+}
+
+/// Formats a duration as "m:ss" — used for split sizes/targets entered as a
+/// time (e.g. "1:30"), distinct from [formatDuration]'s "h:mm:ss" which
+/// omits the hour digit instead of always showing minutes.
+String formatMinSec(Duration duration) {
+  final totalSeconds = duration.inSeconds;
+  final minutes = totalSeconds ~/ 60;
+  final seconds = totalSeconds % 60;
+  return '$minutes:${seconds.toString().padLeft(2, '0')}';
+}
+
+/// Parses "m:ss" or "mm:ss" into a duration, or null if malformed (more
+/// than one colon, non-numeric parts, or seconds outside 0-59). A plain
+/// whole number with no colon at all (e.g. "5") is accepted as whole
+/// minutes ("5:00") — typing the colon is easy to forget on a phone
+/// keyboard, and "5" meaning "5 minutes" for a pace/duration field is the
+/// only reading a user would expect.
+Duration? parseMinSec(String text) {
+  final trimmed = text.trim();
+  final parts = trimmed.split(':');
+  if (parts.length == 1) {
+    final minutes = int.tryParse(parts[0]);
+    if (minutes == null || minutes < 0) return null;
+    return Duration(minutes: minutes);
+  }
+  if (parts.length != 2) return null;
+  final minutes = int.tryParse(parts[0]);
+  final seconds = int.tryParse(parts[1]);
+  if (minutes == null || seconds == null) return null;
+  if (minutes < 0 || seconds < 0 || seconds > 59) return null;
+  return Duration(minutes: minutes, seconds: seconds);
+}
+
+/// Parses a pace string ("m:ss", meaning minutes:seconds per km or mile —
+/// caller decides which via [unit]) into a speed in m/s, or null if
+/// malformed or zero. [unit] must be a pace-flavored member.
+double? parsePaceToMps(String text, SpeedUnit unit) {
+  assert(unit.isPace, 'parsePaceToMps expects a pace-flavored SpeedUnit');
+  final duration = parseMinSec(text);
+  if (duration == null || duration.inSeconds <= 0) return null;
+  final secondsPerUnit = duration.inSeconds.toDouble();
+  final metersPerUnit = unit == SpeedUnit.minMi ? _metersPerMile : 1000.0;
+  return metersPerUnit / secondsPerUnit;
+}
+
+/// Parses a plain decimal speed string (km/h or mph per [unit]) into m/s,
+/// or null if malformed or non-positive. [unit] must be a speed-flavored
+/// member.
+double? parseSpeedToMps(String text, SpeedUnit unit) {
+  assert(!unit.isPace, 'parseSpeedToMps expects a speed-flavored SpeedUnit');
+  final value = double.tryParse(text.trim());
+  if (value == null || value <= 0) return null;
+  return unit == SpeedUnit.mph ? value * _metersPerMile / 3600 : value / 3.6;
+}
+
+/// Formats a target speed ([targetMps]) for display in an editor field —
+/// pace as "m:ss", speed as a plain one-decimal number (no unit suffix,
+/// since the field's own label/segmented control already shows the unit).
+String formatTargetForEditing(double targetMps, SpeedUnit unit) {
+  if (unit.isPace) {
+    final paceSec = unit == SpeedUnit.minMi
+        ? paceSecPerMileFromMps(targetMps)
+        : paceSecPerKmFromMps(targetMps);
+    return formatPace(paceSec);
+  }
+  final display = unit == SpeedUnit.mph ? mphFromMps(targetMps) : kmhFromMps(targetMps);
+  return display.toStringAsFixed(1);
+}

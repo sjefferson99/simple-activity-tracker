@@ -17,7 +17,7 @@ import '../../core/location/location_service.dart';
 import '../../core/sync/file_run_store.dart';
 import '../../core/sync/sync_service.dart';
 import '../../core/tracking/activity_mode_controller.dart';
-import '../../core/tracking/split_preference_controller.dart';
+import '../../core/tracking/split_plan_controller.dart';
 import '../../core/units/units.dart' show DistanceUnit;
 import '../../domain/geo_math.dart';
 import '../../domain/models/live_metrics.dart';
@@ -29,7 +29,7 @@ import '../../domain/tracking/activity_mode.dart';
 import '../../domain/tracking/metrics_engine.dart';
 import '../../domain/tracking/run_clock.dart';
 import '../../domain/tracking/run_phase.dart';
-import '../../domain/tracking/split_preference.dart';
+import '../../domain/tracking/split_plan.dart';
 import 'live_run_state.dart';
 
 const _gpxFlushInterval = Duration(seconds: 5);
@@ -77,7 +77,7 @@ class LiveRunController extends Notifier<LiveRunState> {
   String? _clientRunId;
   DateTime? _startedAt;
   ActivityMode? _activityMode;
-  SplitPreference? _splitPreference;
+  SplitPlan? _splitPlan;
   String? _cachedAppVersion;
 
   // Bumped every time a run starts. stop() closes over the token for the
@@ -147,13 +147,13 @@ class LiveRunController extends Notifier<LiveRunState> {
     // captured value is reused at stop() for the RunRecord/RunSummary, since
     // the toggle may have moved on by then.
     _activityMode = ref.read(activityModeControllerProvider);
-    _splitPreference = ref.read(splitPreferenceControllerProvider);
+    _splitPlan = ref.read(splitPlanControllerProvider);
     _metricsEngine = MetricsEngine(
       mode: _activityMode!,
-      splitPreference: _splitPreference!,
+      splitPlan: _splitPlan!,
     );
     _currentGpxFile = await newRunGpxFile(DateTime.now());
-    _gpxLog = RunGpxLog(_currentGpxFile!, _splitPreference!);
+    _gpxLog = RunGpxLog(_currentGpxFile!, _splitPlan!);
     // A periodic flush that fails is not fatal: every flush rewrites the
     // whole track, so the next one recovers whatever this one missed.
     // Swallow it here rather than letting it surface as an unhandled error.
@@ -215,7 +215,8 @@ class LiveRunController extends Notifier<LiveRunState> {
     final startedAt = _startedAt;
     final activityMode = _activityMode;
     final distanceUnit =
-        _splitPreference?.effectiveDistanceUnit ?? DistanceUnit.km;
+        _splitPlan?.base.effectiveDistanceUnit ?? DistanceUnit.km;
+    final prefersPace = _splitPlan?.targetsAsPace ?? true;
     final finishedRunToken = _runToken;
     await _disposeRun();
 
@@ -251,12 +252,13 @@ class LiveRunController extends Notifier<LiveRunState> {
     _startedAt = null;
     _runClock = null;
     _activityMode = null;
-    _splitPreference = null;
+    _splitPlan = null;
 
     state = LiveRunFinished(
       metrics: metrics,
       activityMode: activityMode ?? ActivityMode.running,
       distanceUnit: distanceUnit,
+      prefersPace: prefersPace,
       clientRunId: clientRunId,
     );
     // Fire-and-forget — a slow or failed upload must never delay the
@@ -391,7 +393,8 @@ class LiveRunController extends Notifier<LiveRunState> {
       // only ever null before a run has started, at which point nothing
       // reaches LiveRunActive.
       activityMode: _activityMode ?? ActivityMode.running,
-      distanceUnit: _splitPreference?.effectiveDistanceUnit ?? DistanceUnit.km,
+      distanceUnit: _splitPlan?.base.effectiveDistanceUnit ?? DistanceUnit.km,
+      prefersPace: _splitPlan?.targetsAsPace ?? true,
     );
   }
 }

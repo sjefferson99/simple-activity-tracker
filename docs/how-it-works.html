@@ -731,12 +731,12 @@
       <div class="metric-card">
         <div class="mhead"><span class="mname">Split pace</span><span class="munit">current km in progress</span></div>
         <div class="mformula">distance into this km ÷ time<br>into this km, live</div>
-        <div class="mnote">Resets each time you cross a whole kilometre. The crossing moment itself is <em>interpolated</em> — see below — so it doesn't wait for the next GPS fix to land exactly on the line.</div>
+        <div class="mnote">Resets each time you cross a whole kilometre. The crossing moment itself is <em>interpolated</em> — see below — so it doesn't wait for the next GPS fix to land exactly on the line. If this split has a target, the tile turns green or red — see "Split targets" below.</div>
       </div>
       <div class="metric-card">
         <div class="mhead"><span class="mname">Last split</span><span class="munit">m:ss for that km</span></div>
         <div class="mformula">time at which the previous<br>km boundary was crossed</div>
-        <div class="mnote">Because the crossing time is interpolated between two real fixes, this is accurate to a fraction of a second — not rounded to whichever fix happened to land nearest the line.</div>
+        <div class="mnote">Because the crossing time is interpolated between two real fixes, this is accurate to a fraction of a second — not rounded to whichever fix happened to land nearest the line. If that split had a target, this tile is also tinted by whether it was met.</div>
       </div>
       <div class="metric-card">
         <div class="mhead"><span class="mname">Time</span><span class="munit">h:mm:ss</span></div>
@@ -747,6 +747,13 @@
 
     <div class="prose" style="margin-top:8px;">
       <p><strong>On that interpolation:</strong> say you're at 970&nbsp;m at one fix and 1,050&nbsp;m at the next, one second later. The 1&nbsp;km mark falls 75% of the way through that segment, so the app estimates you crossed it 750&nbsp;ms into that one-second gap — rather than crediting the whole split to whichever fix happened to land on either side of the line. This is also why a split time can differ slightly from what a simpler tracker would show for the identical GPS data.</p>
+    </div>
+
+    <h3 style="font-size:18px;margin:40px 0 16px;">Split targets</h3>
+    <div class="prose">
+      <p>Optionally, each split can carry a <strong>target pace or speed</strong>, set on the Splits screen before a run. Splits can either repeat at one fixed size ("every 1&nbsp;km", optionally all sharing one target) or follow a custom plan of individually sized splits with their own targets — an interval session of, say, 90&nbsp;seconds fast then 60&nbsp;seconds easy.</p>
+      <p>The Split pace tile is judged on the <strong>current split's average pace so far</strong> by moving time — the same number the tile already shows — never on the instantaneous speed reading above it, which is too noisy fix-to-fix to colour a tile with. It turns green when that average is within 5% of the target either way, and red outside that band, with an arrow showing which way to adjust: pointing down means slow down, pointing up means speed up. To stop every split opening red for its first few seconds before pace has settled, there's a brief grace period — about ten seconds of moving time — before any colour shows at all. A completed split's own tile and its row in the splits list are tinted the same way, judged on that split's final average with no grace period, since the number is already settled.</p>
+      <p>If a custom plan's own splits run out before the activity ends, tracking simply continues at the plan's base split size with no target — nothing stops working, the colours just switch off.</p>
     </div>
   </section>
 

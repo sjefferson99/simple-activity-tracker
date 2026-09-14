@@ -3,14 +3,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../core/tracking/activity_mode_controller.dart';
-import '../../core/tracking/split_preference_controller.dart';
+import '../../core/tracking/split_plan_controller.dart';
 import '../../core/units/units.dart';
 import '../../domain/models/live_metrics.dart';
 import '../../domain/models/split.dart' as domain;
 import '../../domain/tracking/activity_mode.dart';
 import '../../domain/tracking/run_phase.dart';
+import '../../domain/tracking/split_plan.dart';
+import '../../domain/tracking/split_preference.dart' show SplitKind;
+import '../../domain/tracking/split_target.dart';
 import '../export_help/export_help_screen.dart';
 import '../settings/settings_screen.dart';
+import '../splits/splits_screen.dart';
 import 'live_run_controller.dart';
 import 'live_run_state.dart';
 import 'metric_spec.dart';
@@ -18,7 +22,8 @@ import 'run_insights.dart';
 
 /// The live run screen's speed/pace toggle. Starts at null (meaning: not yet
 /// pinned to a run) and is set to the run's initial [SpeedUnit] — derived
-/// from the run's split preference (issue #94) — the moment a run reaches
+/// from the run's split preference (issue #94) and its "targets as
+/// pace/speed" preference (issue #99) — the moment a run reaches
 /// [LiveRunActive]/[LiveRunFinished], via [_SpeedUnitNotifier.startRun].
 /// From there, tapping the toggle only ever cycles speed ⇄ pace within that
 /// run's distance unit (km-based or mile-based) — it never switches between
@@ -28,9 +33,12 @@ class _SpeedUnitNotifier extends Notifier<SpeedUnit?> {
   @override
   SpeedUnit? build() => null;
 
-  /// Resets the toggle to [unit]'s initial (speed, not pace) member — called
-  /// once per run, when the run's distance unit becomes known.
-  void startRun(DistanceUnit unit) => state = SpeedUnit.initialFor(unit);
+  /// Resets the toggle to [unit]'s speed or pace member, per [prefersPace] —
+  /// called once per run, when the run's distance unit becomes known.
+  void startRun(DistanceUnit unit, bool prefersPace) {
+    final speedFirst = SpeedUnit.initialFor(unit);
+    state = prefersPace ? speedFirst.toggled : speedFirst;
+  }
 
   void toggle() {
     final current = state;
@@ -81,6 +89,68 @@ class _ActivityModeToggle extends ConsumerWidget {
   }
 }
 
+/// A one-line summary of the current split plan, tappable to open the
+/// Splits screen (issue #99 D3) — same reasoning as [_ActivityModeToggle]
+/// living on the home screen: it changes how the next run is captured, not
+/// just how it's displayed.
+class _SplitsSummaryRow extends ConsumerWidget {
+  const _SplitsSummaryRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final plan = ref.watch(splitPlanControllerProvider);
+    final unit = plan.targetsAsPace
+        ? SpeedUnit.initialFor(plan.base.effectiveDistanceUnit).toggled
+        : SpeedUnit.initialFor(plan.base.effectiveDistanceUnit);
+
+    final summary = plan.isCustom
+        ? 'Splits: custom, ${plan.customSplits.length} splits'
+        : plan.rollingTargetSpeedMps != null
+        ? 'Splits: every ${formatSplitSizeMeters(_rollingSizeMeters(plan), plan.base.effectiveDistanceUnit)} '
+              '@ ${formatTargetForEditing(plan.rollingTargetSpeedMps!, unit)} ${unit.suffix}'
+        : 'Splits: every ${_rollingSizeLabel(plan)}';
+
+    return InkWell(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const SplitsScreen()),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                summary,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            Icon(
+              Icons.chevron_right,
+              size: 18,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  double _rollingSizeMeters(SplitPlan plan) => switch (plan.base.kind) {
+    SplitKind.distanceKm => plan.base.value * 1000.0,
+    SplitKind.distanceMi => plan.base.value * metersPerMile,
+    SplitKind.timeMin => 0, // unused: time kind formats via _rollingSizeLabel
+  };
+
+  String _rollingSizeLabel(SplitPlan plan) => plan.base.kind == SplitKind.timeMin
+      ? '${plan.base.value} min'
+      : formatSplitSizeMeters(_rollingSizeMeters(plan), plan.base.effectiveDistanceUnit);
+}
+
 class LiveRunScreen extends ConsumerWidget {
   const LiveRunScreen({super.key});
 
@@ -105,29 +175,36 @@ class LiveRunScreen extends ConsumerWidget {
     // The distance unit this run's splits (and therefore its speed/pace/
     // elevation display) use — fixed once the run starts, same rationale as
     // runActivityMode (issue #94). Before a run starts, falls back to the
-    // live split-preference setting.
+    // live split plan setting.
     final runDistanceUnit = switch (state) {
       LiveRunActive(:final distanceUnit) => distanceUnit,
       LiveRunFinished(:final distanceUnit) => distanceUnit,
-      _ => ref.watch(splitPreferenceControllerProvider).effectiveDistanceUnit,
+      _ => ref.watch(splitPlanControllerProvider).base.effectiveDistanceUnit,
     };
 
-    // Pins the toggle to this run's distance unit the moment it becomes
-    // available, so a run started with mile splits opens on mph rather than
-    // whatever unit a previous running-mode session left the toggle on.
-    // Runs (never fired for the idle/acquiring states this reaches before a
-    // run has one) — _speedUnitProvider only resets here, so a manual tap
-    // via toggle() persists across ticks within the same run.
+    // Pins the toggle to this run's distance unit and pace/speed preference
+    // the moment they become available, so a run started with mile splits
+    // opens on mph rather than whatever unit a previous running-mode session
+    // left the toggle on. Runs (never fired for the idle/acquiring states
+    // this reaches before a run has one) — _speedUnitProvider only resets
+    // here, so a manual tap via toggle() persists across ticks within the
+    // same run.
     ref.listen(liveRunControllerProvider, (previous, next) {
-      final unit = switch (next) {
-        LiveRunActive(:final distanceUnit) => distanceUnit,
-        LiveRunFinished(:final distanceUnit) => distanceUnit,
-        _ => null,
+      final (unit, prefersPace) = switch (next) {
+        LiveRunActive(:final distanceUnit, :final prefersPace) => (
+          distanceUnit,
+          prefersPace,
+        ),
+        LiveRunFinished(:final distanceUnit, :final prefersPace) => (
+          distanceUnit,
+          prefersPace,
+        ),
+        _ => (null, true),
       };
       final wasActive =
           previous is LiveRunActive || previous is LiveRunFinished;
       if (unit != null && !wasActive) {
-        ref.read(_speedUnitProvider.notifier).startRun(unit);
+        ref.read(_speedUnitProvider.notifier).startRun(unit, prefersPace);
       }
     });
 
@@ -204,6 +281,12 @@ class LiveRunScreen extends ConsumerWidget {
                 if (canSwitchActivityMode) const _ActivityModeToggle(),
               ],
             ),
+            // Only meaningful before a run starts (the plan is fixed for a
+            // run's whole duration, same as activity mode/distance unit) and
+            // only for running — cycling hides splits entirely (issue #99
+            // D8), so a row promising split configuration here would be
+            // misleading in cycling mode.
+            if (canSwitchActivityMode && !isCycling) const _SplitsSummaryRow(),
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
@@ -424,6 +507,8 @@ class _MetricGrid extends StatelessWidget {
                     label: spec.label(speedUnit),
                     description: spec.description,
                     value: spec.valueOf(metrics, null, speedUnit),
+                    detail: spec.detail?.call(metrics, speedUnit),
+                    verdict: spec.verdict?.call(metrics),
                     unit: unit,
                   ),
                 ),
@@ -524,6 +609,22 @@ class _SplitRow extends StatelessWidget {
         ? '${formatDistanceMi(split.distanceMeters)} mi'
         : '${formatDistanceKm(split.distanceMeters)} km';
 
+    // No grace period here — a completed split's average is already its
+    // final, settled figure (see MetricSpec's _lastSplitSpec.verdict doc).
+    final target = split.targetSpeedMps;
+    final verdict = target == null
+        ? null
+        : splitVerdict(
+            avgSpeedMps: split.avgSpeedMps,
+            targetSpeedMps: target,
+            elapsedInSplit: split.duration,
+          );
+    final paceColor = switch (verdict) {
+      SplitVerdict.onTarget => Colors.green.shade700,
+      SplitVerdict.tooFast || SplitVerdict.tooSlow => theme.colorScheme.error,
+      null => theme.colorScheme.onSurface,
+    };
+
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: unit * 2, vertical: unit * 1.4),
       child: Row(
@@ -541,9 +642,27 @@ class _SplitRow extends StatelessWidget {
             formatDuration(split.duration),
             style: TextStyle(fontSize: unit * 2.8),
           ),
-          Text(
-            paceOrSpeed,
-            style: TextStyle(fontSize: unit * 2.8, fontWeight: FontWeight.w500),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                paceOrSpeed,
+                style: TextStyle(
+                  fontSize: unit * 2.8,
+                  fontWeight: FontWeight.w500,
+                  color: paceColor,
+                ),
+              ),
+              if (target != null)
+                Text(
+                  formatSpeedDelta(split.avgSpeedMps, target, speedUnit),
+                  style: TextStyle(
+                    fontSize: unit * 2.2,
+                    color: paceColor,
+                  ),
+                ),
+            ],
           ),
         ],
       ),
@@ -557,11 +676,22 @@ class _MetricTile extends StatelessWidget {
   final String value;
   final double unit;
 
+  /// A second line under [value] — the split's size/target and, once a
+  /// verdict is available, the delta text (issue #99). Null for every tile
+  /// except the split tiles.
+  final String? detail;
+
+  /// Whether this tile's split is on/off target, tinting the tile's
+  /// background (issue #99) — null for no target/no tile-level target.
+  final SplitVerdict? verdict;
+
   const _MetricTile({
     required this.label,
     required this.description,
     required this.value,
     required this.unit,
+    this.detail,
+    this.verdict,
   });
 
   @override
@@ -571,8 +701,21 @@ class _MetricTile extends StatelessWidget {
     // Distance shows both km and mi stacked (issue #94: both are used by
     // runners at the same time, and two shorter lines fit the tile better
     // than one long "X km / Y mi" line) — every other tile's value is a
-    // single line.
+    // single line. A split tile with a detail line (issue #99) is also
+    // multi-line, so the value gets the smaller two-line size in both cases.
     final valueLines = value.split('\n').length;
+    final hasDetail = detail != null;
+
+    // A fixed green/red pair rather than theme tokens — Material's
+    // ColorScheme has no "success" role, and error/onErrorContainer alone
+    // isn't distinguishable from "too fast" vs "too slow" without also
+    // conveying "good". Chosen at a fixed alpha over the surface so both
+    // themes stay legible.
+    final tintColor = switch (verdict) {
+      SplitVerdict.onTarget => Colors.green,
+      SplitVerdict.tooFast || SplitVerdict.tooSlow => theme.colorScheme.error,
+      null => null,
+    };
 
     // Tap (not long-press, which is reserved for Stop) shows what the
     // number measures, then fades — no modal to dismiss mid-run.
@@ -585,8 +728,17 @@ class _MetricTile extends StatelessWidget {
         fontSize: unit * 2.6,
         color: theme.colorScheme.onInverseSurface,
       ),
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: unit * 0.5),
+      child: Container(
+        decoration: tintColor == null
+            ? null
+            : BoxDecoration(
+                color: tintColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(unit * 1.5),
+              ),
+        padding: EdgeInsets.symmetric(
+          horizontal: unit * 0.5,
+          vertical: tintColor == null ? 0 : unit * 0.8,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -601,13 +753,31 @@ class _MetricTile extends StatelessWidget {
                 textAlign: TextAlign.center,
                 maxLines: valueLines,
                 style: TextStyle(
-                  fontSize: valueLines > 1 ? unit * 4.5 : unit * 7,
+                  fontSize: (valueLines > 1 || hasDetail) ? unit * 4.5 : unit * 7,
                   fontWeight: FontWeight.w400,
                   height: 1.15,
                   color: theme.colorScheme.onSurface,
                 ),
               ),
             ),
+            if (detail != null)
+              Padding(
+                padding: EdgeInsets.only(top: unit * 0.3),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    detail!,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    style: TextStyle(
+                      fontSize: unit * 2.4,
+                      color: tintColor != null
+                          ? theme.colorScheme.onSurface
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
             FittedBox(
               fit: BoxFit.scaleDown,
               child: Text(

@@ -4,10 +4,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gpx/gpx.dart';
 import 'package:simple_activity_tracker/core/files/run_gpx_log.dart';
 import 'package:simple_activity_tracker/domain/models/track_point.dart';
+import 'package:simple_activity_tracker/domain/tracking/split_plan.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_preference.dart'
     show SplitKind, SplitPreference;
 
-const _defaultSplitPreference = SplitPreference.defaultPreference;
+const _defaultSplitPlan = SplitPlan.defaultPlan;
 
 TrackPoint _point(double lat, double lon, DateTime time) => TrackPoint(
   latitude: lat,
@@ -31,7 +32,7 @@ void main() {
 
   test('flush writes a valid GPX file with the accepted points', () async {
     final file = File('${tempDir.path}/run.gpx');
-    final log = RunGpxLog(file, _defaultSplitPreference);
+    final log = RunGpxLog(file, _defaultSplitPlan);
     final start = DateTime(2026, 1, 1, 9, 0, 0);
 
     log.addPoint(_point(51.5, -0.1, start));
@@ -48,7 +49,7 @@ void main() {
 
   test('startNewSegment begins a new trkseg for the next points', () async {
     final file = File('${tempDir.path}/run.gpx');
-    final log = RunGpxLog(file, _defaultSplitPreference);
+    final log = RunGpxLog(file, _defaultSplitPlan);
     final start = DateTime(2026, 1, 1, 9, 0, 0);
 
     log.addPoint(_point(51.5, -0.1, start));
@@ -66,7 +67,7 @@ void main() {
     'finalizeAndFlush drops empty segments (e.g. an unused pause gap)',
     () async {
       final file = File('${tempDir.path}/run.gpx');
-      final log = RunGpxLog(file, _defaultSplitPreference);
+      final log = RunGpxLog(file, _defaultSplitPlan);
       final start = DateTime(2026, 1, 1, 9, 0, 0);
 
       log.addPoint(_point(51.5, -0.1, start));
@@ -82,7 +83,7 @@ void main() {
     'concurrent flushes do not clobber each other and keep every point',
     () async {
       final file = File('${tempDir.path}/run.gpx');
-      final log = RunGpxLog(file, _defaultSplitPreference);
+      final log = RunGpxLog(file, _defaultSplitPlan);
       final start = DateTime(2026, 1, 1, 9, 0, 0);
 
       log.addPoint(_point(51.5, -0.1, start));
@@ -109,7 +110,7 @@ void main() {
     'addPoint writes accuracy/speed diagnostics as GPX extensions',
     () async {
       final file = File('${tempDir.path}/run.gpx');
-      final log = RunGpxLog(file, _defaultSplitPreference);
+      final log = RunGpxLog(file, _defaultSplitPlan);
       final start = DateTime(2026, 1, 1, 9, 0, 0);
 
       log.addPoint(
@@ -157,7 +158,9 @@ void main() {
       final file = File('${tempDir.path}/run.gpx');
       final log = RunGpxLog(
         file,
-        const SplitPreference(kind: SplitKind.timeMin, value: 5),
+        const SplitPlan(
+          base: SplitPreference(kind: SplitKind.timeMin, value: 5),
+        ),
       );
       final start = DateTime(2026, 1, 1, 9, 0, 0);
 
@@ -170,9 +173,75 @@ void main() {
     },
   );
 
+  test(
+    'a plain rolling plan with no target writes no split_target/split_plan extensions',
+    () async {
+      final file = File('${tempDir.path}/run.gpx');
+      final log = RunGpxLog(file, _defaultSplitPlan);
+      final start = DateTime(2026, 1, 1, 9, 0, 0);
+
+      log.addPoint(_point(51.5, -0.1, start));
+      await log.flush();
+
+      final gpx = GpxReader().fromString(await file.readAsString());
+      expect(gpx.extensions.containsKey('sat:split_target'), isFalse);
+      expect(gpx.extensions.containsKey('sat:split_plan'), isFalse);
+      expect(gpx.extensions['sat:split_targets_as'], 'pace');
+    },
+  );
+
+  test(
+    'a rolling plan with a target writes sat:split_target, not sat:split_plan',
+    () async {
+      final file = File('${tempDir.path}/run.gpx');
+      final log = RunGpxLog(
+        file,
+        const SplitPlan(
+          base: SplitPreference.defaultPreference,
+          rollingTargetSpeedMps: 3.0,
+          targetsAsPace: false,
+        ),
+      );
+      final start = DateTime(2026, 1, 1, 9, 0, 0);
+
+      log.addPoint(_point(51.5, -0.1, start));
+      await log.flush();
+
+      final gpx = GpxReader().fromString(await file.readAsString());
+      expect(gpx.extensions['sat:split_target'], '3.0');
+      expect(gpx.extensions.containsKey('sat:split_plan'), isFalse);
+      expect(gpx.extensions['sat:split_targets_as'], 'speed');
+    },
+  );
+
+  test(
+    'a custom plan writes sat:split_plan, not sat:split_target',
+    () async {
+      final file = File('${tempDir.path}/run.gpx');
+      final log = RunGpxLog(
+        file,
+        const SplitPlan(
+          base: SplitPreference.defaultPreference,
+          customSplits: [
+            PlannedSplit(size: 400, targetSpeedMps: 3.5),
+            PlannedSplit(size: 200),
+          ],
+        ),
+      );
+      final start = DateTime(2026, 1, 1, 9, 0, 0);
+
+      log.addPoint(_point(51.5, -0.1, start));
+      await log.flush();
+
+      final gpx = GpxReader().fromString(await file.readAsString());
+      expect(gpx.extensions['sat:split_plan'], '400@3.5;200');
+      expect(gpx.extensions.containsKey('sat:split_target'), isFalse);
+    },
+  );
+
   test('flush is crash-safe: an interrupted temp write leaves the prior file intact', () async {
     final file = File('${tempDir.path}/run.gpx');
-    final log = RunGpxLog(file, _defaultSplitPreference);
+    final log = RunGpxLog(file, _defaultSplitPlan);
     final start = DateTime(2026, 1, 1, 9, 0, 0);
 
     log.addPoint(_point(51.5, -0.1, start));
