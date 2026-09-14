@@ -191,6 +191,27 @@ def test_activity_list_rows_per_page_20_and_100(app_client, sample_gpx_bytes, au
     assert response.text.count("activity-list-item") == 25
 
 
+def test_per_page_select_hx_vals_never_carries_a_stale_per_page_value(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """Regression: the per-page <select> submits its own value via
+    hx-include="this" — if its hx-vals also carried per_page (from the
+    *current*, pre-change page state), htmx's hx-vals unconditionally
+    overrides a same-named field the element already submits, so switching
+    the dropdown to a new value would silently keep sending the old one.
+    While viewing a per_page=100 page, the rendered hx-vals JSON must not
+    mention per_page at all."""
+    _upload_n_activities(app_client, auth_headers, sample_gpx_bytes, 5)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"per_page": "100"})
+    assert response.status_code == 200
+    hx_vals_start = response.text.index("hx-vals='") + len("hx-vals='")
+    hx_vals_end = response.text.index("'", hx_vals_start)
+    hx_vals_json = response.text[hx_vals_start:hx_vals_end]
+    assert "per_page" not in hx_vals_json
+
+
 def test_activity_list_rows_per_page_all_shows_every_activity(
     app_client, sample_gpx_bytes, auth_headers
 ):
@@ -331,7 +352,7 @@ def test_activity_search_shows_a_match_count_when_filtered(
     _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
 
     unfiltered = app_client.get("/")
-    assert "match" not in unfiltered.text  # no count shown with no filter active
+    assert 'class="muted activity-match-count"' not in unfiltered.text  # no filter active
 
     response = app_client.get("/", params={"q": "sunrise"})
     assert response.status_code == 200

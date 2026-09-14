@@ -27,7 +27,7 @@
             hx-indicator="#activity-list-spinner"
             hx-include="this"
             name="per_page"
-            hx-vals='{{ list_vals(list_query, page=1) | tojson }}'>
+            hx-vals='{{ list_vals(list_query, page=1, omit=("per_page",)) | tojson }}'>
       <option value="20" {% if per_page == "20" %}selected{% endif %}>20</option>
       <option value="100" {% if per_page == "100" %}selected{% endif %}>100</option>
       <option value="all" {% if per_page == "all" %}selected{% endif %}>All</option>

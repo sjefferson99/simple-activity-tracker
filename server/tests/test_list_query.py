@@ -45,3 +45,21 @@ def test_list_vals_returns_the_same_non_default_params_as_a_plain_dict() -> None
 
 def test_list_vals_with_all_defaults_is_empty() -> None:
     assert list_vals(ActivityListQuery()) == {}
+
+
+def test_list_vals_omit_drops_a_field_the_caller_already_submits_itself() -> None:
+    """Regression: the per-page <select> submits its own `per_page` value
+    via hx-include="this" — if hx-vals also carried a (stale, pre-change)
+    `per_page`, htmx's hx-vals would win over the select's own value (htmx
+    deletes a form field before merging in the same-named hx-vals key), so
+    switching the dropdown from 100 to 20 would silently keep sending 100.
+    `omit` exists specifically to prevent this."""
+    query = ActivityListQuery(per_page="100")
+    vals = list_vals(query, page=1, omit=("per_page",))
+    assert "per_page" not in vals
+
+
+def test_list_vals_omit_only_affects_the_named_field() -> None:
+    query = ActivityListQuery(per_page="100", sort="distance")
+    vals = list_vals(query, page=1, omit=("per_page",))
+    assert vals == {"sort": "distance"}
