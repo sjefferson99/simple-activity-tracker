@@ -444,7 +444,9 @@ def activity_splits_fragment(
             "partials/splits_table.html",
             {"splits": [], "split_type": split_type, "split_value": split_value},
         )
-    result = AnalyzerV1().analyze(track, split_type, split_value)
+    result = AnalyzerV1().analyze(
+        track, split_type, split_value, activity_type=activity.activity_type
+    )
     return templates.TemplateResponse(
         request,
         "partials/splits_table.html",

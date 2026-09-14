@@ -224,8 +224,11 @@ def _insert_activity_with_gpx(
         return winner, analyses.get_by_activity_id(winner.id), False  # type: ignore[return-value]
 
     try:
+        analyzer = AnalyzerV1()
         result = (
-            AnalyzerV1().analyze(track, *split_pref) if split_pref else AnalyzerV1().analyze(track)
+            analyzer.analyze(track, *split_pref, activity_type=new_activity.activity_type)
+            if split_pref
+            else analyzer.analyze(track, activity_type=new_activity.activity_type)
         )
         distance_meters, moving_seconds = distance_and_duration_from_result(result)
         start_lat, start_lon, end_lat, end_lon = endpoints_from_result(result)
@@ -499,7 +502,9 @@ def get_analysis(
             track = parse_gpx(data)
         except GpxParseError as exc:
             raise api_error(400, "invalid_gpx", str(exc)) from exc
-        result = AnalyzerV1().analyze(track, split_type, split_value)
+        result = AnalyzerV1().analyze(
+            track, split_type, split_value, activity_type=activity.activity_type
+        )
         return AnalysisOut(status="done", result=result)
 
     analysis = SqlAlchemyActivityAnalysisRepository(session).get_by_activity_id(activity.id)

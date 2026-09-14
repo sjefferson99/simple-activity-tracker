@@ -177,6 +177,20 @@ docker compose run --rm app simple-activity-tracker-server migrate
 docker compose up -d
 ```
 
+**`SR_AUTO_REANALYZE`** (default `true`) controls whether `run` also reruns
+the analyzer against every activity whose stored analysis predates the
+current analyzer version, right after migrating and before the app starts
+serving — the same work `simple-activity-tracker-server reanalyze --all`
+does by hand, and a fast no-op once nothing is stale. This is what applies
+an analyzer bugfix or algorithm change (e.g. corrected GPS-jump/accuracy
+filtering) to activities uploaded before the upgrade, automatically, without
+the phone re-uploading anything. Set to `false` to leave stored analyses
+as-is until `reanalyze --all` is run out-of-band:
+
+```bash
+docker compose run --rm app simple-activity-tracker-server reanalyze --all
+```
+
 ## Ports
 
 - `proxy` publishes **80** (redirects to 443) and **443** (TLS) — these are

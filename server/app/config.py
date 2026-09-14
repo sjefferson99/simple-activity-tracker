@@ -66,6 +66,13 @@ class Settings(BaseSettings):
     auto_migrate: bool = True
     backup_before_migrate: bool = True
     backup_dir: str = "/backups"
+    # Runs `reanalyze --all` on every startup, after migrate() — cheap no-op
+    # when every stored ActivityAnalysis is already at the current
+    # ANALYSIS_VERSION (see app/analysis/v1.py), and the mechanism that gets
+    # an analyzer bugfix (e.g. issue #83) applied to already-uploaded
+    # activities without the user having to run the CLI by hand or re-upload
+    # from the phone.
+    auto_reanalyze: bool = True
 
     @field_validator("secret_key")
     @classmethod
