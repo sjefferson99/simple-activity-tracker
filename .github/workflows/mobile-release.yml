@@ -34,6 +34,23 @@ jobs:
       - run: flutter analyze
       - run: flutter test
 
+      - name: Write Android release signing config
+        # android/key.properties is gitignored and never committed — written
+        # fresh from repo secrets on every run. build.gradle.kts reads it and
+        # signs the release build with the real keystore whenever it's
+        # present; without it (any build outside this workflow), release
+        # builds fall back to Flutter's debug keystore, matching prior
+        # behavior. The keystore blob itself is decoded straight into
+        # android/app, which .gitignore also excludes (*.jks/*.keystore).
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore.jks
+          cat > android/key.properties <<EOF
+          storeFile=release.keystore.jks
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          EOF
+
       - name: Build release APK
         run: |
           flutter build apk --release \

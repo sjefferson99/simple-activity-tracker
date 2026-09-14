@@ -98,11 +98,19 @@ GitHub UI) a `v*.*.*` tag triggers both `container.yml` and `mobile-release.yml`
   `:latest` only ever tracks `main`, not a release tag — a `v*.*.*` push produces
   `vX.Y.Z`/`vX.Y` alongside whatever `sha-<short-commit>` matches that same commit,
   without moving `:latest`.
-- **Mobile** (`mobile-release.yml`): builds a release APK (`flutter build apk --release`,
-  debug-signed — see `mobile/android/app/build.gradle.kts`) and attaches it to the
-  GitHub Release for that same tag, ready to sideload per
+- **Mobile** (`mobile-release.yml`): builds a release APK (`flutter build apk --release`)
+  signed with a dedicated release keystore (`ANDROID_KEYSTORE_BASE64` and friends —
+  repo secrets, not committed; see `mobile/android/app/build.gradle.kts`) and attaches
+  it to the GitHub Release for that same tag, ready to sideload per
   [docs/deploy-guide.md](docs/deploy-guide.md#installing-on-android). It never touches
-  the release's title or body, so write those by hand.
+  the release's title or body, so write those by hand. **Every release uses the same
+  keystore** — this matters because Android refuses to install an APK "over" an
+  existing install signed with a different key (fails with a bare "App not installed").
+  Outside this workflow (e.g. `flutter run --release` on a dev machine), the release
+  build type falls back to the Flutter debug keystore, same as before this existed —
+  fine for on-device development, but never sideload a locally-built release APK
+  alongside a release-tag one on the same phone; uninstall one first if you need to
+  switch, since their signatures won't match either.
 
 To cut a release:
 
