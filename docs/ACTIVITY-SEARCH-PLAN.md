@@ -1,6 +1,11 @@
 # Activity search plan — issue #76 (with groundwork for #82)
 
-Status: **plan written 2026-09-14, awaiting owner review — nothing implemented.**
+Status: **implemented 2026-09-14 across three PRs, all open pending merge:**
+[#87](https://github.com/sjefferson99/simple-activity-tracker/pull/87) (endpoint coordinates),
+[#88](https://github.com/sjefferson99/simple-activity-tracker/pull/88) (text search + distance
+range), [#89](https://github.com/sjefferson99/simple-activity-tracker/pull/89) (radius filter +
+map picker, opened against #88 since both are unmerged). See each PR's description for what was
+verified. Update this line to "merged" once all three land on `main`.
 
 Scope, from [issue #76](https://github.com/sjefferson99/simple-activity-tracker/issues/76):
 

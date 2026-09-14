@@ -79,10 +79,23 @@ def list_url(query: ActivityListQuery, **overrides: Any) -> str:
     return f"/?{urlencode(params)}" if params else "/"
 
 
-def list_vals(query: ActivityListQuery, **overrides: Any) -> dict[str, str]:
+def list_vals(
+    query: ActivityListQuery, *, omit: tuple[str, ...] = (), **overrides: Any
+) -> dict[str, str]:
     """The same merged param set as list_url(), as a plain dict — for an
     htmx `hx-vals` attribute (via `| tojson`) on a control that submits its
     own value separately (the per-page `<select>`, which already sends
     `per_page` via `hx-include="this"` and only needs the *other* fields
-    supplied via hx-vals)."""
-    return query.params(**overrides)
+    supplied via hx-vals).
+
+    `omit` must list any field the element itself already submits under the
+    same name: htmx's hx-vals unconditionally overrides a field's own
+    submitted value for a matching key (it deletes the key from the
+    element's own form data before merging hx-vals in — see htmx's `ln()`),
+    so a stale hx-vals value for that field would silently win over
+    whatever the user just picked in the control itself. Regression test:
+    tests/test_web_pages.py::test_per_page_select_hx_vals_never_carries_a_stale_per_page_value."""
+    params = query.params(**overrides)
+    for field in omit:
+        params.pop(field, None)
+    return params

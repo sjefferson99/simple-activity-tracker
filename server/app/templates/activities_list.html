@@ -146,8 +146,26 @@
     const lonInput = document.getElementById("activity-search-lon");
     const lat = parseFloat(latInput.value);
     const lon = parseFloat(lonInput.value);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      // No location filter set (e.g. after Clear, or a Back navigation to
+      // a URL with no lat/lon) — remove any pin/circle left over from
+      // before, so an open map picker doesn't keep showing a location that
+      // no longer matches what's actually being searched for.
+      clearMapPicker();
+      return;
+    }
     placeMarker(lat, lon, { moveView: false });
+  }
+
+  function clearMapPicker() {
+    if (searchMarker) {
+      searchMarker.remove();
+      searchMarker = null;
+    }
+    if (searchCircle) {
+      searchCircle.remove();
+      searchCircle = null;
+    }
   }
 
   function placeMarker(lat, lon, { moveView }) {
