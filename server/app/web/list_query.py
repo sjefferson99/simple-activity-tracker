@@ -19,6 +19,7 @@ _DEFAULT_PAGE = 1
 _DEFAULT_PER_PAGE = "20"
 _DEFAULT_SORT: ActivityListSort = "date"
 _DEFAULT_DIR: ActivityListDirection = "desc"
+_DEFAULT_GEO = "either"
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,7 @@ class ActivityListQuery:
     lat: str = ""
     lon: str = ""
     radius_km: str = ""
-    geo: str = ""
+    geo: str = _DEFAULT_GEO
 
     def params(self, **overrides: Any) -> dict[str, str]:
         merged = replace(self, **overrides)
@@ -63,7 +64,7 @@ class ActivityListQuery:
             params["lon"] = merged.lon
         if merged.radius_km:
             params["radius_km"] = merged.radius_km
-        if merged.geo:
+        if merged.geo != _DEFAULT_GEO:
             params["geo"] = merged.geo
         return params
 

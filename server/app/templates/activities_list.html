@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Activities — Simple Activity Tracker{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+{% endblock %}
 {% block content %}
 <h1>Activities</h1>
 
@@ -64,7 +67,10 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="/static/vendor/leaflet/leaflet.js"></script>
 <script nonce="{{ csp_nonce(request) }}">
+  window.__mapDefaultCenter = {{ map_default_center | tojson }};
+
   // The search form lives outside #activity-list-region (see
   // partials/activity_search_form.html's comment) so it survives every
   // htmx swap of that region untouched — but that also means the browser
@@ -72,15 +78,26 @@
   // touches the form's own field values. Without this, pressing Back shows
   // the previous list but leaves the search box/distance inputs showing
   // whatever was last typed, not what the restored URL actually reflects.
+  const SEARCH_FIELD_DEFAULTS = {
+    q: "", min_km: "", max_km: "", lat: "", lon: "", radius_km: "",
+    sort: "date", dir: "desc", per_page: "20", geo: "either",
+  };
+
   function syncSearchFormFromUrl() {
     const form = document.getElementById("activity-search-form");
     if (!form) return;
     const params = new URLSearchParams(window.location.search);
-    const defaults = { sort: "date", dir: "desc", per_page: "20" };
-    for (const field of ["q", "min_km", "max_km", "sort", "dir", "per_page"]) {
+    for (const [field, fallback] of Object.entries(SEARCH_FIELD_DEFAULTS)) {
       const input = form.elements.namedItem(field);
-      if (input) input.value = params.get(field) || defaults[field] || "";
+      if (!input) continue;
+      const value = params.get(field) || fallback;
+      if (input instanceof RadioNodeList) {
+        for (const radio of input) radio.checked = radio.value === value;
+      } else {
+        input.value = value;
+      }
     }
+    updateMapPickerFromForm();
   }
   document.body.addEventListener("htmx:historyRestore", syncSearchFormFromUrl);
 
@@ -96,11 +113,142 @@
     if (event.target.id !== "activity-search-clear") return;
     const form = document.getElementById("activity-search-form");
     if (!form) return;
-    const defaults = { q: "", min_km: "", max_km: "", sort: "date", dir: "desc", per_page: "20" };
-    for (const [field, value] of Object.entries(defaults)) {
+    for (const [field, value] of Object.entries(SEARCH_FIELD_DEFAULTS)) {
       const input = form.elements.namedItem(field);
-      if (input) input.value = value;
+      if (!input) continue;
+      if (input instanceof RadioNodeList) {
+        for (const radio of input) radio.checked = radio.value === value;
+      } else {
+        input.value = value;
+      }
     }
+    updateMapPickerFromForm();
   });
+
+  // --- Map picker (issue #76) ---------------------------------------
+  // Leaflet is already vendored for the activity detail page's track map;
+  // this reuses the same tile layer/CSP allowance, just with a click
+  // handler instead of a fetched track. No mapping API needed — dropping a
+  // pin only ever fills in lat/lon text inputs the form already has.
+  let searchMap = null;
+  let searchMarker = null;
+  let searchCircle = null;
+
+  function currentRadiusMeters() {
+    const input = document.getElementById("activity-search-radius-km");
+    const km = parseFloat(input.value);
+    return (Number.isFinite(km) && km > 0 ? km : 1) * 1000;
+  }
+
+  function updateMapPickerFromForm() {
+    if (!searchMap) return;
+    const latInput = document.getElementById("activity-search-lat");
+    const lonInput = document.getElementById("activity-search-lon");
+    const lat = parseFloat(latInput.value);
+    const lon = parseFloat(lonInput.value);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      // No location filter set (e.g. after Clear, or a Back navigation to
+      // a URL with no lat/lon) — remove any pin/circle left over from
+      // before, so an open map picker doesn't keep showing a location that
+      // no longer matches what's actually being searched for.
+      clearMapPicker();
+      return;
+    }
+    placeMarker(lat, lon, { moveView: false });
+  }
+
+  function clearMapPicker() {
+    if (searchMarker) {
+      searchMarker.remove();
+      searchMarker = null;
+    }
+    if (searchCircle) {
+      searchCircle.remove();
+      searchCircle = null;
+    }
+  }
+
+  function placeMarker(lat, lon, { moveView }) {
+    const latLng = [lat, lon];
+    if (!searchMarker) {
+      searchMarker = L.marker(latLng, { draggable: true }).addTo(searchMap);
+      searchMarker.on("dragend", () => {
+        const pos = searchMarker.getLatLng();
+        setFormLatLon(pos.lat, pos.lng);
+        updateCircle(pos.lat, pos.lng);
+      });
+    } else {
+      searchMarker.setLatLng(latLng);
+    }
+    updateCircle(lat, lon);
+    if (moveView) searchMap.setView(latLng, 13);
+  }
+
+  function updateCircle(lat, lon) {
+    const radius = currentRadiusMeters();
+    if (!searchCircle) {
+      searchCircle = L.circle([lat, lon], { radius, color: "#0f766e", weight: 2, fillOpacity: 0.08 }).addTo(searchMap);
+    } else {
+      searchCircle.setLatLng([lat, lon]);
+      searchCircle.setRadius(radius);
+    }
+  }
+
+  function setFormLatLon(lat, lon) {
+    document.getElementById("activity-search-lat").value = lat.toFixed(5);
+    document.getElementById("activity-search-lon").value = lon.toFixed(5);
+  }
+
+  function initSearchMap() {
+    if (searchMap) return;
+    searchMap = L.map("search-map");
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap contributors",
+      maxZoom: 19,
+    }).addTo(searchMap);
+
+    const latInput = document.getElementById("activity-search-lat");
+    const lonInput = document.getElementById("activity-search-lon");
+    const existingLat = parseFloat(latInput.value);
+    const existingLon = parseFloat(lonInput.value);
+    if (Number.isFinite(existingLat) && Number.isFinite(existingLon)) {
+      searchMap.setView([existingLat, existingLon], 13);
+      placeMarker(existingLat, existingLon, { moveView: false });
+    } else if (window.__mapDefaultCenter) {
+      searchMap.setView(window.__mapDefaultCenter, 11);
+    } else {
+      searchMap.setView([0, 0], 2);
+    }
+
+    searchMap.on("click", (event) => {
+      setFormLatLon(event.latlng.lat, event.latlng.lng);
+      placeMarker(event.latlng.lat, event.latlng.lng, { moveView: false });
+      const form = document.getElementById("activity-search-form");
+      if (form) htmx.trigger(form, "submit");
+    });
+  }
+
+  const mapPickerToggle = document.getElementById("map-picker-toggle");
+  const mapPicker = document.getElementById("map-picker");
+  if (mapPickerToggle && mapPicker) {
+    mapPickerToggle.addEventListener("click", () => {
+      const opening = mapPicker.hidden;
+      mapPicker.hidden = !opening;
+      if (opening) {
+        initSearchMap();
+        // Leaflet needs a laid-out container to size itself correctly —
+        // the map div is display:none via [hidden] until this toggle,
+        // so invalidateSize() must run after it's actually visible.
+        requestAnimationFrame(() => searchMap.invalidateSize());
+      }
+    });
+  }
+
+  const radiusInput = document.getElementById("activity-search-radius-km");
+  if (radiusInput) {
+    radiusInput.addEventListener("input", () => {
+      if (searchCircle) searchCircle.setRadius(currentRadiusMeters());
+    });
+  }
 </script>
 {% endblock %}

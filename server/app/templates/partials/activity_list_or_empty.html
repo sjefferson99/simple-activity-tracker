@@ -13,7 +13,12 @@
   {% include "partials/activity_filter_errors.html" %}
   <div class="card empty-state">
     <p>No activities match your search.</p>
-    <p><a href="/">Clear filters</a> to see every activity.</p>
+    <p>
+      <a href="/" id="activity-search-clear"
+         hx-get="/" hx-target="#activity-list-region" hx-select="#activity-list-region"
+         hx-swap="outerHTML" hx-push-url="true" hx-indicator="#activity-list-spinner">Clear filters</a>
+      to see every activity.
+    </p>
   </div>
 </div>
 {% else %}

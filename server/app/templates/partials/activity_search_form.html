@@ -30,4 +30,40 @@
          hx-swap="outerHTML" hx-push-url="true" hx-indicator="#activity-list-spinner">Clear</a>
     </div>
   </div>
+
+  <div class="activity-search-geo">
+    <button type="button" id="map-picker-toggle" class="secondary">Pick on map</button>
+    <div class="toolbar activity-search-row activity-search-geo-row">
+      <div>
+        <label for="activity-search-lat">Latitude</label>
+        <input type="number" id="activity-search-lat" name="lat" value="{{ list_query.lat }}"
+               placeholder="e.g. 51.50" step="any" min="-90" max="90"
+               hx-trigger="change, input changed delay:400ms">
+      </div>
+      <div>
+        <label for="activity-search-lon">Longitude</label>
+        <input type="number" id="activity-search-lon" name="lon" value="{{ list_query.lon }}"
+               placeholder="e.g. -0.12" step="any" min="-180" max="180"
+               hx-trigger="change, input changed delay:400ms">
+      </div>
+      <div>
+        <label for="activity-search-radius-km">Within (km)</label>
+        <input type="number" id="activity-search-radius-km" name="radius_km" value="{{ list_query.radius_km }}"
+               placeholder="1" min="0.05" max="100" step="0.05"
+               hx-trigger="change, input changed delay:400ms">
+      </div>
+      <div>
+        <label>Match</label>
+        <div class="activity-search-geo-radios" role="radiogroup" aria-label="Which endpoint must be nearby">
+          <label class="radio-label"><input type="radio" name="geo" value="start" {% if list_query.geo == "start" %}checked{% endif %} hx-trigger="change">Start</label>
+          <label class="radio-label"><input type="radio" name="geo" value="finish" {% if list_query.geo == "finish" %}checked{% endif %} hx-trigger="change">Finish</label>
+          <label class="radio-label"><input type="radio" name="geo" value="either" {% if list_query.geo == "either" %}checked{% endif %} hx-trigger="change">Either</label>
+          <label class="radio-label"><input type="radio" name="geo" value="both" {% if list_query.geo == "both" %}checked{% endif %} hx-trigger="change">Both</label>
+        </div>
+      </div>
+    </div>
+    <div id="map-picker" hidden>
+      <div id="search-map"></div>
+    </div>
+  </div>
 </form>
