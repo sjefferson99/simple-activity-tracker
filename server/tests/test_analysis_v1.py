@@ -140,6 +140,31 @@ def test_distance_is_never_negative() -> None:
     assert result["distance_meters"] >= 0
 
 
+def test_start_and_end_match_the_track_endpoints() -> None:
+    """Regression for issue #76: the analysis result must carry the run's
+    start/finish coordinates so ActivityAnalysis.start_lat/start_lon/
+    end_lat/end_lon (and later, location search) can be derived from it."""
+    track = parse_gpx(_FIXTURE.read_bytes())
+    result = AnalyzerV1().analyze(track)
+
+    first_point = track.segments[0].points[0]
+    last_point = track.segments[-1].points[-1]
+    assert result["start"] == {"lat": first_point.lat, "lon": first_point.lon}
+    assert result["end"] == {"lat": last_point.lat, "lon": last_point.lon}
+    # The fixture's two segments (a pause/resume gap) don't share a start
+    # point, so this also confirms start/end aren't accidentally both drawn
+    # from the same (e.g. first) segment.
+    assert result["start"] != result["end"]
+
+
+def test_start_equals_end_for_a_single_point_track() -> None:
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    track = Track(segments=[Segment(points=[Point(lat=51.5, lon=-0.1, ele=10.0, time=start)])])
+    result = AnalyzerV1().analyze(track)
+    assert result["start"] == {"lat": 51.5, "lon": -0.1}
+    assert result["end"] == {"lat": 51.5, "lon": -0.1}
+
+
 def test_split_distances_sum_to_approximately_total_distance() -> None:
     result = _analyze()
     # 3 completed 1km splits should cover ~all of a 3km run.

@@ -128,6 +128,73 @@ def test_reanalyze_picks_up_gpx_split_extension_without_touching_activity_column
         assert activity.split_value is None
 
 
+def test_reanalyze_repopulates_the_endpoint_coordinate_columns(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    """Issue #76: reanalyze is the recovery path for rows analyzed before
+    start_lat/start_lon/end_lat/end_lon existed (all null) — it must fill
+    them in from the refreshed result, the same way it already does for the
+    R8 track cache (see test_reanalyze_repopulates_the_cached_track above)."""
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+
+    with get_session_factory()() as session:
+        analysis = session.get(ActivityAnalysis, activity_id)
+        assert analysis is not None
+        analysis.start_lat = None
+        analysis.start_lon = None
+        analysis.end_lat = None
+        analysis.end_lon = None
+        analysis.analysis_version = 0
+        session.commit()
+
+    reanalyze(activity_id=activity_id, all_activities=False)
+
+    with get_session_factory()() as session:
+        analysis = session.get(ActivityAnalysis, activity_id)
+        assert analysis is not None
+        assert analysis.result is not None
+        assert analysis.start_lat == analysis.result["start"]["lat"]
+        assert analysis.start_lon == analysis.result["start"]["lon"]
+        assert analysis.end_lat == analysis.result["end"]["lat"]
+        assert analysis.end_lon == analysis.result["end"]["lon"]
+
+
+def test_reanalyze_leaves_coordinates_null_for_a_failed_analysis(app_client, auth_headers) -> None:
+    """A GPX that fails to analyze (parse error at reanalyze time) must not
+    leave stale/wrong coordinates behind — endpoints_from_result(None)
+    returns all-None, mirroring distance_and_duration_from_result's 0/0."""
+    from app.models.activity import Activity
+
+    ns = "https://simple-activity-tracker.local/gpx-extensions"
+    gpx = (
+        f'<?xml version="1.0"?><gpx version="1.1" xmlns:sat="{ns}">'
+        '<trk><trkseg><trkpt lat="51.5" lon="-0.1"><time>2026-01-01T07:00:00Z</time></trkpt>'
+        '<trkpt lat="51.51" lon="-0.1"><time>2026-01-01T07:05:00Z</time></trkpt>'
+        "</trkseg></trk></gpx>"
+    ).encode()
+    upload = upload_sample_activity(app_client, auth_headers, gpx)
+    activity_id = upload.json()["id"]
+    _stale_the_analysis(activity_id)
+
+    with get_session_factory()() as session:
+        activity = session.get(Activity, activity_id)
+        assert activity is not None
+        activity.gpx_blob_key = "does-not-exist-on-disk.gpx"
+        session.commit()
+
+    reanalyze(activity_id=activity_id, all_activities=False)
+
+    with get_session_factory()() as session:
+        analysis = session.get(ActivityAnalysis, activity_id)
+        assert analysis is not None
+        assert analysis.status == AnalysisStatus.failed
+        assert analysis.start_lat is None
+        assert analysis.start_lon is None
+        assert analysis.end_lat is None
+        assert analysis.end_lon is None
+
+
 def test_reanalyze_repopulates_the_cached_track(app_client, auth_headers, sample_gpx_bytes) -> None:
     """R8 in docs/SERVER-PRODUCTION-PLAN.md: reanalyze is the recovery path
     for rows analyzed before the track cache existed (track is null) — it
