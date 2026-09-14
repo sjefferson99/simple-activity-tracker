@@ -5,16 +5,18 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, Protocol
 
-from sqlalchemy import Select, UnaryExpression, exists, func, or_, select
+from sqlalchemy import Select, UnaryExpression, and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.selectable import Exists
 
+from app.analysis.geo_math import equirectangular_scale
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis
 from app.models.tag import Tag, activity_tags
 
 ActivityListSort = Literal["date", "distance"]
 ActivityListDirection = Literal["asc", "desc"]
+ActivityListGeoMode = Literal["start", "finish", "either", "both"]
 
 # LIKE needs its wildcard/escape characters escaped in user-supplied text, or
 # a search for a literal "%" or "_" would behave as a wildcard instead —
@@ -40,14 +42,25 @@ class ActivityListFilters:
     every whitespace-separated term must match *something* (not necessarily
     the same column), case-insensitively. `min_m`/`max_m` bound the same
     denormalized distance the list already sorts and displays (issue #75).
-    The location filter (lat/lon/radius/geo) arrives in a follow-up PR."""
+    `lat`/`lon`/`radius_m`/`geo` filter by proximity to an activity's start
+    and/or finish coordinates (see ActivityAnalysis.start_lat etc., added in
+    a companion PR) — only applied when both `lat` and `lon` are set."""
 
     text: str | None = None
     min_m: float | None = None
     max_m: float | None = None
+    lat: float | None = None
+    lon: float | None = None
+    radius_m: float | None = None
+    geo: ActivityListGeoMode = "either"
 
     def is_active(self) -> bool:
-        return bool(self.text) or self.min_m is not None or self.max_m is not None
+        return (
+            bool(self.text)
+            or self.min_m is not None
+            or self.max_m is not None
+            or (self.lat is not None and self.lon is not None)
+        )
 
 
 _NO_FILTERS = ActivityListFilters()
@@ -111,6 +124,7 @@ class ActivityRepository(Protocol):
         direction: ActivityListDirection,
         filters: ActivityListFilters = _NO_FILTERS,
     ) -> ActivityListPage: ...
+    def most_recent_start_point(self, user_id: str) -> tuple[float, float] | None: ...
     def delete(self, activity: Activity) -> None: ...
 
 
@@ -258,7 +272,70 @@ class SqlAlchemyActivityRepository:
         if filters.max_m is not None:
             stmt = stmt.where(distance <= filters.max_m)
 
+        if filters.lat is not None and filters.lon is not None and filters.radius_m is not None:
+            stmt = stmt.where(self._near_clause(filters))
+
         return stmt
+
+    @staticmethod
+    def _near_clause(filters: ActivityListFilters) -> Any:
+        """Builds the "within radius_m of (lat, lon)" WHERE clause for the
+        given geo mode — see equirectangular_scale's docstring for the
+        approximation this is built on. A null start/end coordinate (an
+        activity with no analysis, a failed one, or one analyzed before
+        issue #76's endpoint columns existed) never satisfies the
+        comparison — SQL's NULL semantics already give the right answer
+        with no extra `IS NOT NULL` guard needed."""
+        assert filters.lat is not None  # noqa: S101 -- caller already checked
+        assert filters.lon is not None  # noqa: S101 -- caller already checked
+        assert filters.radius_m is not None  # noqa: S101 -- caller already checked
+        k_lat, k_lon = equirectangular_scale(filters.lat)
+        radius_sq = filters.radius_m**2
+
+        def near(lat_col: Any, lon_col: Any) -> Any:
+            # Plain multiplication rather than func.power()/POWER(): SQLite
+            # only exposes that as a math function when compiled with
+            # -DSQLITE_ENABLE_MATH_FUNCTIONS (true for the dev/container
+            # builds checked, but not guaranteed for every SQLite this app
+            # might run against) — squaring by multiplying is portable SQL.
+            d_lat = (lat_col - filters.lat) * k_lat
+            d_lon = (lon_col - filters.lon) * k_lon
+            return (d_lat * d_lat) + (d_lon * d_lon) <= radius_sq
+
+        start_near = near(ActivityAnalysis.start_lat, ActivityAnalysis.start_lon)
+        finish_near = near(ActivityAnalysis.end_lat, ActivityAnalysis.end_lon)
+
+        if filters.geo == "start":
+            return start_near
+        if filters.geo == "finish":
+            return finish_near
+        if filters.geo == "both":
+            return and_(start_near, finish_near)
+        return or_(start_near, finish_near)  # "either"
+
+    def most_recent_start_point(self, user_id: str) -> tuple[float, float] | None:
+        """The user's most recently started activity's start coordinates, or
+        None if they have no analysed activity with one — used only to pick
+        a sensible initial center for the map picker (issue #76) so it
+        doesn't open on the middle of the ocean for a first-time user.
+        Deliberately ignores whether that activity's coordinates are null
+        (no analysis, or analysed before the endpoint columns existed):
+        `started_at DESC` naturally skips it in favor of an older activity
+        that does have coordinates, at the cost of one extra row scanned in
+        the rare case the very latest activity lacks them."""
+        stmt = (
+            select(ActivityAnalysis.start_lat, ActivityAnalysis.start_lon)
+            .join(Activity, Activity.id == ActivityAnalysis.activity_id)
+            .where(
+                Activity.user_id == user_id,
+                ActivityAnalysis.start_lat.isnot(None),
+                ActivityAnalysis.start_lon.isnot(None),
+            )
+            .order_by(Activity.started_at.desc())
+            .limit(1)
+        )
+        row = self._session.execute(stmt).first()
+        return (row[0], row[1]) if row is not None else None
 
     def delete(self, activity: Activity) -> None:
         self._session.delete(activity)

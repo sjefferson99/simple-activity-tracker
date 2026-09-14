@@ -73,6 +73,26 @@ def test_activity_list_renders_for_signed_in_user(app_client, sample_gpx_bytes, 
     assert "km" in response.text
 
 
+def test_activity_list_includes_the_map_picker(app_client, sample_gpx_bytes, auth_headers):
+    """The full-page render (not the htmx fragment) must ship the map picker
+    markup and the vendored Leaflet script — see partials/activity_search_form.html
+    and activities_list.html's scripts block."""
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/")
+    assert response.status_code == 200
+    assert 'id="map-picker-toggle"' in response.text
+    assert 'id="search-map"' in response.text
+    assert "/static/vendor/leaflet/leaflet.js" in response.text
+    assert "/static/vendor/leaflet/leaflet.css" in response.text
+
+    # The htmx fragment (a sort/page/search response) must NOT re-render the
+    # picker or re-send Leaflet — it only lives in the full page.
+    fragment = app_client.get("/", headers={"HX-Request": "true"})
+    assert 'id="map-picker-toggle"' not in fragment.text
+
+
 def test_activity_list_shows_analyzed_distance_not_phone_summary(
     app_client, sample_gpx_bytes, auth_headers
 ):
@@ -629,6 +649,100 @@ def test_activity_distance_filter_non_numeric_shows_notice(
     assert response.status_code == 200
     assert "must be a number" in response.text
     assert "activity-list-item" in response.text
+
+
+def test_activity_geo_filter_out_of_range_latitude_shows_notice(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"lat": "95", "lon": "0"})
+    assert response.status_code == 200
+    assert "Latitude must be between" in response.text
+    # The invalid geo filter is ignored entirely — the unfiltered list still shows.
+    assert "activity-list-item" in response.text
+
+
+def test_activity_geo_filter_non_numeric_radius_shows_notice(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"lat": "51.5", "lon": "-0.1", "radius_km": "abc"})
+    assert response.status_code == 200
+    assert "Search radius must be a number" in response.text
+
+
+def test_activity_geo_filter_radius_out_of_range_shows_notice(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"lat": "51.5", "lon": "-0.1", "radius_km": "500"})
+    assert response.status_code == 200
+    assert "Search radius must be between" in response.text
+
+
+def test_activity_geo_filter_lat_without_lon_shows_notice(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"lat": "51.5"})
+    assert response.status_code == 200
+    assert "Latitude must be between" in response.text
+
+
+def test_activity_geo_filter_params_are_preserved_in_sort_and_page_links(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get(
+        "/", params={"lat": "51.5", "lon": "-0.1", "radius_km": "2", "geo": "start"}
+    )
+    assert response.status_code == 200
+    assert "lat=51.5" in response.text
+    assert "lon=-0.1" in response.text
+    assert "radius_km=2" in response.text
+    assert "geo=start" in response.text
+
+
+def test_activity_geo_filter_finds_activity_by_start_point(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """End-to-end through the web route (not just the repository) — the
+    fixture's own real start point, looked up from the analysis JSON, must
+    be found by a nearby search."""
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+
+    from app.db import get_session_factory
+    from app.models.activity_analysis import ActivityAnalysis
+
+    with get_session_factory()() as session:
+        analysis = session.get(ActivityAnalysis, activity_id)
+        assert analysis is not None
+        analysis.start_lat = 51.5
+        analysis.start_lon = -0.1
+        session.commit()
+
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    nearby = app_client.get(
+        "/", params={"lat": "51.5", "lon": "-0.1", "radius_km": "1", "geo": "start"}
+    )
+    assert "activity-list-item" in nearby.text
+
+    far_away = app_client.get(
+        "/", params={"lat": "0", "lon": "0", "radius_km": "1", "geo": "start"}
+    )
+    assert "No activities match your search" in far_away.text
 
 
 def test_activity_detail_renders_with_map_and_analysis(app_client, sample_gpx_bytes, auth_headers):

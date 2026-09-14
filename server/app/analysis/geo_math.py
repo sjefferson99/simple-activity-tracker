@@ -24,3 +24,34 @@ def speed_mps_between(a: Point, b: Point) -> float | None:
     if dt_seconds <= 0:
         return None
     return haversine_distance_meters(a, b) / dt_seconds
+
+
+# Meters per degree of latitude (and, at the equator, of longitude) — the
+# mean value along a meridian, accurate enough for the tolerance a "within N
+# km of this point" search needs (issue #76).
+_METERS_PER_DEGREE = 111_320.0
+
+
+def equirectangular_scale(lat_deg: float) -> tuple[float, float]:
+    """Returns (k_lat, k_lon): meters per degree of latitude and, at this
+    latitude, meters per degree of longitude — for a cheap equirectangular
+    approximation of distance from a fixed point, usable directly in SQL as
+    plain arithmetic (see ActivityListFilters' location filter in
+    app/repositories/activities.py):
+
+        ((lat_col - lat) * k_lat) ** 2 + ((lon_col - lon) * k_lon) ** 2 <= radius_m ** 2
+
+    This is an approximation, not the haversine great-circle distance used
+    elsewhere in this module — it assumes a locally flat Earth around
+    (lat_deg, lon), which is why k_lon depends on latitude (a degree of
+    longitude shrinks towards the poles) while k_lat doesn't. The error is
+    well under 0.5% for radii up to ~50km at any latitude a runner is
+    realistically at, comfortably inside GPS noise, and it degrades badly
+    only near the poles or across the antimeridian — neither is a concern
+    here. It is *not* accurate enough to reuse for the analyzer's own
+    distance/speed calculations, which keep using haversine_distance_meters
+    for exactly that reason.
+    """
+    k_lat = _METERS_PER_DEGREE
+    k_lon = _METERS_PER_DEGREE * math.cos(math.radians(lat_deg))
+    return k_lat, k_lon

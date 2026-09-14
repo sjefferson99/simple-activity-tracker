@@ -310,6 +310,8 @@ button.secondary:hover, .button.secondary:hover { background: var(--bg); }
 }
 #activity-search-q { width: 14rem; }
 #activity-search-min-km, #activity-search-max-km { width: 7rem; }
+#activity-search-lat, #activity-search-lon { width: 7rem; }
+#activity-search-radius-km { width: 5rem; }
 .activity-search-actions {
   display: flex;
   gap: 0.75rem;
@@ -327,6 +329,31 @@ button.secondary:hover, .button.secondary:hover { background: var(--bg); }
   padding-right: 0.75rem;
   border-right: 1px solid var(--border);
 }
+
+.activity-search-geo { margin-top: 0.75rem; }
+.activity-search-geo-row { margin-top: 0.5rem; }
+.activity-search-geo-radios {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  padding-top: 0.3rem;
+}
+.radio-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: normal;
+  color: var(--text);
+  white-space: nowrap;
+}
+.radio-label input[type="radio"] {
+  width: auto;
+  margin: 0;
+}
+#map-picker { margin-top: 0.75rem; }
+#search-map { height: 280px; border-radius: 8px; }
 
 .filter-errors {
   color: var(--danger);

@@ -44,6 +44,7 @@ from app.models.user import _new_uuid
 from app.repositories.activities import (
     ActivityListDirection,
     ActivityListFilters,
+    ActivityListGeoMode,
     ActivityListSort,
     SqlAlchemyActivityRepository,
 )
@@ -110,6 +111,10 @@ def _activity_list_view(activity: Activity, analysis: ActivityAnalysis | None) -
 _PER_PAGE_CHOICES = (20, 100)
 _MAX_QUERY_CHARS = 200
 _MAX_KM = 10000.0
+_MIN_RADIUS_KM = 0.05
+_MAX_RADIUS_KM = 100.0
+_DEFAULT_RADIUS_KM = 1.0
+_GEO_MODES = ("start", "finish", "either", "both")
 
 
 def _parse_per_page(raw: str) -> int | None:
@@ -146,6 +151,69 @@ def _parse_km(raw: str, *, field_label: str, errors: list[str]) -> float | None:
     return km * 1000.0
 
 
+def _parse_geo_filter(
+    *, lat: str, lon: str, radius_km: str, geo: str, errors: list[str]
+) -> tuple[float | None, float | None, float | None, ActivityListGeoMode]:
+    """Parses the location-search params into (lat, lon, radius_m, geo_mode).
+    The geo filter only applies when *both* lat and lon parse successfully —
+    a lat with no lon (or vice versa) is treated the same as neither being
+    set, with a notice explaining why, rather than silently guessing. `geo`
+    always resolves to a valid mode (defaulting to "either") since it's a
+    fixed set of radio values, not free text — an unrecognized value can
+    only come from a tampered URL, so it's corrected silently like
+    _parse_per_page does for an unknown sort key."""
+    geo_mode: ActivityListGeoMode = geo if geo in _GEO_MODES else "either"  # type: ignore[assignment]
+
+    lat = lat.strip()
+    lon = lon.strip()
+    if not lat and not lon:
+        return None, None, None, geo_mode
+
+    lat_value: float | None = None
+    lon_value: float | None = None
+    ok = True
+    if lat:
+        try:
+            lat_value = float(lat)
+        except ValueError:
+            ok = False
+        else:
+            if not (-90.0 <= lat_value <= 90.0):
+                ok = False
+    else:
+        ok = False
+    if lon:
+        try:
+            lon_value = float(lon)
+        except ValueError:
+            ok = False
+        else:
+            if not (-180.0 <= lon_value <= 180.0):
+                ok = False
+    else:
+        ok = False
+
+    if not ok:
+        errors.append("Latitude must be between -90 and 90, and longitude between -180 and 180.")
+        return None, None, None, geo_mode
+
+    radius_km = radius_km.strip()
+    radius_value = _DEFAULT_RADIUS_KM
+    if radius_km:
+        try:
+            radius_value = float(radius_km)
+        except ValueError:
+            errors.append("Search radius must be a number.")
+            return None, None, None, geo_mode
+        if not (_MIN_RADIUS_KM <= radius_value <= _MAX_RADIUS_KM):
+            errors.append(
+                f"Search radius must be between {_MIN_RADIUS_KM:g} and {_MAX_RADIUS_KM:g} km."
+            )
+            return None, None, None, geo_mode
+
+    return lat_value, lon_value, radius_value * 1000.0, geo_mode
+
+
 @router.get("/")
 def activity_list(
     request: Request,
@@ -158,6 +226,10 @@ def activity_list(
     q: str = "",
     min_km: str = "",
     max_km: str = "",
+    lat: str = "",
+    lon: str = "",
+    radius_km: str = "",
+    geo: str = "",
 ) -> Response:
     # Every param is read as a plain str and validated/defaulted here rather
     # than via FastAPI's own type/Literal coercion, so a tampered or stale
@@ -180,7 +252,19 @@ def activity_list(
         filter_errors.append("Minimum distance must not be greater than maximum distance.")
         min_m = max_m = None
 
-    filters = ActivityListFilters(text=q or None, min_m=min_m, max_m=max_m)
+    lat_value, lon_value, radius_m, geo_mode = _parse_geo_filter(
+        lat=lat, lon=lon, radius_km=radius_km, geo=geo, errors=filter_errors
+    )
+
+    filters = ActivityListFilters(
+        text=q or None,
+        min_m=min_m,
+        max_m=max_m,
+        lat=lat_value,
+        lon=lon_value,
+        radius_m=radius_m,
+        geo=geo_mode,
+    )
 
     activities_repo = SqlAlchemyActivityRepository(session)
     # list_for_user_page clamps page to [1, total_pages] itself, so a stale
@@ -204,6 +288,10 @@ def activity_list(
         q=q,
         min_km=min_km.strip(),
         max_km=max_km.strip(),
+        lat=lat.strip(),
+        lon=lon.strip(),
+        radius_km=radius_km.strip(),
+        geo=geo_mode,
     )
     context = {
         "user": user,
@@ -227,6 +315,12 @@ def activity_list(
     # cheap even as more cards get added to the page over time.
     if request.headers.get("hx-request") == "true":
         return templates.TemplateResponse(request, "partials/activity_list_or_empty.html", context)
+
+    # The map picker (partials/activity_search_form.html) only exists on the
+    # full page render, not the htmx fragment above — so this extra query is
+    # skipped on every sort/page/search click, which is by far the more
+    # common request.
+    context["map_default_center"] = activities_repo.most_recent_start_point(user.id)
     return templates.TemplateResponse(request, "activities_list.html", context)
 
 
