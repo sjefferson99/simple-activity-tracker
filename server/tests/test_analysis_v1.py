@@ -328,3 +328,86 @@ def test_a_single_sparse_step_crossing_multiple_time_boundaries_produces_every_s
     for split in splits:
         assert split["duration_seconds"] == pytest.approx(120.0, abs=0.5)
         assert split["distance_m"] == pytest.approx(240.0, rel=0.01)
+
+
+def _straight_line_track(
+    *, n_points: int, step_m: float, step_s: float, ele: float | None = 100.0
+) -> Track:
+    """A straight line moving east, n_points fixes step_s apart, each
+    step_m further along — used below to build a track with one bad leading
+    point stitched onto an otherwise-clean run/ride."""
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    lon_per_meter = 1 / 111195
+    points = [
+        Point(
+            lat=0.0,
+            lon=i * step_m * lon_per_meter,
+            ele=ele,
+            time=start + timedelta(seconds=i * step_s),
+        )
+        for i in range(n_points)
+    ]
+    return Track(segments=[Segment(points=points)])
+
+
+def test_a_stale_low_accuracy_leading_point_is_excluded_from_start_and_bounds() -> None:
+    """Regression for issue #83: a real activity's very first GPS fix was a
+    stale/cold fix ~5km from the true start, flagged by a sat:accuracy
+    extension of 1000m (every other point was ~10m or better). The implied-
+    speed check already excluded the *step* into it, but the point itself
+    still became `start` and skewed `bounds` and the series' first speed
+    sample. Points with poor accuracy must be dropped before any of that is
+    derived, not just have their connecting step dropped."""
+    track = _straight_line_track(n_points=20, step_m=3.0, step_s=1.0)
+    bad_point = Point(
+        lat=5.0, lon=5.0, ele=100.0, time=track.segments[0].points[0].time, accuracy_m=1000.0
+    )
+    stitched = Track(segments=[Segment(points=[bad_point, *track.segments[0].points])])
+
+    result = AnalyzerV1().analyze(stitched)
+
+    true_start = track.segments[0].points[0]
+    assert result["start"] == {"lat": true_start.lat, "lon": true_start.lon}
+    bounds = result["bounds"]
+    assert bounds is not None
+    assert bounds["max_lat"] < 1.0  # the bad point's lat=5.0 must not appear
+    assert bounds["max_lon"] < 1.0  # the bad point's lon=5.0 must not appear
+    # No huge speed spike in the series' first sample either.
+    for sample in result["series"]:
+        if sample["speed_mps"] is not None:
+            assert sample["speed_mps"] < 50.0
+
+
+def test_a_point_with_no_accuracy_data_is_never_dropped() -> None:
+    """A GPX with no sat:accuracy extension at all (an old recording, a
+    manually-uploaded/imported file) must analyze exactly as before — a
+    missing accuracy is not evidence of a bad point, only an unmeasured one."""
+    track = parse_gpx(_FIXTURE.read_bytes())
+    assert all(p.accuracy_m is None for segment in track.segments for p in segment.points)
+    result = AnalyzerV1().analyze(track)
+    assert result["distance_meters"] == pytest.approx(_EXPECTED_DISTANCE_M, rel=0.01)
+
+
+def test_cycling_activity_type_raises_the_implied_speed_cap() -> None:
+    """Regression for issue #83: a cycling activity's genuine ~20 m/s (72
+    km/h) descent used to be misclassified as a GPS jump under the
+    running-only 12.5 m/s cap, breaking the step chain mid-ride. Passing
+    activity_type="cycling" should accept it as real motion."""
+    track = _straight_line_track(n_points=10, step_m=20.0, step_s=1.0)  # 20 m/s throughout
+
+    running_result = AnalyzerV1().analyze(track, activity_type="running")
+    cycling_result = AnalyzerV1().analyze(track, activity_type="cycling")
+
+    # Under the running cap, every step is an implausible jump and gets
+    # dropped, so distance collapses to ~0.
+    assert running_result["distance_meters"] < 5.0
+    # Under the cycling cap, the same steps are accepted as real motion.
+    assert cycling_result["distance_meters"] == pytest.approx(9 * 20.0, rel=0.01)
+
+
+def test_unknown_activity_type_falls_back_to_the_running_cap() -> None:
+    """A future/unrecognised activity_type string must not silently disable
+    jump rejection — falls back to the conservative running threshold."""
+    track = _straight_line_track(n_points=10, step_m=20.0, step_s=1.0)  # 20 m/s throughout
+    result = AnalyzerV1().analyze(track, activity_type="swimming")
+    assert result["distance_meters"] < 5.0

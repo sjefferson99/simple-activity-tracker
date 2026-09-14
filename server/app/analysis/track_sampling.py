@@ -6,7 +6,7 @@ for a non-default request, without duplicating the sampling logic."""
 
 from typing import Any
 
-from app.analysis.track import Track
+from app.analysis.track import Track, drop_inaccurate_points
 
 DEFAULT_MAX_POINTS = 2000
 
@@ -17,11 +17,14 @@ def sample_track(track: Track, *, max_points: int) -> dict[str, Any]:
     can be stored as JSON and re-served without re-parsing the GPX. `t` on
     every point is relative to the first point of the first segment, so a
     gap between segments (e.g. a pause/resume) is reflected in later
-    segments' timestamps rather than each segment restarting at zero."""
+    segments' timestamps rather than each segment restarting at zero.
+    Poor-accuracy points are dropped first (see drop_inaccurate_points) so a
+    stale GPS fix doesn't appear as a stray marker/skewed bounds on the map —
+    same filter AnalyzerV1 applies, issue #83."""
     out_segments: list[list[dict[str, Any]]] = []
     start_time = track.segments[0].points[0].time
     for segment in track.segments:
-        points = segment.points
+        points = drop_inaccurate_points(segment.points) or segment.points
         stride = max(1, -(-len(points) // max_points))
         sampled = points[::stride]
         if sampled[-1] is not points[-1]:

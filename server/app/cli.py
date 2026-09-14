@@ -127,7 +127,9 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
                 # (see docs history: pre-existing defaults aren't backfilled).
                 split_pref = parse_split_preference(gpx_bytes)
                 result = (
-                    analyzer.analyze(track, *split_pref) if split_pref else analyzer.analyze(track)
+                    analyzer.analyze(track, *split_pref, activity_type=activity.activity_type)
+                    if split_pref
+                    else analyzer.analyze(track, activity_type=activity.activity_type)
                 )
                 cached_track = sample_track(track, max_points=DEFAULT_MAX_POINTS)
                 status = AnalysisStatus.done
@@ -206,7 +208,8 @@ def gc(*, apply: bool) -> None:
 
 
 def run() -> None:
-    """validate config -> migrate (or refuse to start if behind) -> bootstrap admin -> serve."""
+    """validate config -> migrate (or refuse to start if behind) -> reanalyze
+    stale activities -> bootstrap admin -> serve."""
     import uvicorn
     from pydantic import ValidationError
 
@@ -238,6 +241,19 @@ def run() -> None:
             "Database is not at the latest migration and SR_AUTO_MIGRATE=false — "
             "refusing to start. Run `simple-activity-tracker-server migrate` first."
         )
+
+    if settings.auto_reanalyze:
+        # Picks up any activity whose stored ActivityAnalysis predates the
+        # current ANALYSIS_VERSION (a bumped analyzer version ships in the
+        # same release as the code that reads it) — an analyzer bugfix or
+        # algorithm change (e.g. issue #83) then reaches every existing
+        # user's already-uploaded activities on upgrade, with no manual CLI
+        # step and no re-upload from the phone. A no-op, fast pass when
+        # nothing is stale (see reanalyze()'s docstring/query). Runs before
+        # the app starts serving, same as migrate() above, so no one can
+        # load a page showing analysis computed under an old, possibly-wrong
+        # algorithm right after an upgrade.
+        reanalyze(activity_id=None, all_activities=True)
 
     with get_session_factory()() as session:
         bootstrap_admin_if_needed(session)

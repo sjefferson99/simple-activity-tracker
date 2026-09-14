@@ -8,6 +8,10 @@ class Point:
     lon: float
     ele: float | None
     time: datetime
+    # From the optional sat:accuracy/sat:has_accuracy GPX extensions (mobile
+    # only, see gpx_parser.parse_gpx) — None when absent/unmeasured, distinct
+    # from a genuinely good accuracy value.
+    accuracy_m: float | None = None
 
 
 @dataclass(frozen=True)
@@ -26,3 +30,25 @@ class Track:
     @property
     def point_count(self) -> int:
         return sum(len(segment.points) for segment in self.segments)
+
+
+# A point whose sat:accuracy extension reports worse than this is dropped by
+# drop_inaccurate_points() — same 25m threshold and "missing accuracy is not
+# the same as good accuracy" treatment as mobile MetricsEngine's own live
+# filter (_maxAcceptableAccuracyMeters). A GPX with no accuracy data at all
+# (an old recording, a non-mobile import) is unaffected: Point.accuracy_m is
+# None, which never triggers this filter.
+MAX_ACCEPTABLE_ACCURACY_M = 25.0
+
+
+def drop_inaccurate_points(points: list[Point]) -> list[Point]:
+    """Excludes points whose sat:accuracy extension reports worse than
+    MAX_ACCEPTABLE_ACCURACY_M — chiefly the stale/cold fix mobile devices
+    sometimes report before GPS has a real lock (issue #83: such a point
+    could become an analysis' `start`, skew its `bounds`, and appear as a
+    stray marker on the map, even though the implied-speed jump check already
+    excludes the *step* into/out of it). Shared by AnalyzerV1 and
+    track_sampling.sample_track so the map and the analysis agree on which
+    points are trustworthy. A point with no accuracy data at all
+    (accuracy_m is None) is always kept."""
+    return [p for p in points if p.accuracy_m is None or p.accuracy_m <= MAX_ACCEPTABLE_ACCURACY_M]

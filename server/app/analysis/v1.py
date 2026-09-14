@@ -3,16 +3,29 @@ from dataclasses import dataclass, field
 
 from app.analysis.analyzer import AnalysisResult
 from app.analysis.geo_math import haversine_distance_meters, speed_mps_between
-from app.analysis.track import Point, Track
+from app.analysis.track import Point, Track, drop_inaccurate_points
 
-# 5: result gained `start`/`end` ({"lat", "lon"} of the first/last point,
-# issue #76) so activity search can filter by proximity to a run's start or
-# finish. Bump this whenever the result shape or algorithm changes, then run
+# 6: implied-speed GPS-jump rejection now varies by activity_type instead of
+# always using the running threshold (issue #83 — genuine cycling speeds were
+# being misclassified as jumps), and points with a poor/missing sat:accuracy
+# extension (e.g. a stale fix before the GPS lock settles) are dropped before
+# analysis rather than left to poison `start`/`bounds`/the series' first
+# sample. Bump this whenever the result shape or algorithm changes, then run
 # `simple-activity-tracker-server reanalyze --all` on each deployment so
 # stored analyses catch up — the web UI reads stored results as-is.
-ANALYSIS_VERSION = 5
+ANALYSIS_VERSION = 6
 
-_MAX_IMPLIED_SPEED_MPS = 12.5  # ~2:08 min/km; faster than that is treated as a GPS jump
+# ~2:08 min/km for running; a cyclist routinely exceeds that, so use a higher
+# cap for cycling — mirrors mobile MetricsEngine's per-ActivityMode
+# _PlausibilityLimits.maxPlausibleSpeedMps (mobile/lib/domain/tracking/metrics_engine.dart),
+# same values, same reasoning: no one sustains more than this for the given
+# activity, so a faster-implied segment is a bad fix, not real motion.
+_MAX_IMPLIED_SPEED_MPS_BY_ACTIVITY_TYPE: dict[str, float] = {
+    "running": 12.0,
+    "cycling": 25.0,  # 90 km/h
+}
+_DEFAULT_MAX_IMPLIED_SPEED_MPS = 12.0
+
 _MOVING_SPEED_THRESHOLD_MPS = 0.5
 _SERIES_MAX_SAMPLES = 300
 _BEST_EFFORT_DISTANCES_METERS = (1000.0, 5000.0, 10000.0)
@@ -98,16 +111,16 @@ def _smoothed_elevations(points: list[Point]) -> list[float | None]:
     return result
 
 
-def _build_steps(track: Track) -> list[_Step]:
+def _build_steps(segments: list[list[Point]], max_implied_speed_mps: float) -> list[_Step]:
     steps: list[_Step] = []
     cum_distance = 0.0
     cum_time = 0.0
-    for segment in track.segments:
-        for prev, curr in zip(segment.points, segment.points[1:], strict=False):
+    for points in segments:
+        for prev, curr in itertools.pairwise(points):
             distance = haversine_distance_meters(prev, curr)
             speed = speed_mps_between(prev, curr)
             dt = (curr.time - prev.time).total_seconds()
-            if speed is not None and speed > _MAX_IMPLIED_SPEED_MPS:
+            if speed is not None and speed > max_implied_speed_mps:
                 # v1 behaviour: drop the step entirely rather than try to
                 # re-anchor (unlike the phone's live filter, which needs to
                 # keep tracking through a jump) — a finished GPX is analysed
@@ -426,9 +439,9 @@ def _series(
     return samples
 
 
-def _bounds(track: Track) -> dict[str, float] | None:
-    lats = [p.lat for segment in track.segments for p in segment.points]
-    lons = [p.lon for segment in track.segments for p in segment.points]
+def _bounds(segments: list[list[Point]]) -> dict[str, float] | None:
+    lats = [p.lat for points in segments for p in points]
+    lons = [p.lon for points in segments for p in points]
     if not lats:
         return None
     return {
@@ -448,12 +461,27 @@ class AnalyzerV1:
         track: Track,
         split_type: str = _DEFAULT_SPLIT_TYPE,
         split_value: int = _DEFAULT_SPLIT_VALUE,
+        activity_type: str = "running",
     ) -> AnalysisResult:
         all_points = [p for segment in track.segments for p in segment.points]
         if not all_points:
             raise ValueError("Track has no points")
 
-        steps = _build_steps(track)
+        # Drop poor-accuracy points (e.g. a stale fix before GPS locks) per
+        # segment, before anything else derives start/end/bounds/steps from
+        # them — issue #83. Never let this empty out a segment that had real
+        # points; if filtering would remove everything in a segment, keep its
+        # original points instead (the implied-speed jump check in
+        # _build_steps is still there as a second line of defense).
+        filtered_segments = [
+            drop_inaccurate_points(segment.points) or segment.points for segment in track.segments
+        ]
+        all_points = [p for points in filtered_segments for p in points]
+
+        max_implied_speed_mps = _MAX_IMPLIED_SPEED_MPS_BY_ACTIVITY_TYPE.get(
+            activity_type, _DEFAULT_MAX_IMPLIED_SPEED_MPS
+        )
+        steps = _build_steps(filtered_segments, max_implied_speed_mps)
         smoothed = _smoothed_elevations(all_points)
         windowed_speeds = _windowed_speeds(steps, all_points[0])
 
@@ -478,7 +506,7 @@ class AnalyzerV1:
             "splits": _compute_splits(steps, all_points[0], split_type, split_value),
             "best_efforts": _best_efforts(steps),
             "series": _series(steps, smoothed, windowed_speeds, all_points[0]),
-            "bounds": _bounds(track),
+            "bounds": _bounds(filtered_segments),
             "start": {"lat": all_points[0].lat, "lon": all_points[0].lon},
             "end": {"lat": all_points[-1].lat, "lon": all_points[-1].lon},
             "point_count": track.point_count,
