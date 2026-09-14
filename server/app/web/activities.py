@@ -43,6 +43,7 @@ from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
 from app.models.user import _new_uuid
 from app.repositories.activities import (
     ActivityListDirection,
+    ActivityListFilters,
     ActivityListSort,
     SqlAlchemyActivityRepository,
 )
@@ -57,6 +58,7 @@ from app.validation import (
     validate_tag_name,
 )
 from app.web.deps import WebUser, require_htmx_header
+from app.web.list_query import ActivityListQuery
 from app.web.templating import templates
 
 router = APIRouter(tags=["web"], include_in_schema=False)
@@ -106,6 +108,8 @@ def _activity_list_view(activity: Activity, analysis: ActivityAnalysis | None) -
 
 
 _PER_PAGE_CHOICES = (20, 100)
+_MAX_QUERY_CHARS = 200
+_MAX_KM = 10000.0
 
 
 def _parse_per_page(raw: str) -> int | None:
@@ -121,6 +125,27 @@ def _parse_per_page(raw: str) -> int | None:
     return value if value in _PER_PAGE_CHOICES else _PER_PAGE_CHOICES[0]
 
 
+def _parse_km(raw: str, *, field_label: str, errors: list[str]) -> float | None:
+    """Parses an optional min_km/max_km query param into meters. Blank means
+    "not set" (None, no error). An invalid or out-of-range value is skipped
+    (filter not applied) with a message appended to `errors` — never a 422,
+    since this is a page a human is just browsing (matches _parse_per_page's
+    reasoning), but silently ignoring a value the user actually typed would
+    leave them wondering why the filter did nothing."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        km = float(raw)
+    except ValueError:
+        errors.append(f"{field_label} must be a number.")
+        return None
+    if km < 0 or km > _MAX_KM:
+        errors.append(f"{field_label} must be between 0 and {_MAX_KM:g} km.")
+        return None
+    return km * 1000.0
+
+
 @router.get("/")
 def activity_list(
     request: Request,
@@ -130,6 +155,9 @@ def activity_list(
     per_page: str = "20",
     sort: str = "date",
     dir: str = "desc",
+    q: str = "",
+    min_km: str = "",
+    max_km: str = "",
 ) -> Response:
     # Every param is read as a plain str and validated/defaulted here rather
     # than via FastAPI's own type/Literal coercion, so a tampered or stale
@@ -144,14 +172,39 @@ def activity_list(
     sort_value: ActivityListSort = "distance" if sort == "distance" else "date"
     dir_value: ActivityListDirection = "asc" if dir == "asc" else "desc"
 
+    q = q.strip()[:_MAX_QUERY_CHARS]
+    filter_errors: list[str] = []
+    min_m = _parse_km(min_km, field_label="Minimum distance", errors=filter_errors)
+    max_m = _parse_km(max_km, field_label="Maximum distance", errors=filter_errors)
+    if min_m is not None and max_m is not None and min_m > max_m:
+        filter_errors.append("Minimum distance must not be greater than maximum distance.")
+        min_m = max_m = None
+
+    filters = ActivityListFilters(text=q or None, min_m=min_m, max_m=max_m)
+
     activities_repo = SqlAlchemyActivityRepository(session)
     # list_for_user_page clamps page to [1, total_pages] itself, so a stale
-    # page number (rows deleted since, or a hand-edited URL) never needs a
-    # second query here — one call always returns a valid page.
+    # page number (rows deleted since, activities deleted, or a filter that
+    # now matches fewer rows) never needs a second query here — one call
+    # always returns a valid page.
     result = activities_repo.list_for_user_page(
-        user.id, page=page_num, per_page=per_page_value, sort=sort_value, direction=dir_value
+        user.id,
+        page=page_num,
+        per_page=per_page_value,
+        sort=sort_value,
+        direction=dir_value,
+        filters=filters,
     )
 
+    list_query = ActivityListQuery(
+        page=result.page,
+        per_page="all" if result.per_page is None else str(result.per_page),
+        sort=sort_value,
+        dir=dir_value,
+        q=q,
+        min_km=min_km.strip(),
+        max_km=max_km.strip(),
+    )
     context = {
         "user": user,
         "activities": [
@@ -163,12 +216,15 @@ def activity_list(
         "total": result.total,
         "sort": sort_value,
         "dir": dir_value,
+        "list_query": list_query,
+        "filters_active": filters.is_active(),
+        "filter_errors": filter_errors,
     }
-    # Sort/page/per-page controls all target #activity-list-region — for an
-    # htmx request from one of them, render just that fragment
+    # Sort/page/per-page/search controls all target #activity-list-region —
+    # for an htmx request from one of them, render just that fragment
     # (activity_list_or_empty.html) instead of the whole page (upload/import/
-    # Strava/export cards included), so a sort/page click stays cheap even
-    # as more cards get added to the page over time.
+    # Strava/export cards included), so a sort/page/search action stays
+    # cheap even as more cards get added to the page over time.
     if request.headers.get("hx-request") == "true":
         return templates.TemplateResponse(request, "partials/activity_list_or_empty.html", context)
     return templates.TemplateResponse(request, "activities_list.html", context)

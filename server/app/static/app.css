@@ -146,7 +146,7 @@ th { color: var(--text-muted); font-weight: 500; font-size: 0.85rem; }
 
 label { display: block; margin-bottom: 0.3rem; color: var(--text-muted); font-size: 0.9rem; }
 
-input[type="text"], input[type="email"], input[type="password"], input[type="number"], textarea, select {
+input[type="text"], input[type="email"], input[type="password"], input[type="number"], input[type="search"], textarea, select {
   width: 100%;
   padding: 0.5rem 0.65rem;
   background: var(--bg);
@@ -294,3 +294,44 @@ button.secondary:hover, .button.secondary:hover { background: var(--bg); }
 
 .muted { color: var(--text-muted); }
 .text-right { text-align: right; }
+
+.activity-search-form { margin-bottom: 1rem; }
+.activity-search-row { align-items: flex-end; }
+.activity-search-row > div { margin-bottom: 0; }
+.activity-search-row label {
+  margin: 0 0 0.3rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.activity-search-row input {
+  margin-bottom: 0;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+}
+#activity-search-q { width: 14rem; }
+#activity-search-min-km, #activity-search-max-km { width: 7rem; }
+.activity-search-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  /* Matches the inputs' own height so the button/link sit on the same
+     baseline as the label+input pairs beside them, not floating higher. */
+  padding-bottom: 0.05rem;
+}
+.activity-search-actions button {
+  padding: 0.35rem 0.9rem;
+  font-size: 0.85rem;
+}
+
+.activity-match-count {
+  padding-right: 0.75rem;
+  border-right: 1px solid var(--border);
+}
+
+.filter-errors {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.filter-errors p { margin: 0.2rem 0; }
+.filter-errors p:first-child { margin-top: 0; }
+.filter-errors p:last-child { margin-bottom: 0; }

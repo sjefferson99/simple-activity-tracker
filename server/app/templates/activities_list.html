@@ -6,6 +6,7 @@
 <form id="export-form" action="/export" method="get">
   <input type="hidden" name="selection" value="1">
 </form>
+{% include "partials/activity_search_form.html" %}
 {% include "partials/activity_list_or_empty.html" %}
 
 <div class="card">
@@ -61,4 +62,45 @@
   </form>
   <div id="import-strava-result"></div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script nonce="{{ csp_nonce(request) }}">
+  // The search form lives outside #activity-list-region (see
+  // partials/activity_search_form.html's comment) so it survives every
+  // htmx swap of that region untouched — but that also means the browser
+  // Back button, which restores the region from htmx's history cache, never
+  // touches the form's own field values. Without this, pressing Back shows
+  // the previous list but leaves the search box/distance inputs showing
+  // whatever was last typed, not what the restored URL actually reflects.
+  function syncSearchFormFromUrl() {
+    const form = document.getElementById("activity-search-form");
+    if (!form) return;
+    const params = new URLSearchParams(window.location.search);
+    const defaults = { sort: "date", dir: "desc", per_page: "20" };
+    for (const field of ["q", "min_km", "max_km", "sort", "dir", "per_page"]) {
+      const input = form.elements.namedItem(field);
+      if (input) input.value = params.get(field) || defaults[field] || "";
+    }
+  }
+  document.body.addEventListener("htmx:historyRestore", syncSearchFormFromUrl);
+
+  // "Clear" is a plain hx-get link with no hx-include, so htmx's own
+  // request/spinner handling (hx-indicator) already works for it exactly
+  // like every other list control — the only gap is the search form itself
+  // (outside #activity-list-region, so htmx's swap never touches it): its
+  // visible fields need resetting once the cleared list has loaded. Not
+  // form.reset(): that restores the hidden sort/dir/per_page inputs to
+  // whatever was server-rendered into them (the *current* sort), not the
+  // true defaults.
+  document.body.addEventListener("htmx:afterSettle", (event) => {
+    if (event.target.id !== "activity-search-clear") return;
+    const form = document.getElementById("activity-search-form");
+    if (!form) return;
+    const defaults = { q: "", min_km: "", max_km: "", sort: "date", dir: "desc", per_page: "20" };
+    for (const [field, value] of Object.entries(defaults)) {
+      const input = form.elements.namedItem(field);
+      if (input) input.value = value;
+    }
+  });
+</script>
 {% endblock %}

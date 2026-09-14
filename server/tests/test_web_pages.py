@@ -282,6 +282,355 @@ def test_activity_list_controls_show_a_loading_indicator(
     assert response.text.count('hx-indicator="#activity-list-spinner"') >= 2
 
 
+def _set_title_and_notes(activity_id: str, *, title: str | None, notes: str | None) -> None:
+    from app.db import get_session_factory
+    from app.models.activity import Activity
+
+    with get_session_factory()() as session:
+        activity = session.get(Activity, activity_id)
+        assert activity is not None
+        activity.title = title
+        activity.notes = notes
+        session.commit()
+
+
+def _add_tag(app_client, auth_headers, activity_id: str, name: str) -> None:
+    response = app_client.post(
+        f"/api/v1/activities/{activity_id}/tags", headers=auth_headers, json={"name": name}
+    )
+    assert response.status_code == 201
+
+
+def test_activity_search_clear_link_has_a_loading_indicator(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """Regression: Clear was originally a plain <a href="/"> full-page
+    reload, which gave no loading feedback and looked like a dead click on
+    a slow connection — it must wire up the same shared spinner every other
+    list control (sort, page, per-page) already uses."""
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/")
+    assert response.status_code == 200
+    assert 'id="activity-search-clear"' in response.text
+    assert 'hx-indicator="#activity-list-spinner"' in response.text
+
+
+def test_activity_search_shows_a_match_count_when_filtered(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    other = upload_sample_activity(
+        app_client,
+        auth_headers,
+        sample_gpx_bytes,
+        client_activity_id="66666666-6666-6666-6666-666666666666",
+    )
+    _set_title_and_notes(other.json()["id"], title="Sunrise Loop", notes=None)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    unfiltered = app_client.get("/")
+    assert "match" not in unfiltered.text  # no count shown with no filter active
+
+    response = app_client.get("/", params={"q": "sunrise"})
+    assert response.status_code == 200
+    assert "1 match" in response.text
+
+
+def test_activity_search_match_count_pluralizes(app_client, sample_gpx_bytes, auth_headers):
+    _upload_n_activities(app_client, auth_headers, sample_gpx_bytes, 3)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"min_km": "0"})
+    assert response.status_code == 200
+    assert "3 matches" in response.text
+
+
+def test_activity_search_matches_title(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _set_title_and_notes(activity_id, title="Sunrise Loop", notes=None)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"q": "sunrise"})
+    assert response.status_code == 200
+    assert "Sunrise Loop" in response.text
+
+
+def test_activity_search_matches_notes(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _set_title_and_notes(activity_id, title="Untitled run", notes="Felt strong on the hills")
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"q": "hills"})
+    assert response.status_code == 200
+    assert "Untitled run" in response.text
+
+    no_match = app_client.get("/", params={"q": "swimming"})
+    assert "Untitled run" not in no_match.text
+    assert "No activities match your search" in no_match.text
+
+
+def test_activity_search_no_matches_state_keeps_the_search_form_and_region(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """The "no matches" empty state must still render #activity-list-region
+    (so the sort/pagination controls' htmx swap target exists) and the
+    search form must stay visible/usable so the user can change or clear
+    their filter — distinct from the true "no activities at all" onboarding
+    state, which shows neither."""
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"q": "nonexistentterm"})
+    assert response.status_code == 200
+    assert 'id="activity-list-region"' in response.text
+    assert 'id="activity-search-form"' in response.text
+    assert "No activities match your search" in response.text
+    assert "No activities yet" not in response.text  # not the onboarding empty state
+
+
+def test_activity_search_matches_tag_name(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _set_title_and_notes(activity_id, title="Morning run", notes=None)
+    _add_tag(app_client, auth_headers, activity_id, "Strava")
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"q": "strava"})
+    assert response.status_code == 200
+    assert "Morning run" in response.text
+
+
+def test_activity_search_does_not_match_another_users_tag(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """Tags are per-user (uq_tags_user_id_name) — a search must never match a
+    tag belonging to someone else's identically-named tag."""
+    from datetime import UTC, datetime
+
+    from app.auth.passwords import hash_password
+    from app.db import get_session_factory
+    from app.models.tag import Tag
+    from app.models.user import User, _new_uuid
+    from app.repositories.users import SqlAlchemyUserRepository
+
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _set_title_and_notes(activity_id, title="Morning run", notes=None)
+
+    with get_session_factory()() as session:
+        now = datetime.now(UTC)
+        other_user = User(
+            email="other@example.com",
+            password_hash=hash_password("other-password-123"),
+            display_name="Other",
+            is_admin=False,
+            sessions_invalidated_at=now,
+            created_at=now,
+        )
+        SqlAlchemyUserRepository(session).add(other_user)
+        session.flush()
+        session.add(Tag(id=_new_uuid(), user_id=other_user.id, name="Strava", created_at=now))
+        session.commit()
+
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+    response = app_client.get("/", params={"q": "strava"})
+    assert "Morning run" not in response.text
+    assert "No activities match your search" in response.text
+
+
+def test_activity_search_requires_every_term_to_match_something(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """One term matching a tag and another matching the title must both be
+    required — terms are ANDed at the activity level, not the column level."""
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _set_title_and_notes(activity_id, title="Morning run", notes=None)
+    _add_tag(app_client, auth_headers, activity_id, "Strava")
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    both_match = app_client.get("/", params={"q": "morning strava"})
+    assert "Morning run" in both_match.text
+
+    one_missing = app_client.get("/", params={"q": "morning nonexistentterm"})
+    assert "Morning run" not in one_missing.text
+
+
+def test_activity_search_is_case_insensitive(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _set_title_and_notes(activity_id, title="Sunrise Loop", notes=None)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"q": "SUNRISE"})
+    assert "Sunrise Loop" in response.text
+
+
+def test_activity_search_escapes_like_wildcards(app_client, sample_gpx_bytes, auth_headers):
+    """A search term containing a literal "%"/"_" must be treated as that
+    literal character, not a SQL LIKE wildcard — otherwise a search for
+    "100%" would match anything (an unescaped "%" matches any substring),
+    and a bare "%"/"_" search would match every row in the list."""
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _set_title_and_notes(activity_id, title="Effort", notes="Gave it 100% today")
+    other = upload_sample_activity(
+        app_client,
+        auth_headers,
+        sample_gpx_bytes,
+        client_activity_id="44444444-4444-4444-4444-444444444444",
+    )
+    _set_title_and_notes(other.json()["id"], title="Plain run", notes=None)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    literal_match = app_client.get("/", params={"q": "100%"})
+    assert "Effort" in literal_match.text
+    assert "Plain run" not in literal_match.text
+
+    bare_wildcard = app_client.get("/", params={"q": "%"})
+    assert "Effort" in bare_wildcard.text  # contains a literal %
+    assert "Plain run" not in bare_wildcard.text  # doesn't — "%" isn't a real wildcard here
+
+    bare_underscore = app_client.get("/", params={"q": "_"})
+    assert "Effort" not in bare_underscore.text
+    assert "Plain run" not in bare_underscore.text
+
+
+def test_activity_search_ignores_query_text_past_200_chars(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _set_title_and_notes(activity_id, title="A" * 250, notes=None)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    # The 201st+ characters are dropped before the query even runs, so a
+    # 250-char title still matches a query truncated to its first 200 chars.
+    response = app_client.get("/", params={"q": "A" * 250})
+    assert response.status_code == 200
+    assert "A" * 200 in response.text
+
+
+def test_activity_search_is_preserved_in_sort_and_page_links(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _set_title_and_notes(activity_id, title="Sunrise Loop", notes=None)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"q": "sunrise"})
+    assert response.status_code == 200
+    assert "q=sunrise" in response.text
+
+
+def test_activity_search_resets_to_page_one(app_client, sample_gpx_bytes, auth_headers):
+    ids = _upload_n_activities(app_client, auth_headers, sample_gpx_bytes, 25)
+    _set_title_and_notes(ids[-1], title="Sunrise Loop", notes=None)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    # Land on page 2, then search — the search form's hidden inputs don't
+    # carry `page`, so a new search always starts back at page 1 even if the
+    # user had paged forward first.
+    response = app_client.get("/", params={"q": "sunrise", "per_page": "20"})
+    assert response.status_code == 200
+    assert "Sunrise Loop" in response.text
+    assert 'aria-current="page"' not in response.text  # only 1 match: no pagination at all
+
+
+def test_activity_distance_filter_min_only(app_client, sample_gpx_bytes, auth_headers):
+    _upload_n_activities(app_client, auth_headers, sample_gpx_bytes, 5)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    # _upload_n_activities gives activity i a distance of i meters (0..4).
+    response = app_client.get("/", params={"min_km": "0.003"})
+    assert response.status_code == 200
+    assert response.text.count("activity-list-item") == 2  # distances 3, 4 (in meters)
+
+
+def test_activity_distance_filter_max_only(app_client, sample_gpx_bytes, auth_headers):
+    _upload_n_activities(app_client, auth_headers, sample_gpx_bytes, 5)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"max_km": "0.001"})
+    assert response.status_code == 200
+    assert response.text.count("activity-list-item") == 2  # distances 0, 1 (in meters)
+
+
+def test_activity_distance_filter_min_and_max(app_client, sample_gpx_bytes, auth_headers):
+    _upload_n_activities(app_client, auth_headers, sample_gpx_bytes, 5)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"min_km": "0.001", "max_km": "0.003"})
+    assert response.status_code == 200
+    assert response.text.count("activity-list-item") == 3  # distances 1, 2, 3
+
+
+def test_activity_distance_filter_boundary_is_inclusive(app_client, sample_gpx_bytes, auth_headers):
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _set_activity_started_at_and_distance(activity_id, "2026-01-01T00:00:00+00:00", 5000.0)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    exact = app_client.get("/", params={"min_km": "5"})
+    assert exact.status_code == 200
+    assert "activity-list-item" in exact.text
+
+
+def test_activity_distance_filter_treats_unanalyzed_activity_as_zero(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """An activity with no analysis (or a failed one) has an implied distance
+    of 0 — excluded by any positive min_km, included by any max_km — same as
+    ActivityAnalysis.distance_meters' own default and the sort's COALESCE."""
+    from app.db import get_session_factory
+    from app.models.activity_analysis import ActivityAnalysis
+
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    with get_session_factory()() as session:
+        analysis = session.get(ActivityAnalysis, activity_id)
+        assert analysis is not None
+        session.delete(analysis)
+        session.commit()
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    excluded = app_client.get("/", params={"min_km": "0.01"})
+    assert "No activities match your search" in excluded.text
+
+    included = app_client.get("/", params={"max_km": "1"})
+    assert "activity-list-item" in included.text
+
+
+def test_activity_distance_filter_min_greater_than_max_shows_notice(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"min_km": "6", "max_km": "3"})
+    assert response.status_code == 200
+    assert "must not be greater than" in response.text
+    # The invalid filter is ignored entirely — the unfiltered list still shows.
+    assert "activity-list-item" in response.text
+
+
+def test_activity_distance_filter_non_numeric_shows_notice(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"min_km": "abc"})
+    assert response.status_code == 200
+    assert "must be a number" in response.text
+    assert "activity-list-item" in response.text
+
+
 def test_activity_detail_renders_with_map_and_analysis(app_client, sample_gpx_bytes, auth_headers):
     upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
     activity_id = upload.json()["id"]
