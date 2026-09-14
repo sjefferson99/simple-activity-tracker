@@ -1,0 +1,7 @@
+{% if filter_errors %}
+<div class="card filter-errors" role="alert">
+  {% for error in filter_errors %}
+  <p>{{ error }}</p>
+  {% endfor %}
+</div>
+{% endif %}
