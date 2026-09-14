@@ -196,7 +196,7 @@ def test_reanalyze_leaves_coordinates_null_for_a_failed_analysis(app_client, aut
 
 
 def test_run_reanalyzes_stale_activities_by_default(
-    app_client, auth_headers, sample_gpx_bytes, monkeypatch
+    app_client, auth_headers, sample_gpx_bytes, monkeypatch, tmp_path
 ) -> None:
     """SR_AUTO_REANALYZE defaults to true: on every startup, run() must bring
     every activity analyzed under an older ANALYSIS_VERSION up to date, the
@@ -204,13 +204,22 @@ def test_run_reanalyzes_stale_activities_by_default(
     analyzer bugfix (issue #83) applied to already-uploaded activities on
     upgrade, without the operator running a command by hand."""
     from app.cli import run
+    from app.config import get_settings
 
     upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
     activity_id = upload.json()["id"]
     _stale_the_analysis(activity_id)
+    # Pin SR_BACKUP_DIR to a writable tmp dir — run()'s default
+    # SR_BACKUP_BEFORE_MIGRATE=true would otherwise try to back up to the
+    # real /backups, which doesn't exist in this test environment.
+    monkeypatch.setenv("SR_BACKUP_DIR", str(tmp_path / "backups"))
+    get_settings.cache_clear()
     monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
 
-    run()
+    try:
+        run()
+    finally:
+        get_settings.cache_clear()
 
     with get_session_factory()() as session:
         analysis = session.get(ActivityAnalysis, activity_id)
@@ -221,7 +230,7 @@ def test_run_reanalyzes_stale_activities_by_default(
 
 
 def test_run_skips_reanalysis_when_auto_reanalyze_is_disabled(
-    app_client, auth_headers, sample_gpx_bytes, monkeypatch
+    app_client, auth_headers, sample_gpx_bytes, monkeypatch, tmp_path
 ) -> None:
     from app.cli import run
     from app.config import get_settings
@@ -230,6 +239,7 @@ def test_run_skips_reanalysis_when_auto_reanalyze_is_disabled(
     activity_id = upload.json()["id"]
     _stale_the_analysis(activity_id)
     monkeypatch.setenv("SR_AUTO_REANALYZE", "false")
+    monkeypatch.setenv("SR_BACKUP_DIR", str(tmp_path / "backups"))
     get_settings.cache_clear()
     monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
 
