@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:simple_activity_tracker/core/api/api_client.dart';
+import 'package:simple_activity_tracker/core/api/dto/activity_list_item_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/analysis_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/device_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/login_response_dto.dart';
@@ -16,6 +17,7 @@ class FakeApiClient implements ApiClient {
   final List<RunSummary> uploadCalls = [];
   int uploadCallCount = 0;
   int getAnalysisCallCount = 0;
+  int getActivityCallCount = 0;
 
   Future<LoginResponseDto> Function({
     required String baseUrl,
@@ -39,6 +41,21 @@ class FakeApiClient implements ApiClient {
     required String serverRunId,
   })?
   getAnalysisHandler;
+
+  Future<RunDto> Function({
+    required String baseUrl,
+    required String token,
+    required String serverRunId,
+  })?
+  getActivityHandler;
+
+  Future<ActivityListResponseDto> Function({
+    required String baseUrl,
+    required String token,
+    String? cursor,
+    int limit,
+  })?
+  listActivitiesHandler;
 
   @override
   Future<LoginResponseDto> login({
@@ -117,10 +134,13 @@ class FakeApiClient implements ApiClient {
         activityType: summary.activityMode.name,
         title: null,
         notes: null,
+        deviceName: null,
         clientSummary: summary.toJson(),
         sourcePlatform: summary.sourcePlatform,
         sourceAppVersion: summary.sourceAppVersion,
         analysis: const AnalysisDto(status: 'pending', result: null),
+        tags: const [],
+        splitPlan: null,
       ),
     );
   }
@@ -137,5 +157,50 @@ class FakeApiClient implements ApiClient {
       return handler(baseUrl: baseUrl, token: token, serverRunId: serverRunId);
     }
     return Future.value(const AnalysisDto(status: 'pending', result: null));
+  }
+
+  @override
+  Future<RunDto> getActivity({
+    required String baseUrl,
+    required String token,
+    required String serverRunId,
+  }) {
+    getActivityCallCount++;
+    final handler = getActivityHandler;
+    if (handler != null) {
+      return handler(baseUrl: baseUrl, token: token, serverRunId: serverRunId);
+    }
+    return Future.value(
+      RunDto(
+        id: serverRunId,
+        clientRunId: 'client-$serverRunId',
+        startedAt: DateTime.utc(2026),
+        endedAt: DateTime.utc(2026, 1, 1, 0, 30),
+        activityType: 'running',
+        title: null,
+        notes: null,
+        deviceName: null,
+        clientSummary: const {},
+        sourcePlatform: 'android',
+        sourceAppVersion: '1.0.0+1',
+        analysis: const AnalysisDto(status: 'pending', result: null),
+        tags: const [],
+        splitPlan: null,
+      ),
+    );
+  }
+
+  @override
+  Future<ActivityListResponseDto> listActivities({
+    required String baseUrl,
+    required String token,
+    String? cursor,
+    int limit = 50,
+  }) {
+    final handler = listActivitiesHandler;
+    if (handler != null) {
+      return handler(baseUrl: baseUrl, token: token, cursor: cursor, limit: limit);
+    }
+    return Future.value(const ActivityListResponseDto(activities: [], nextCursor: null));
   }
 }
