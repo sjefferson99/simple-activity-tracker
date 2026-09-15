@@ -87,6 +87,12 @@ def _activity_view(activity: Activity, analysis: ActivityAnalysis | None) -> dic
         "client_summary": activity.client_summary,
         "analysis": analysis_view,
         "tags": activity.tags,
+        # Truthy iff the activity was uploaded with a split plan/targets
+        # (issue #100) — only used to decide whether to show the "Reset to
+        # my uploaded plan" link next to the split-size control, so the raw
+        # stored dict is enough; the splits table itself always reads
+        # target_speed_mps/verdict from analysis.result, not from this.
+        "split_plan": activity.split_plan,
     }
 
 
@@ -442,15 +448,77 @@ def activity_splits_fragment(
         return templates.TemplateResponse(
             request,
             "partials/splits_table.html",
-            {"splits": [], "split_type": split_type, "split_value": split_value},
+            {
+                "splits": [],
+                "split_type": split_type,
+                "split_value": split_value,
+                "split_targets_as": None,
+                "is_custom_plan": False,
+            },
         )
+    # Re-slicing at an explicit size drops any split plan/targets — they
+    # only apply to the plan's own sizes (issue #100 scope), same as the
+    # JSON API's analysis?split_type=... variant. is_custom_plan is always
+    # False here (never True) for the same reason: whatever the activity's
+    # own plan was, this is a plain rolling slice at the size the user just
+    # picked, so the heading/controls should say exactly that.
     result = AnalyzerV1().analyze(
         track, split_type, split_value, activity_type=activity.activity_type
     )
     return templates.TemplateResponse(
         request,
         "partials/splits_table.html",
-        {"splits": result["splits"], "split_type": split_type, "split_value": split_value},
+        {
+            "splits": result["splits"],
+            "split_type": split_type,
+            "split_value": split_value,
+            "split_targets_as": None,
+            "is_custom_plan": False,
+        },
+    )
+
+
+@router.get("/activities/{activity_id}/splits/reset")
+def activity_splits_reset(
+    activity_id: str,
+    request: Request,
+    user: WebUser,
+    session: Annotated[Session, Depends(db_session)],
+) -> Response:
+    """Issue #100 follow-up: undoes a re-slice done via the split-size
+    control above, returning to the activity's own uploaded split plan
+    (targets included) with no page reload. Re-slicing at an explicit size
+    always drops the plan (see activity_splits_fragment), and nothing else
+    on the page previously offered a way back short of reloading — this
+    just re-serves the already-stored, plan-aware ActivityAnalysis.result
+    rather than recomputing anything, so it's guaranteed to match what a
+    fresh page load would show. Also swaps the split-size controls
+    (out-of-band) back to the activity's own split_type/split_value, since
+    otherwise they'd keep showing whatever size the user last picked even
+    though the table beneath them no longer matches it."""
+    activity = SqlAlchemyActivityRepository(session).get_by_id_for_user(user.id, activity_id)
+    if activity is None:
+        return templates.TemplateResponse(
+            request, "not_found.html", {"user": user}, status_code=404
+        )
+    analysis = SqlAlchemyActivityAnalysisRepository(session).get_by_activity_id(activity.id)
+    result = None
+    if analysis is not None and analysis.status == AnalysisStatus.done:
+        result = analysis.result
+    splits = result["splits"] if result else []
+    split_type = (result or {}).get("split_type") or "distance_km"
+    split_value = (result or {}).get("split_value") or 1
+    return templates.TemplateResponse(
+        request,
+        "partials/splits_table.html",
+        {
+            "splits": splits,
+            "split_type": split_type,
+            "split_value": split_value,
+            "split_targets_as": (result or {}).get("split_targets_as"),
+            "reset_controls": True,
+            "is_custom_plan": bool((activity.split_plan or {}).get("custom_splits")),
+        },
     )
 
 

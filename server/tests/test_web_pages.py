@@ -835,6 +835,21 @@ def test_splits_fragment_recomputes_with_given_split(app_client, sample_gpx_byte
     assert "Splits (5 min)" in response.text
 
 
+def test_splits_table_always_shows_a_speed_column(app_client, sample_gpx_bytes, auth_headers):
+    """Requested alongside a target: with a target shown as pace, comparing
+    it against the actual required a mental pace<->speed conversion — a
+    Speed column next to Pace removes that, for every activity regardless
+    of whether it has a plan."""
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get(f"/activities/{activity_id}")
+    assert response.status_code == 200
+    assert "<th>Speed</th>" in response.text
+    assert "km/h" in response.text
+
+
 def test_splits_fragment_defaults_to_one_km(app_client, sample_gpx_bytes, auth_headers):
     upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
     activity_id = upload.json()["id"]
@@ -859,6 +874,149 @@ def test_splits_fragment_rejects_invalid_split_type(app_client, sample_gpx_bytes
 def test_splits_fragment_404_for_missing_activity(app_client, auth_headers):
     _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
     response = app_client.get("/activities/does-not-exist/splits")
+    assert response.status_code == 404
+
+
+_SPLIT_NS = "https://simple-activity-tracker.local/gpx-extensions"
+
+
+def _gpx_with_custom_plan() -> bytes:
+    """A real (timestamped, moving) track at a constant 5 m/s, long enough to
+    complete a 300m custom-plan split, carrying a sat:split_plan extension —
+    see tests/test_split_plan_api.py's identical fixture for the API-level
+    equivalent of this helper."""
+    points = []
+    lon_per_meter = 1 / 111195
+    for i in range(90):
+        lon = i * 5.0 * lon_per_meter
+        minutes, seconds = divmod(i, 60)
+        points.append(
+            f'<trkpt lat="0.0" lon="{lon}">'
+            f"<time>2026-01-01T00:{minutes:02d}:{seconds:02d}Z</time></trkpt>"
+        )
+    return (
+        f'<?xml version="1.0"?><gpx version="1.1" xmlns:sat="{_SPLIT_NS}">'
+        "<extensions><sat:split_type>distance_km</sat:split_type>"
+        "<sat:split_value>1</sat:split_value>"
+        "<sat:split_plan>100@4;200@6</sat:split_plan>"
+        "<sat:split_targets_as>speed</sat:split_targets_as></extensions>"
+        f"<trk><trkseg>{''.join(points)}</trkseg></trk></gpx>"
+    ).encode()
+
+
+def test_activity_detail_shows_reset_link_only_when_activity_has_a_plan(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    from tests.conftest import make_summary
+
+    plain_upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    plain_id = plain_upload.json()["id"]
+
+    plan_upload = app_client.post(
+        "/api/v1/activities",
+        headers=auth_headers,
+        data={
+            "summary": json.dumps(
+                make_summary(client_activity_id="22222222-2222-2222-2222-222222222222")
+            )
+        },
+        files={"gpx": ("plan.gpx", _gpx_with_custom_plan(), "application/gpx+xml")},
+    )
+    plan_id = plan_upload.json()["id"]
+
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    plain_response = app_client.get(f"/activities/{plain_id}")
+    assert "Reset to my uploaded plan" not in plain_response.text
+
+    plan_response = app_client.get(f"/activities/{plan_id}")
+    assert "Reset to my uploaded plan" in plan_response.text
+    assert f'hx-get="/activities/{plan_id}/splits/reset"' in plan_response.text
+
+
+def test_activity_detail_for_a_plain_rolling_plan_shows_its_real_size(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """Regression guard for the custom-plan blanking below: an activity with
+    no plan (or a rolling plan) must keep showing its real split size in
+    both the heading and the pre-selected controls — only a custom plan
+    (variable per-split sizes) should blank them."""
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get(f"/activities/{activity_id}")
+    assert response.status_code == 200
+    assert "Splits (1 km)" in response.text
+    assert 'value="1"' in response.text
+    assert 'value="distance_km" selected' in response.text
+
+
+def test_activity_detail_for_a_custom_plan_shows_a_plain_heading_and_blank_controls(
+    app_client, auth_headers
+):
+    """Issue #100 follow-up: a custom plan's splits vary in size, so
+    result.split_type/split_value is only the plan's rolling *base* (used
+    once the plan's own splits run out) — showing it as "Splits (1 km)" with
+    "1"/"Kilometers" pre-selected falsely implies every split below is 1 km.
+    """
+    from tests.conftest import make_summary
+
+    upload = app_client.post(
+        "/api/v1/activities",
+        headers=auth_headers,
+        data={"summary": json.dumps(make_summary())},
+        files={"gpx": ("plan.gpx", _gpx_with_custom_plan(), "application/gpx+xml")},
+    )
+    activity_id = upload.json()["id"]
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get(f"/activities/{activity_id}")
+    assert response.status_code == 200
+    assert ">Splits<" in response.text
+    assert "Splits (1 km)" not in response.text
+    assert 'value=""' in response.text
+    assert 'value="" selected disabled hidden' in response.text
+
+
+def test_splits_reset_restores_the_uploaded_plan_after_a_reslice(app_client, auth_headers) -> None:
+    from tests.conftest import make_summary
+
+    upload = app_client.post(
+        "/api/v1/activities",
+        headers=auth_headers,
+        data={"summary": json.dumps(make_summary())},
+        files={"gpx": ("plan.gpx", _gpx_with_custom_plan(), "application/gpx+xml")},
+    )
+    activity_id = upload.json()["id"]
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    resliced = app_client.get(
+        f"/activities/{activity_id}/splits", params={"split_type": "time_min", "split_value": 2}
+    )
+    assert resliced.status_code == 200
+    assert "Target" not in resliced.text  # re-slicing drops the plan's targets
+
+    reset = app_client.get(f"/activities/{activity_id}/splits/reset")
+    assert reset.status_code == 200
+    # A custom plan's splits vary in size, so the heading is a plain
+    # "Splits" — not "Splits (1 km)", which would misstate the plan's own
+    # rolling base size as if every split below were actually that size.
+    assert "<h2" in reset.text
+    assert ">Splits<" in reset.text
+    assert "Splits (1 km)" not in reset.text
+    assert "Target" in reset.text
+    # Out-of-band swap puts the size controls back too, not just the table —
+    # blanked out for a custom plan, for the same reason as the heading.
+    assert 'id="split_value"' in reset.text
+    assert 'value=""' in reset.text
+    assert 'id="split_type"' in reset.text
+    assert 'value="" selected disabled hidden' in reset.text
+
+
+def test_splits_reset_404_for_missing_activity(app_client, auth_headers):
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+    response = app_client.get("/activities/does-not-exist/splits/reset")
     assert response.status_code == 404
 
 

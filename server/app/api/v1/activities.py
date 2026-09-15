@@ -33,7 +33,7 @@ from app.activity_import_strava import (
     parse_activities_csv,
     read_strava_export_archive,
 )
-from app.analysis.gpx_parser import GpxParseError, parse_gpx, parse_split_preference
+from app.analysis.gpx_parser import GpxParseError, SplitPlanData, parse_gpx, parse_split_plan
 from app.analysis.track_sampling import DEFAULT_MAX_POINTS, sample_track
 from app.analysis.v1 import (
     ANALYSIS_VERSION,
@@ -53,6 +53,7 @@ from app.api.v1.schemas import (
     ExportManifestEntry,
     ExportRequest,
     ImportResult,
+    SplitPlanOut,
     StravaImportJobCreated,
     StravaImportJobStatus,
     TagOut,
@@ -82,6 +83,16 @@ def _tag_out(tag: Tag) -> TagOut:
     return TagOut(id=tag.id, name=tag.name)
 
 
+def _split_plan_out(activity: Activity) -> SplitPlanOut | None:
+    if activity.split_plan is None:
+        return None
+    return SplitPlanOut(
+        rolling_target_mps=activity.split_plan.get("rolling_target_mps"),
+        custom_splits=[tuple(entry) for entry in activity.split_plan.get("custom_splits", [])],
+        targets_as=activity.split_plan.get("targets_as", "pace"),
+    )
+
+
 def _activity_out(activity: Activity, analysis: ActivityAnalysis | None) -> ActivityOut:
     return ActivityOut(
         id=activity.id,
@@ -99,7 +110,18 @@ def _activity_out(activity: Activity, analysis: ActivityAnalysis | None) -> Acti
         updated_at=activity.updated_at,
         analysis=_analysis_out(analysis),
         tags=[_tag_out(t) for t in activity.tags],
+        split_plan=_split_plan_out(activity),
     )
+
+
+def _split_plan_to_json(plan: SplitPlanData) -> dict[str, object]:
+    """Serializes SplitPlanData for Activity.split_plan — see the column's
+    own docstring (app/models/activity.py) for the shape."""
+    return {
+        "rolling_target_mps": plan.rolling_target_mps,
+        "custom_splits": [[size, target] for size, target in plan.custom_splits],
+        "targets_as": plan.targets_as,
+    }
 
 
 def _analysis_out(analysis: ActivityAnalysis | None) -> AnalysisOut:
@@ -177,7 +199,7 @@ def _insert_activity_with_gpx(
         track = parse_gpx(gpx_bytes)
     except GpxParseError as exc:
         raise api_error(400, "invalid_gpx", str(exc)) from exc
-    split_pref = parse_split_preference(gpx_bytes)
+    split_plan = parse_split_plan(gpx_bytes)
 
     blob_store = _blob_store()
     blob_key = blob_store.put(user_id, gpx_bytes)
@@ -198,8 +220,9 @@ def _insert_activity_with_gpx(
         gpx_bytes=len(gpx_bytes),
         source_platform=new_activity.source_platform,
         source_app_version=new_activity.source_app_version,
-        split_type=split_pref[0] if split_pref else None,
-        split_value=split_pref[1] if split_pref else None,
+        split_type=split_plan.split_type if split_plan else None,
+        split_value=split_plan.split_value if split_plan else None,
+        split_plan=_split_plan_to_json(split_plan) if split_plan else None,
         created_at=now,
         updated_at=now,
     )
@@ -226,8 +249,14 @@ def _insert_activity_with_gpx(
     try:
         analyzer = AnalyzerV1()
         result = (
-            analyzer.analyze(track, *split_pref, activity_type=new_activity.activity_type)
-            if split_pref
+            analyzer.analyze(
+                track,
+                split_plan.split_type,
+                split_plan.split_value,
+                activity_type=new_activity.activity_type,
+                split_plan=split_plan,
+            )
+            if split_plan
             else analyzer.analyze(track, activity_type=new_activity.activity_type)
         )
         distance_meters, moving_seconds = distance_and_duration_from_result(result)

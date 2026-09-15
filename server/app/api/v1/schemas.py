@@ -153,6 +153,20 @@ class AnalysisOut(BaseModel):
     result: dict[str, Any] | None = None
 
 
+class SplitPlanOut(BaseModel):
+    """The split plan an activity was uploaded with (issue #100) — mirrors
+    Activity.split_plan/app.analysis.gpx_parser.SplitPlanData. None on
+    ActivityOut for an activity with no plan at all (an old upload, or a
+    plain rolling preference with no target)."""
+
+    rolling_target_mps: float | None
+    # (size, target) pairs, splits 1..N of a custom plan; empty for a
+    # rolling plan. Size is metres/seconds per the activity's own
+    # split_type; target is null for an untargeted custom split.
+    custom_splits: list[tuple[float, float | None]]
+    targets_as: Literal["pace", "speed"]
+
+
 class ActivityOut(BaseModel):
     id: str
     client_activity_id: str
@@ -169,6 +183,7 @@ class ActivityOut(BaseModel):
     updated_at: datetime
     analysis: AnalysisOut
     tags: list[TagOut]
+    split_plan: SplitPlanOut | None = None
 
 
 class ActivityPatchRequest(BaseModel):

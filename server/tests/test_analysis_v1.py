@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from app.analysis.gpx_parser import parse_gpx
+from app.analysis.gpx_parser import SplitPlanData, parse_gpx
 from app.analysis.track import Point, Segment, Track
-from app.analysis.v1 import AnalyzerV1
+from app.analysis.v1 import AnalyzerV1, _verdict
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "sample_run.gpx"
 
@@ -328,6 +328,116 @@ def test_a_single_sparse_step_crossing_multiple_time_boundaries_produces_every_s
     for split in splits:
         assert split["duration_seconds"] == pytest.approx(120.0, abs=0.5)
         assert split["distance_m"] == pytest.approx(240.0, rel=0.01)
+
+
+def test_custom_plan_produces_variable_sized_splits_with_targets() -> None:
+    """Issue #100: a custom plan's splits (400m, 1000m, 200m here) must each
+    be sized and targeted individually, mirroring mobile's own
+    SplitPlan-generalized MetricsEngine test (docs/SPLIT-TARGETS-PLAN.md
+    §6.1). A constant 4 m/s track lets duration fall straight out of size."""
+    # A hair over 1600m so the final 200m split genuinely completes despite
+    # haversine's tiny approximation error versus the nominal lon offset.
+    track = _sparse_track(total_distance_m=1600.1, total_duration_s=400.025)  # 4 m/s throughout
+    plan = SplitPlanData(
+        split_type="distance_km",
+        split_value=1,
+        rolling_target_mps=None,
+        custom_splits=[(400.0, 5.0), (1000.0, 3.0), (200.0, None)],
+    )
+    result = AnalyzerV1().analyze(track, "distance_km", 1, split_plan=plan)
+    splits = result["splits"]
+    assert len(splits) == 3
+    assert [s["distance_m"] for s in splits] == pytest.approx([400.0, 1000.0, 200.0], rel=0.001)
+    assert splits[0]["target_speed_mps"] == 5.0
+    assert splits[0]["verdict"] == "too_slow"  # 4 m/s actual vs 5 m/s target
+    assert splits[1]["target_speed_mps"] == 3.0
+    assert splits[1]["verdict"] == "too_fast"  # 4 m/s actual vs 3 m/s target
+    assert splits[2]["target_speed_mps"] is None
+    assert splits[2]["verdict"] is None
+    assert result["split_targets_as"] == "pace"
+
+
+def test_custom_plan_rolls_on_at_base_size_with_no_target_once_exhausted() -> None:
+    """Issue #99 D5: after a custom plan's splits are used up, further
+    splits continue at the rolling split_type/split_value size with no
+    target — no special-casing beyond _SplitSizing falling through to
+    base_size/None."""
+    track = _sparse_track(total_distance_m=2500.0, total_duration_s=250.0)  # 10 m/s
+    plan = SplitPlanData(
+        split_type="distance_km",
+        split_value=1,
+        rolling_target_mps=None,
+        custom_splits=[(400.0, 5.0)],
+    )
+    result = AnalyzerV1().analyze(track, "distance_km", 1, split_plan=plan)
+    splits = result["splits"]
+    # 400m custom split, then two more 1000m rolling splits (2400m total of
+    # the 2500m covered), all with no target past the first.
+    assert [s["distance_m"] for s in splits] == pytest.approx([400.0, 1000.0, 1000.0], rel=0.001)
+    assert splits[0]["target_speed_mps"] == 5.0
+    for split in splits[1:]:
+        assert split["target_speed_mps"] is None
+        assert split["verdict"] is None
+
+
+def test_rolling_plan_with_a_target_applies_it_to_every_split() -> None:
+    track = _sparse_track(total_distance_m=2500.0, total_duration_s=250.0)  # 10 m/s
+    plan = SplitPlanData(
+        split_type="distance_km", split_value=1, rolling_target_mps=10.0, targets_as="speed"
+    )
+    result = AnalyzerV1().analyze(track, "distance_km", 1, split_plan=plan)
+    splits = result["splits"]
+    assert len(splits) == 2
+    for split in splits:
+        assert split["target_speed_mps"] == 10.0
+        assert split["verdict"] == "on_target"
+    assert result["split_targets_as"] == "speed"
+
+
+def test_a_single_sparse_step_spanning_two_differently_sized_custom_splits() -> None:
+    """Mirrors the existing multi-boundary regression tests above, but for a
+    custom plan where the two boundaries crossed by one sparse step are
+    different sizes (90s then 60s) — exactly the scenario
+    docs/SPLIT-TARGETS-PLAN.md §2 calls out as easy to get wrong."""
+    # 300m over 150s = 2 m/s throughout, crosses a 90s boundary (180m) then a
+    # 60s boundary (150s total, exactly the far end of this single step).
+    track = _sparse_track(total_distance_m=300.0, total_duration_s=150.0)
+    plan = SplitPlanData(
+        split_type="time_min",
+        split_value=1,
+        rolling_target_mps=None,
+        custom_splits=[(90.0, 2.5), (60.0, 1.5)],
+    )
+    result = AnalyzerV1().analyze(track, "time_min", 1, split_plan=plan)
+    splits = result["splits"]
+    assert len(splits) == 2
+    assert splits[0]["duration_seconds"] == pytest.approx(90.0, abs=0.5)
+    assert splits[0]["target_speed_mps"] == 2.5
+    assert splits[1]["duration_seconds"] == pytest.approx(60.0, abs=0.5)
+    assert splits[1]["target_speed_mps"] == 1.5
+
+
+def test_verdict_boundaries_at_exactly_plus_minus_five_percent() -> None:
+    assert _verdict(5.0, 5.0) == "on_target"
+    assert _verdict(5.249, 5.0) == "on_target"  # just inside +5%
+    assert _verdict(5.25, 5.0) == "on_target"  # exactly +5%
+    assert _verdict(5.251, 5.0) == "too_fast"  # just outside +5%
+    assert _verdict(4.751, 5.0) == "on_target"  # just inside -5%
+    assert _verdict(4.75, 5.0) == "on_target"  # exactly -5%
+    assert _verdict(4.749, 5.0) == "too_slow"  # just outside -5%
+    assert _verdict(5.0, None) is None
+
+
+def test_no_split_plan_leaves_result_unchanged_from_before_issue_100() -> None:
+    """Every split must still carry the new keys (target_speed_mps/verdict),
+    both null, and split_targets_as must be null at the top level, so
+    existing consumers of the result dict don't need to guard against a
+    missing key — only a null value."""
+    result = _analyze()
+    assert result["split_targets_as"] is None
+    for split in result["splits"]:
+        assert split["target_speed_mps"] is None
+        assert split["verdict"] is None
 
 
 def _straight_line_track(

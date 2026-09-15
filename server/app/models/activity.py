@@ -49,6 +49,16 @@ class Activity(Base):
     # "distance_km" / 1 (see AnalyzerV1.analyze's defaults).
     split_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     split_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The phone's optional split plan (issue #99/#100): targets and/or a
+    # custom variable-size split list, read from the uploaded GPX's
+    # sat:split_target/sat:split_plan/sat:split_targets_as extensions (see
+    # app.analysis.gpx_parser.SplitPlanData, which this mirrors as JSON —
+    # {"rolling_target_mps": float | None, "custom_splits": [[size, target|
+    # null], ...], "targets_as": "pace" | "speed"}). Null for activities with
+    # no plan (an old upload, or a plain rolling preference with no target).
+    # Set once at upload/import time, never backfilled or touched by
+    # reanalysis — same rule as split_type/split_value above.
+    split_plan: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
     # selectin avoids N+1 on the activity list page, which renders every
