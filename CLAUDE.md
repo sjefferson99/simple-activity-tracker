@@ -218,13 +218,25 @@ more than trivial size. One plan item (or tightly related group, e.g. "S5 + D1 t
      never pushed.
 4. **Hand off to the user.** Report what was verified (each probe/behavior, pass/fail,
    test counts, Snyk result) and ask the user to log into the same running dev-host stack
-   and confirm before anything is pushed. Do not push or open a PR before this sign-off.
-5. **On confirmation: commit, push, open the PR, stop.** One commit per item/group
-   (ask first, per the git commit rule below), `git push -u origin <branch>`, then
-   `gh pr create` with a summary + test plan (both the automated checks and what was
-   manually verified in the container). Wait for the user to merge — do not merge
-   server PRs automatically.
-6. **After the user merges:** `gh pr checks <n>` to confirm CI green, watch/confirm the
+   and confirm before anything is pushed. **STOP HERE.** Do not commit, push, or open a
+   PR before this sign-off, no matter how confident the verification was — a clean local
+   check suite and a working dev-stack probe are not the same thing as the user's
+   go-ahead, and this step doesn't get to be inferred from an earlier round's approval.
+   This applies even to a follow-up/bugfix made in direct response to something the user
+   just reported — a bug report or "yes, fix it that way" approves the *design* of the
+   fix, not the commit/push/PR/merge of it.
+5. **On confirmation: commit, push, open the PR, stop again.** One commit per item/group
+   (per the global "always ask" rule above — this is that ask, answered by the sign-off
+   just given in step 4). `git push -u origin <branch>`, then `gh pr create` with a
+   summary + test plan (both the automated checks and what was manually verified in the
+   container). **Then stop and wait — do not merge.** Merging is a separate action from
+   opening the PR and needs its own explicit instruction in the current request, not an
+   assumption drawn from how a previous PR in this session was handled.
+6. **The user merges the PR themselves, by default.** Only merge it yourself if the
+   request that led to this PR explicitly said so in words (e.g. "merge it", "and merge",
+   not just "let's ship this" or momentum from an earlier merge). When in doubt, ask
+   "want me to merge this, or will you?" rather than picking one.
+7. **After the PR is merged (by either of you):** `gh pr checks <n>` to confirm CI green, watch/confirm the
    `Container` workflow pushes to GHCR, `docker pull ghcr.io/sjefferson99/simple-activity-tracker-server:latest`,
    restart the dev stack on the real pulled image (`docker compose up -d` in
    `deploy/standalone-tls/`), confirm healthy, and reconcile local `main` with
@@ -304,6 +316,6 @@ one at a time. Merging them in order surfaced three real problems, each avoidabl
 
 - Units displayed: km/h and min/km. All conversions/formatting via `core/units`, nowhere else.
 - Speeds are stored internally in m/s (as GPS provides); convert only at display time.
-- **Always ask before running `git commit`** — even at a meaningful milestone, even if a commit earlier in the same session was already approved. Summarize what would be committed and wait for a go-ahead.
+- **Always ask before `git commit`, `git push`, opening a PR, or merging a PR** — each of these four is its own approval, every time, not a package deal. Summarize what would happen and wait for an explicit go-ahead before each one — even at a meaningful milestone, even if the exact same action was already approved earlier in this session, even immediately after finishing a fix the user themselves asked you to make. **A go-ahead covers only the specific unit of work it was given for** (e.g. "commit this" said about the feature being reviewed does not extend to a bugfix made afterward in the same conversation, and "commit, PR, and merge it" said once does not carry forward to the *next* PR raised later in the session) — a new piece of work, including a follow-up fix to something just merged, needs its own explicit ask before each of these four actions, asked separately if the user's message didn't already name all four for that specific work. If a request is ambiguous about scope (e.g. it's unclear whether "do the same for this one" extends prior authorization), ask rather than assume the broader reading. Merging in particular defaults to **the user does it**, per the server workflow below — only merge yourself when the current request says so in words, not by inference from an earlier merge this session.
 - Stay on `main` unless told otherwise.
 - **NO SUB AGENTS EVER, unless specifically asked for in that request.** This includes the `code-review` skill's default multi-agent mode — a plain "run a code review" is NOT a request for sub agents; do the review directly instead. Spawning sub agents burns disproportionate usage credits. Only use the Agent tool / multi-agent code review when the user explicitly asks for it (e.g. "ultrareview", "use sub agents").
