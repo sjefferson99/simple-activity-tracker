@@ -88,6 +88,7 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
         distance_and_duration_from_result,
         endpoints_from_result,
     )
+    from app.api.v1.activities import _split_plan_to_json
     from app.db import get_session_factory
     from app.models.activity import Activity
     from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
@@ -121,14 +122,24 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
             try:
                 gpx_bytes = blob_store.get(activity.gpx_blob_key)
                 track = parse_gpx(gpx_bytes)
-                # Reanalyze refreshes the derived ActivityAnalysis.result only —
-                # it deliberately does not touch activity.split_type/split_value/
-                # split_plan, which were set once at upload time and stay
-                # upload-time-fixed (see docs history: pre-existing defaults
-                # aren't backfilled). The plan is re-parsed from the GPX itself
-                # (issue #100) rather than read from the stored column, for the
-                # same reason split_type/split_value are re-derived here too.
+                # Reanalyze refreshes the derived ActivityAnalysis.result —
+                # it deliberately does not touch activity.split_type/split_value,
+                # which were set once at upload time and stay upload-time-fixed
+                # (see docs history: pre-existing defaults aren't backfilled).
+                # The plan is re-parsed from the GPX itself (issue #100) rather
+                # than read from the stored column, for the same reason
+                # split_type/split_value are re-derived here too. Unlike those
+                # two, activity.split_plan IS backfilled below when it's still
+                # null — an activity uploaded after the phone started writing
+                # the plan extensions (#99) but before the server understood
+                # them (#100) would otherwise have a plan-aware splits table
+                # (from `split_plan` passed to analyze() here) but no
+                # Activity.split_plan row, so the web page's "reset to my
+                # uploaded plan" control and the custom-plan heading/controls
+                # fix would never appear for it — the exact gap this closes.
                 split_plan = parse_split_plan(gpx_bytes)
+                if split_plan is not None and activity.split_plan is None:
+                    activity.split_plan = _split_plan_to_json(split_plan)
                 result = (
                     analyzer.analyze(
                         track,
