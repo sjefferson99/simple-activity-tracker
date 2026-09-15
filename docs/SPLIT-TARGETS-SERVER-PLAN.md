@@ -63,6 +63,24 @@ line as the split-size controls, Speed column present with correct values
 (e.g. 14.0 km/h actual next to a 4.0 target correctly shown as 14.4 km/h),
 clean `docker logs`.
 
+**Code review (direct, no sub-agents), same session.** One confirmed
+finding: `format_speed_delta` decided "on target" via a near-zero absolute
+threshold (0.05 km/h, or a rounded-to-0 seconds/km delta) instead of the
+same ±5% relative ratio `_verdict`/the cell's colour class use — so a split
+genuinely `on_target` (e.g. 4.90 m/s actual vs. a 5.0 m/s target, ratio
+0.98) could still render a nonzero correction arrow inside its own green
+cell. Fixed by computing the same `ratio = avg/target` and using
+`_SPLIT_TARGET_TOLERANCE`-equivalent bounds to decide "on target" first,
+then only computing the displayed km/h/seconds delta for the off-target
+case — mirrors mobile's `formatSpeedDelta` (`units.dart`), which already
+did this correctly. New `tests/test_web_formatting.py` (9 tests, including
+a direct regression check against `_verdict`'s own boundaries in both pace
+and speed modes) — 463 server tests total, `ruff`/`ruff format`/`mypy
+--strict` clean, Snyk clean (no new findings). Verified live against the
+rebuilt dev container with a real upload sitting exactly in the scenario
+the review predicted (4.90 m/s actual, 5.0 target): the split now renders
+`on target` in the tinted span instead of a spurious `▲ 0.4 km/h slow`.
+
 **Third follow-up, same session: misleading size on a custom plan.** User
 noticed the split-size controls and the "Splits (...)" heading showed "1
 min"/"Kilometers" for a custom-plan activity, even though the custom plan's
