@@ -2,6 +2,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:simple_activity_tracker/domain/models/current_split_info.dart';
 import 'package:simple_activity_tracker/domain/models/live_metrics.dart';
 import 'package:simple_activity_tracker/domain/models/run_summary.dart';
 import 'package:simple_activity_tracker/domain/models/split.dart';
@@ -58,6 +59,13 @@ void main() {
       ],
       currentSplitElapsed: Duration.zero,
       currentSplitDistanceMeters: 0,
+      currentSplit: const CurrentSplitInfo(
+        index: 2,
+        plannedCount: null,
+        sizeKind: SplitSizeKind.distanceMeters,
+        size: 1000,
+        targetSpeedMps: null,
+      ),
     );
 
     final summary = RunSummary.fromMetrics(

@@ -17,7 +17,7 @@ import '../../core/location/location_service.dart';
 import '../../core/sync/file_run_store.dart';
 import '../../core/sync/sync_service.dart';
 import '../../core/tracking/activity_mode_controller.dart';
-import '../../core/tracking/split_preference_controller.dart';
+import '../../core/tracking/split_plan_controller.dart';
 import '../../core/units/units.dart' show DistanceUnit;
 import '../../domain/geo_math.dart';
 import '../../domain/models/live_metrics.dart';
@@ -29,7 +29,8 @@ import '../../domain/tracking/activity_mode.dart';
 import '../../domain/tracking/metrics_engine.dart';
 import '../../domain/tracking/run_clock.dart';
 import '../../domain/tracking/run_phase.dart';
-import '../../domain/tracking/split_preference.dart';
+import '../../domain/tracking/speed_smoother.dart';
+import '../../domain/tracking/split_plan.dart';
 import 'live_run_state.dart';
 
 const _gpxFlushInterval = Duration(seconds: 5);
@@ -65,6 +66,7 @@ class LiveRunController extends Notifier<LiveRunState> {
 
   StreamSubscription<LocationSample>? _subscription;
   TrackPoint? _previousPoint;
+  final SpeedSmoother _speedSmoother = SpeedSmoother();
   MetricsEngine? _metricsEngine;
   RunClock? _runClock;
   RunGpxLog? _gpxLog;
@@ -77,7 +79,7 @@ class LiveRunController extends Notifier<LiveRunState> {
   String? _clientRunId;
   DateTime? _startedAt;
   ActivityMode? _activityMode;
-  SplitPreference? _splitPreference;
+  SplitPlan? _splitPlan;
   String? _cachedAppVersion;
 
   // Bumped every time a run starts. stop() closes over the token for the
@@ -140,6 +142,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     _runClock = RunClock(startedAt: _startedAt!);
 
     _previousPoint = null;
+    _speedSmoother.reset();
     // Fixed for the run's duration — read once here, not from a live
     // `ref.watch`, so switching the home screen toggle mid-run (which the UI
     // already disables, but this is the actual guarantee) can't change which
@@ -147,13 +150,13 @@ class LiveRunController extends Notifier<LiveRunState> {
     // captured value is reused at stop() for the RunRecord/RunSummary, since
     // the toggle may have moved on by then.
     _activityMode = ref.read(activityModeControllerProvider);
-    _splitPreference = ref.read(splitPreferenceControllerProvider);
+    _splitPlan = ref.read(splitPlanControllerProvider);
     _metricsEngine = MetricsEngine(
       mode: _activityMode!,
-      splitPreference: _splitPreference!,
+      splitPlan: _splitPlan!,
     );
     _currentGpxFile = await newRunGpxFile(DateTime.now());
-    _gpxLog = RunGpxLog(_currentGpxFile!, _splitPreference!);
+    _gpxLog = RunGpxLog(_currentGpxFile!, _splitPlan!);
     // A periodic flush that fails is not fatal: every flush rewrites the
     // whole track, so the next one recovers whatever this one missed.
     // Swallow it here rather than letting it surface as an unhandled error.
@@ -195,6 +198,7 @@ class LiveRunController extends Notifier<LiveRunState> {
   void pause() {
     if (_phase != RunPhase.tracking) return;
     _previousPoint = null;
+    _speedSmoother.reset();
     _runClock?.pause(DateTime.now().toUtc());
     _emitActive(RunPhase.paused, speedMps: null, accuracyMeters: null);
   }
@@ -202,6 +206,7 @@ class LiveRunController extends Notifier<LiveRunState> {
   void resume() {
     if (_phase != RunPhase.paused) return;
     _previousPoint = null;
+    _speedSmoother.reset();
     _runClock?.resume(DateTime.now().toUtc());
     _metricsEngine?.resetSegmentAnchor();
     _gpxLog?.startNewSegment();
@@ -215,7 +220,8 @@ class LiveRunController extends Notifier<LiveRunState> {
     final startedAt = _startedAt;
     final activityMode = _activityMode;
     final distanceUnit =
-        _splitPreference?.effectiveDistanceUnit ?? DistanceUnit.km;
+        _splitPlan?.base.effectiveDistanceUnit ?? DistanceUnit.km;
+    final prefersPace = _splitPlan?.targetsAsPace ?? true;
     final finishedRunToken = _runToken;
     await _disposeRun();
 
@@ -251,12 +257,13 @@ class LiveRunController extends Notifier<LiveRunState> {
     _startedAt = null;
     _runClock = null;
     _activityMode = null;
-    _splitPreference = null;
+    _splitPlan = null;
 
     state = LiveRunFinished(
       metrics: metrics,
       activityMode: activityMode ?? ActivityMode.running,
       distanceUnit: distanceUnit,
+      prefersPace: prefersPace,
       clientRunId: clientRunId,
     );
     // Fire-and-forget — a slow or failed upload must never delay the
@@ -338,9 +345,18 @@ class LiveRunController extends Notifier<LiveRunState> {
     _metricsEngine?.addPoint(point);
     _gpxLog?.addPoint(point);
 
+    // Display-only smoothing (issue #99 follow-up): the raw per-fix chip
+    // speed is too volatile at ~1Hz to actually aim at when trying to hit a
+    // split target — smoothing only the number shown here, not the engine's
+    // own distance/average/split math, which still reads the unsmoothed
+    // `speed` above via addPoint().
+    final smoothedSpeed = speed == null
+        ? null
+        : _speedSmoother.addSpeed(speed, DateTime.now().toUtc());
+
     _emitActive(
       RunPhase.tracking,
-      speedMps: speed,
+      speedMps: smoothedSpeed,
       accuracyMeters: sample.accuracyMeters,
     );
   }
@@ -391,7 +407,8 @@ class LiveRunController extends Notifier<LiveRunState> {
       // only ever null before a run has started, at which point nothing
       // reaches LiveRunActive.
       activityMode: _activityMode ?? ActivityMode.running,
-      distanceUnit: _splitPreference?.effectiveDistanceUnit ?? DistanceUnit.km,
+      distanceUnit: _splitPlan?.base.effectiveDistanceUnit ?? DistanceUnit.km,
+      prefersPace: _splitPlan?.targetsAsPace ?? true,
     );
   }
 }

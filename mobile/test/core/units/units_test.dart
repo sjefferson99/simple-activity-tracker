@@ -173,4 +173,240 @@ void main() {
       expect(formatSpeedOrPace(null, SpeedUnit.minMi), '--:-- /mi');
     });
   });
+
+  group('formatSpeedDelta', () {
+    // 5:00/km == 1000/300 m/s.
+    final targetMps = 1000 / 300;
+
+    test('reports "on target" within tolerance', () {
+      expect(formatSpeedDelta(targetMps, targetMps, SpeedUnit.minKm), 'on target');
+      // 4% faster is still within the 5% band.
+      expect(
+        formatSpeedDelta(targetMps * 1.04, targetMps, SpeedUnit.minKm),
+        'on target',
+      );
+    });
+
+    test(
+      'pace: running faster than target (lower pace number) points the arrow UP, meaning "slow down"',
+      () {
+        // 10% faster than target speed => a lower (faster) pace number.
+        final fasterMps = targetMps * 1.10;
+        final delta = formatSpeedDelta(fasterMps, targetMps, SpeedUnit.minKm);
+        expect(delta, startsWith('▲'));
+        expect(delta, contains('fast'));
+      },
+    );
+
+    test(
+      'pace: running slower than target (higher pace number) points the arrow DOWN, meaning "speed up"',
+      () {
+        final slowerMps = targetMps * 0.90;
+        final delta = formatSpeedDelta(slowerMps, targetMps, SpeedUnit.minKm);
+        expect(delta, startsWith('▼'));
+        expect(delta, contains('slow'));
+      },
+    );
+
+    test(
+      'pace mi: same arrow convention as pace km',
+      () {
+        final targetMi = 1609.344 / 300;
+        expect(
+          formatSpeedDelta(targetMi * 1.10, targetMi, SpeedUnit.minMi),
+          startsWith('▲'),
+        );
+        expect(
+          formatSpeedDelta(targetMi * 0.90, targetMi, SpeedUnit.minMi),
+          startsWith('▼'),
+        );
+      },
+    );
+
+    test(
+      'speed: running faster than target (higher km/h number) points the arrow DOWN, meaning "slow down"',
+      () {
+        final fasterMps = targetMps * 1.10;
+        final delta = formatSpeedDelta(fasterMps, targetMps, SpeedUnit.kmh);
+        expect(delta, startsWith('▼'));
+        expect(delta, contains('fast'));
+      },
+    );
+
+    test(
+      'speed: running slower than target (lower km/h number) points the arrow UP, meaning "speed up"',
+      () {
+        final slowerMps = targetMps * 0.90;
+        final delta = formatSpeedDelta(slowerMps, targetMps, SpeedUnit.kmh);
+        expect(delta, startsWith('▲'));
+        expect(delta, contains('slow'));
+      },
+    );
+
+    test(
+      'speed mph: same arrow convention as speed km/h',
+      () {
+        final targetMi = 1609.344 / 300;
+        expect(
+          formatSpeedDelta(targetMi * 1.10, targetMi, SpeedUnit.mph),
+          startsWith('▼'),
+        );
+        expect(
+          formatSpeedDelta(targetMi * 0.90, targetMi, SpeedUnit.mph),
+          startsWith('▲'),
+        );
+      },
+    );
+
+    test(
+      'pace: a stopped split (zero avg speed) reports too slow, not "on target"',
+      () {
+        // Regression: avgMps == 0 makes pace undefined, but that must not
+        // be confused with being on target — it's the most-off-target case.
+        final delta = formatSpeedDelta(0, targetMps, SpeedUnit.minKm);
+        expect(delta, isNot('on target'));
+        expect(delta, startsWith('▼'));
+      },
+    );
+
+    test('speed: a stopped split (zero avg speed) reports too slow', () {
+      final delta = formatSpeedDelta(0, targetMps, SpeedUnit.kmh);
+      expect(delta, isNot('on target'));
+      expect(delta, startsWith('▲'));
+    });
+  });
+
+  group('formatSplitSizeMeters', () {
+    test('shows whole meters under 1km for a km-kind split', () {
+      expect(formatSplitSizeMeters(400, DistanceUnit.km), '400 m');
+    });
+
+    test('shows trimmed decimal km at or above 1km', () {
+      expect(formatSplitSizeMeters(1000, DistanceUnit.km), '1 km');
+      expect(formatSplitSizeMeters(1500, DistanceUnit.km), '1.5 km');
+    });
+
+    test('shows decimal miles for a mile-kind split', () {
+      expect(formatSplitSizeMeters(1609.344, DistanceUnit.mi), '1 mi');
+      expect(formatSplitSizeMeters(804.672, DistanceUnit.mi), '0.5 mi');
+    });
+
+    test('shows feet for a small mile-kind split', () {
+      expect(formatSplitSizeMeters(30, DistanceUnit.mi), '98 ft');
+    });
+  });
+
+  group('formatSplitSizeSeconds / formatMinSec', () {
+    test('formats whole minutes and seconds as m:ss', () {
+      expect(formatSplitSizeSeconds(90), '1:30');
+      expect(formatMinSec(const Duration(seconds: 90)), '1:30');
+      expect(formatMinSec(const Duration(minutes: 5)), '5:00');
+    });
+  });
+
+  group('parseMinSec', () {
+    test('parses a valid m:ss string', () {
+      expect(parseMinSec('1:30'), const Duration(minutes: 1, seconds: 30));
+      expect(parseMinSec('0:05'), const Duration(seconds: 5));
+    });
+
+    test('treats a colon-less whole number as whole minutes', () {
+      // Easy to forget the colon on a phone keyboard — "5" for a pace/
+      // duration field can only sensibly mean "5 minutes".
+      expect(parseMinSec('5'), const Duration(minutes: 5));
+      expect(parseMinSec('90'), const Duration(minutes: 90));
+      expect(parseMinSec('0'), Duration.zero);
+      expect(parseMinSec(' 5 '), const Duration(minutes: 5));
+    });
+
+    test('returns null for malformed input', () {
+      expect(parseMinSec('abc'), isNull);
+      expect(parseMinSec('1:30:00'), isNull);
+      expect(parseMinSec('-5'), isNull);
+      expect(parseMinSec('1:60'), isNull);
+      expect(parseMinSec('1:-5'), isNull);
+    });
+
+    test(
+      'bareNumberAsSeconds treats a colon-less whole number as seconds, not minutes',
+      () {
+        // Regression: a seconds-sized field (e.g. a custom time-kind split's
+        // length) must not silently multiply a bare "90" by 60.
+        expect(
+          parseMinSec('90', bareNumberAsSeconds: true),
+          const Duration(seconds: 90),
+        );
+        expect(
+          parseMinSec('5', bareNumberAsSeconds: true),
+          const Duration(seconds: 5),
+        );
+        // A colon still means m:ss regardless of the flag.
+        expect(
+          parseMinSec('1:30', bareNumberAsSeconds: true),
+          const Duration(minutes: 1, seconds: 30),
+        );
+      },
+    );
+  });
+
+  group('parsePaceToMps / parseSpeedToMps round trips', () {
+    test('parsePaceToMps round-trips formatPace for km', () {
+      final mps = parsePaceToMps('5:00', SpeedUnit.minKm);
+      expect(mps, isNotNull);
+      expect(formatPace(paceSecPerKmFromMps(mps!)), '5:00');
+    });
+
+    test('parsePaceToMps round-trips formatPace for mi', () {
+      final mps = parsePaceToMps('8:00', SpeedUnit.minMi);
+      expect(mps, isNotNull);
+      expect(formatPace(paceSecPerMileFromMps(mps!)), '8:00');
+    });
+
+    test('parsePaceToMps rejects zero/garbage', () {
+      expect(parsePaceToMps('0:00', SpeedUnit.minKm), isNull);
+      expect(parsePaceToMps('0', SpeedUnit.minKm), isNull);
+      expect(parsePaceToMps('abc', SpeedUnit.minKm), isNull);
+    });
+
+    test(
+      'parsePaceToMps accepts a colon-less whole-minute shorthand (e.g. "5" for "5:00")',
+      () {
+        // A real-device bug: typing just "5" (forgetting the colon) used to
+        // be rejected outright and silently revert the field.
+        final withColon = parsePaceToMps('5:00', SpeedUnit.minKm);
+        final shorthand = parsePaceToMps('5', SpeedUnit.minKm);
+        expect(shorthand, isNotNull);
+        expect(shorthand, withColon);
+      },
+    );
+
+    test('parseSpeedToMps round-trips formatKmh', () {
+      final mps = parseSpeedToMps('12.0', SpeedUnit.kmh);
+      expect(mps, isNotNull);
+      expect(formatKmh(mps!), '12.0');
+    });
+
+    test('parseSpeedToMps round-trips formatMph', () {
+      final mps = parseSpeedToMps('8.0', SpeedUnit.mph);
+      expect(mps, isNotNull);
+      expect(formatMph(mps!), '8.0');
+    });
+
+    test('parseSpeedToMps rejects zero/negative/garbage', () {
+      expect(parseSpeedToMps('0', SpeedUnit.kmh), isNull);
+      expect(parseSpeedToMps('-5', SpeedUnit.kmh), isNull);
+      expect(parseSpeedToMps('abc', SpeedUnit.kmh), isNull);
+    });
+  });
+
+  group('formatTargetForEditing', () {
+    test('formats a pace target as m:ss', () {
+      final mps = 1000 / 300;
+      expect(formatTargetForEditing(mps, SpeedUnit.minKm), '5:00');
+    });
+
+    test('formats a speed target as a plain decimal', () {
+      expect(formatTargetForEditing(10 / 3.6, SpeedUnit.kmh), '10.0');
+    });
+  });
 }

@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:simple_activity_tracker/domain/models/current_split_info.dart';
 import 'package:simple_activity_tracker/domain/tracking/activity_mode.dart';
 import 'package:simple_activity_tracker/domain/tracking/metrics_engine.dart';
+import 'package:simple_activity_tracker/domain/tracking/split_plan.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_preference.dart';
 import 'package:simple_activity_tracker/domain/models/track_point.dart';
 
@@ -815,6 +817,86 @@ void main() {
     });
   });
 
+  group('credited distance integrates chip speed, not position deltas', () {
+    // Replaying three real S23 captures showed position-delta distance
+    // running 17-19% over Doppler-integrated distance across identical
+    // accepted points — the per-fix position jitter at 1 Hz is the same
+    // order as a walking stride, and summing |deltas| banks all of it. The
+    // chip speed readout (Doppler) had no such bias, so split averages built
+    // on position deltas read ~1 km/h hotter than the speed actually held.
+    DateTime start() => DateTime(2026, 1, 1, 0, 0, 0);
+
+    /// Four fixes at a steady 1.2 m/s, 1.2 m apart: confirms "moving" as of
+    /// the fourth, with nothing credited yet (see the step 3a tests).
+    int walkOff(MetricsEngine engine) {
+      for (var t = 0; t < 4; t++) {
+        engine.addPoint(
+          _pointAtMeters(
+            1.2 * t,
+            start().add(Duration(seconds: t)),
+            speedMps: 1.2,
+            hasSpeed: true,
+          ),
+        );
+      }
+      return 4;
+    }
+
+    test('jittered positions at a steady chip speed credit speed × time, not '
+        'the inflated point-to-point path', () {
+      final engine = MetricsEngine();
+      var t = walkOff(engine);
+      // Positions lurch +2.5 m, -0.5 m, +2.5 m, -0.5 m (a 6.0 m point-to-point
+      // path for 4.0 m of net progress) while the chip reports a steady
+      // 1.0 m/s throughout.
+      for (final meters in [6.1, 5.6, 8.1, 7.6]) {
+        engine.addPoint(
+          _pointAtMeters(
+            meters,
+            start().add(Duration(seconds: t++)),
+            speedMps: 1.0,
+            hasSpeed: true,
+          ),
+        );
+      }
+
+      // First segment blends the 1.2 m/s walk-off endpoint with 1.0 m/s
+      // (1.1 m), the other three are 1.0 m each.
+      expect(engine.metrics.distanceMeters, closeTo(4.1, 0.01));
+      expect(engine.metrics.distanceMeters, lessThan(6.0));
+    });
+
+    test('falls back to the position delta when either fix has no chip speed',
+        () {
+      final engine = MetricsEngine();
+      final t = walkOff(engine);
+      // No speed on this fix: the stationary gate falls back to its position
+      // floor (2.5 m clears it) and so must the credited distance.
+      engine.addPoint(_pointAtMeters(6.1, start().add(Duration(seconds: t))));
+
+      expect(engine.metrics.distanceMeters, closeTo(2.5, 0.01));
+    });
+
+    test('falls back to the position delta across a long gap between fixes',
+        () {
+      final engine = MetricsEngine();
+      final t = walkOff(engine);
+      // 30 m in 10 s (plausible), but 10 s is past the integration gap —
+      // two endpoint speeds can't describe the path between them, so the
+      // position delta is credited rather than (1.2 + 1.2) / 2 × 10 = 12 m.
+      engine.addPoint(
+        _pointAtMeters(
+          3.6 + 30,
+          start().add(Duration(seconds: t + 9)),
+          speedMps: 1.2,
+          hasSpeed: true,
+        ),
+      );
+
+      expect(engine.metrics.distanceMeters, closeTo(30, 0.1));
+    });
+  });
+
   group('#49: a real out-and-back route is never mistaken for GPS drift', () {
     // A "straightness" filter (net displacement over a window vs. total path
     // walked in it) was tried and reverted here: a genuine on-device capture
@@ -1147,5 +1229,167 @@ void main() {
 
       expect(engine.metrics.elevationGainMeters, closeTo(15, 0.01));
     });
+  });
+
+  group('issue #99: custom split plans (variable split sizes)', () {
+    test(
+      'a distance-kind custom plan produces splits of exactly the planned sizes, then rolls on at the base size',
+      () {
+        // 400m, 1000m, 200m planned; base rolling size 1km. Moving at
+        // constant 10 m/s throughout so distances/times are easy to check.
+        final engine = MetricsEngine(
+          splitPlan: const SplitPlan(
+            base: SplitPreference(kind: SplitKind.distanceKm, value: 1),
+            customSplits: [
+              PlannedSplit(size: 400, targetSpeedMps: 12),
+              PlannedSplit(size: 1000, targetSpeedMps: 11),
+              PlannedSplit(size: 200),
+            ],
+          ),
+        );
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        // Total distance to cover all three planned splits plus 1500m of
+        // roll-on: 400 + 1000 + 200 + 1500 = 3100m, at 10 m/s = 310s.
+        engine.addPoint(_pointAtMeters(0, start));
+        engine.addPoint(
+          _pointAtMeters(3100, start.add(const Duration(seconds: 310))),
+        );
+
+        final splits = engine.metrics.completedSplits;
+        // 3 planned splits + 1 completed roll-on split (1000m) = 4.
+        expect(splits, hasLength(4));
+
+        expect(splits[0].distanceMeters, closeTo(400, 0.5));
+        expect(splits[0].targetSpeedMps, 12);
+        expect(splits[0].duration.inMilliseconds, closeTo(40000, 100));
+
+        expect(splits[1].distanceMeters, closeTo(1000, 0.5));
+        expect(splits[1].targetSpeedMps, 11);
+        expect(splits[1].duration.inMilliseconds, closeTo(100000, 100));
+
+        expect(splits[2].distanceMeters, closeTo(200, 0.5));
+        expect(splits[2].targetSpeedMps, isNull);
+        expect(splits[2].duration.inMilliseconds, closeTo(20000, 100));
+
+        // Roll-on split: sized at the base 1000m, no target.
+        expect(splits[3].distanceMeters, closeTo(1000, 0.5));
+        expect(splits[3].targetSpeedMps, isNull);
+
+        // 1500m of roll-on total, 1000m completed above => 500m in progress.
+        expect(engine.metrics.currentSplitDistanceMeters, closeTo(500, 1));
+        expect(engine.metrics.currentSplit.index, 5);
+        expect(engine.metrics.currentSplit.plannedCount, 3);
+        expect(engine.metrics.currentSplit.targetSpeedMps, isNull);
+      },
+    );
+
+    test(
+      'a time-kind custom plan interpolates two different-sized boundaries within one sparse segment',
+      () {
+        // 90s then 60s planned splits, at a constant 4 m/s. One GPS gap
+        // spans both boundaries in a single segment (e.g. weak signal).
+        final engine = MetricsEngine(
+          splitPlan: const SplitPlan(
+            base: SplitPreference(kind: SplitKind.timeMin, value: 1),
+            customSplits: [
+              PlannedSplit(size: 90, targetSpeedMps: 4),
+              PlannedSplit(size: 60, targetSpeedMps: 3),
+            ],
+          ),
+        );
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        // 4 m/s for 200s covers 800m, crossing the 90s boundary (360m) and
+        // the 90+60=150s boundary (600m), landing 50s/200m into roll-on.
+        engine.addPoint(_pointAtMeters(0, start));
+        engine.addPoint(
+          _pointAtMeters(800, start.add(const Duration(seconds: 200))),
+        );
+
+        final splits = engine.metrics.completedSplits;
+        expect(splits, hasLength(2));
+
+        expect(splits[0].duration, const Duration(seconds: 90));
+        expect(splits[0].distanceMeters, closeTo(360, 0.5));
+        expect(splits[0].targetSpeedMps, 4);
+
+        expect(splits[1].duration, const Duration(seconds: 60));
+        expect(splits[1].distanceMeters, closeTo(240, 0.5));
+        expect(splits[1].targetSpeedMps, 3);
+
+        // Roll-on at the base 1-minute size: 50s/200m into that split.
+        expect(engine.metrics.currentSplitElapsed, const Duration(seconds: 50));
+        expect(engine.metrics.currentSplitDistanceMeters, closeTo(200, 1));
+        expect(engine.metrics.currentSplit.index, 3);
+        expect(engine.metrics.currentSplit.plannedCount, 2);
+        expect(engine.metrics.currentSplit.sizeKind, SplitSizeKind.durationSeconds);
+        expect(engine.metrics.currentSplit.size, 60); // base: 1 minute
+        expect(engine.metrics.currentSplit.targetSpeedMps, isNull);
+      },
+    );
+
+    test('currentSplit reflects split 1 of the plan before any split completes', () {
+      final engine = MetricsEngine(
+        splitPlan: const SplitPlan(
+          base: SplitPreference(kind: SplitKind.distanceKm, value: 1),
+          customSplits: [PlannedSplit(size: 400, targetSpeedMps: 3)],
+        ),
+      );
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      engine.addPoint(_pointAtMeters(0, start));
+      engine.addPoint(
+        _pointAtMeters(100, start.add(const Duration(seconds: 25))),
+      );
+
+      expect(engine.metrics.currentSplit.index, 1);
+      expect(engine.metrics.currentSplit.plannedCount, 1);
+      expect(engine.metrics.currentSplit.sizeKind, SplitSizeKind.distanceMeters);
+      expect(engine.metrics.currentSplit.size, 400);
+      expect(engine.metrics.currentSplit.targetSpeedMps, 3);
+    });
+
+    test(
+      'a rolling plan with a target stamps that target on every completed split',
+      () {
+        final engine = MetricsEngine(
+          splitPlan: const SplitPlan(
+            base: SplitPreference(kind: SplitKind.distanceKm, value: 1),
+            rollingTargetSpeedMps: 3.0,
+          ),
+        );
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        engine.addPoint(_pointAtMeters(0, start));
+        engine.addPoint(
+          _pointAtMeters(2500, start.add(const Duration(seconds: 500))),
+        );
+
+        expect(engine.metrics.completedSplits, hasLength(2));
+        expect(engine.metrics.completedSplits[0].targetSpeedMps, 3.0);
+        expect(engine.metrics.completedSplits[1].targetSpeedMps, 3.0);
+        expect(engine.metrics.currentSplit.targetSpeedMps, 3.0);
+      },
+    );
+
+    test(
+      'the deprecated splitPreference constructor parameter still wraps into a rolling plan',
+      () {
+        final engine = MetricsEngine(
+          splitPreference: const SplitPreference(
+            kind: SplitKind.distanceMi,
+            value: 1,
+          ),
+        );
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        engine.addPoint(_pointAtMeters(0, start));
+        engine.addPoint(
+          _pointAtMeters(1700, start.add(const Duration(seconds: 170))),
+        );
+
+        expect(engine.metrics.completedSplits, hasLength(1));
+        expect(
+          engine.metrics.completedSplits.first.distanceMeters,
+          closeTo(1609.344, 0.5),
+        );
+      },
+    );
   });
 }

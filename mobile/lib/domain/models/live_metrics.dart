@@ -1,3 +1,4 @@
+import 'current_split_info.dart';
 import 'split.dart';
 
 /// Snapshot of a run's metrics at a point in time. Produced by
@@ -22,6 +23,12 @@ class LiveMetrics {
   final Duration currentSplitElapsed;
   final double currentSplitDistanceMeters;
 
+  /// The split currently in progress: its index, size, and target (issue
+  /// #99). Never null once a run has a [MetricsEngine] — even
+  /// [LiveMetrics.zero] carries split 1 of whatever plan the engine was
+  /// constructed with as its default.
+  final CurrentSplitInfo currentSplit;
+
   /// Highest accepted instantaneous/segment speed seen so far this run. Null
   /// until at least one segment has been accepted, so "no data yet" isn't
   /// confused with "stationary". Unaffected by pause/resume, same as
@@ -42,6 +49,7 @@ class LiveMetrics {
     required this.completedSplits,
     required this.currentSplitElapsed,
     required this.currentSplitDistanceMeters,
+    required this.currentSplit,
     this.maxSpeedMps,
     this.elevationGainMeters = 0,
     this.elapsedWallClock = Duration.zero,
@@ -55,6 +63,7 @@ class LiveMetrics {
     completedSplits: completedSplits,
     currentSplitElapsed: currentSplitElapsed,
     currentSplitDistanceMeters: currentSplitDistanceMeters,
+    currentSplit: currentSplit,
     maxSpeedMps: maxSpeedMps,
     elevationGainMeters: elevationGainMeters,
   );
@@ -66,6 +75,13 @@ class LiveMetrics {
     completedSplits: [],
     currentSplitElapsed: Duration.zero,
     currentSplitDistanceMeters: 0,
+    currentSplit: CurrentSplitInfo(
+      index: 1,
+      plannedCount: null,
+      sizeKind: SplitSizeKind.distanceMeters,
+      size: 1000,
+      targetSpeedMps: null,
+    ),
     maxSpeedMps: null,
     elevationGainMeters: 0,
   );
