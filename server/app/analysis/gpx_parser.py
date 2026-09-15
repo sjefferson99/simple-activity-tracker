@@ -1,4 +1,6 @@
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Literal
 
 import gpxpy
 import gpxpy.gpx
@@ -165,3 +167,122 @@ def parse_split_preference(data: bytes) -> tuple[str, int] | None:
         return None
 
     return split_type, split_value
+
+
+@dataclass(frozen=True)
+class SplitPlanData:
+    """The phone's split plan (issue #99/#100), parsed from the GPX's
+    sat:split_target/sat:split_plan/sat:split_targets_as extensions —
+    written alongside the unchanged sat:split_type/sat:split_value (see
+    mobile's RunGpxLog and docs/SPLIT-TARGETS-PLAN.md §4.2). Mirrors
+    mobile's SplitPlan: split_type/split_value are the same rolling
+    base every activity already has; rolling_target_mps and custom_splits
+    are mutually exclusive (a custom plan's own per-split targets, or one
+    target applied to every rolling split — never both, matching mobile's
+    SplitPlan.isCustom split between rollingTargetSpeedMps and
+    customSplits)."""
+
+    split_type: str
+    split_value: int
+    rolling_target_mps: float | None
+    # (size, target) pairs, in order, splits 1..N of a custom plan. Size is
+    # metres for a distance split_type, seconds for time_min. Empty for a
+    # rolling plan (mirrors mobile's SplitPlan.customSplits).
+    custom_splits: list[tuple[float, float | None]] = field(default_factory=list)
+    targets_as: Literal["pace", "speed"] = "pace"
+
+    @property
+    def is_custom(self) -> bool:
+        return bool(self.custom_splits)
+
+
+def _parse_custom_splits(raw: str) -> list[tuple[float, float | None]] | None:
+    """Parses a sat:split_plan value ("size@target;size@target;size") into
+    (size, target) pairs, or None if any entry is malformed — a partially
+    unparseable plan is treated as entirely absent rather than silently
+    dropping just the bad entry (see docs/SPLIT-TARGETS-SERVER-PLAN.md §2)."""
+    entries = raw.split(";")
+    if not entries or any(not e for e in entries):
+        return None
+    result: list[tuple[float, float | None]] = []
+    for entry in entries:
+        if "@" in entry:
+            size_text, target_text = entry.split("@", 1)
+            try:
+                size = float(size_text)
+                target: float | None = float(target_text)
+            except ValueError:
+                return None
+        else:
+            try:
+                size = float(entry)
+            except ValueError:
+                return None
+            target = None
+        if size <= 0 or (target is not None and target <= 0):
+            return None
+        result.append((size, target))
+    return result
+
+
+def parse_split_plan(data: bytes) -> SplitPlanData | None:
+    """Best-effort split plan from the uploaded GPX's root <extensions>
+    (issue #100 — see mobile's RunGpxLog and docs/SPLIT-TARGETS-PLAN.md
+    §4.2). Returns None (never raises) whenever parse_split_preference
+    itself would — no/invalid split_type/split_value — since a plan without
+    a valid base preference makes no sense. sat:split_target/sat:split_plan/
+    sat:split_targets_as are all optional on top of that: a GPX with none of
+    them still yields a SplitPlanData (rolling, no target, targets_as
+    defaulting to "pace") so callers have one code path rather than having
+    to special-case "old GPX with no plan extensions at all"."""
+    base = parse_split_preference(data)
+    if base is None:
+        return None
+    split_type, split_value = base
+
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if "<!DOCTYPE" in text or "<!ENTITY" in text:
+        return None
+    try:
+        gpx = gpxpy.parse(text)
+    except Exception:
+        return None
+
+    target_raw: str | None = None
+    plan_raw: str | None = None
+    targets_as_raw: str | None = None
+    for element in gpx.extensions:
+        tag = getattr(element, "tag", None)
+        if tag == f"{{{_SPLIT_EXTENSIONS_NS}}}split_target":
+            target_raw = (element.text or "").strip()
+        elif tag == f"{{{_SPLIT_EXTENSIONS_NS}}}split_plan":
+            plan_raw = (element.text or "").strip()
+        elif tag == f"{{{_SPLIT_EXTENSIONS_NS}}}split_targets_as":
+            targets_as_raw = (element.text or "").strip()
+
+    custom_splits: list[tuple[float, float | None]] = []
+    rolling_target_mps: float | None = None
+    if plan_raw:
+        parsed = _parse_custom_splits(plan_raw)
+        if parsed is not None:
+            custom_splits = parsed
+    if not custom_splits and target_raw:
+        try:
+            value = float(target_raw)
+        except ValueError:
+            value = 0.0
+        if value > 0:
+            rolling_target_mps = value
+
+    targets_as: Literal["pace", "speed"] = "speed" if targets_as_raw == "speed" else "pace"
+
+    return SplitPlanData(
+        split_type=split_type,
+        split_value=split_value,
+        rolling_target_mps=rolling_target_mps,
+        custom_splits=custom_splits,
+        targets_as=targets_as,
+    )

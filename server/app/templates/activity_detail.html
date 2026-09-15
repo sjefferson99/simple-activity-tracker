@@ -98,23 +98,40 @@
   </table>
   {% endif %}
 
+  {% set is_custom_plan = (activity.split_plan.custom_splits if activity.split_plan else None) %}
   <form class="split-controls"
         hx-get="/activities/{{ activity.id }}/splits"
         hx-target="#splits-table"
         hx-trigger="change"
         style="margin-top:1.5rem;">
     <label for="split_value">Split every</label>
+    {# A custom plan's splits vary in size, so result.split_type/split_value
+       (the plan's rolling *base*, used only once the plan runs out — see
+       SplitPlanData) isn't the size actually in effect. Showing it here
+       would misleadingly imply a fixed size the splits below don't have, so
+       the boxes are left blank/unselected until the user actually picks a
+       size — at which point it's a real, explicit re-slice request. #}
     <input type="number" id="split_value" name="split_value" min="1" max="1000"
-           value="{{ result.split_value or 1 }}">
+           value="{{ '' if is_custom_plan else (result.split_value or 1) }}"
+           placeholder="{{ '—' if is_custom_plan else '' }}">
     <select id="split_type" name="split_type" aria-label="Split unit">
-      <option value="distance_km" {% if not result.split_type or result.split_type == "distance_km" %}selected{% endif %}>Kilometers</option>
-      <option value="distance_mi" {% if result.split_type == "distance_mi" %}selected{% endif %}>Miles</option>
-      <option value="time_min" {% if result.split_type == "time_min" %}selected{% endif %}>Minutes</option>
+      {% if is_custom_plan %}<option value="" selected disabled hidden>—</option>{% endif %}
+      <option value="distance_km" {% if not is_custom_plan and (not result.split_type or result.split_type == "distance_km") %}selected{% endif %}>Kilometers</option>
+      <option value="distance_mi" {% if not is_custom_plan and result.split_type == "distance_mi" %}selected{% endif %}>Miles</option>
+      <option value="time_min" {% if not is_custom_plan and result.split_type == "time_min" %}selected{% endif %}>Minutes</option>
     </select>
+    {% if activity.split_plan %}
+    <button type="button" class="secondary"
+            hx-get="/activities/{{ activity.id }}/splits/reset"
+            hx-target="#splits-table">
+      Reset to my uploaded plan
+    </button>
+    {% endif %}
   </form>
   {% set splits = result.splits %}
   {% set split_type = result.split_type %}
   {% set split_value = result.split_value %}
+  {% set split_targets_as = result.split_targets_as %}
   <div id="splits-table">
     {% include "partials/splits_table.html" %}
   </div>

@@ -281,6 +281,7 @@ button.secondary:hover, .button.secondary:hover { background: var(--bg); }
 
 .split-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
 }
@@ -362,3 +363,9 @@ button.secondary:hover, .button.secondary:hover { background: var(--bg); }
 .filter-errors p { margin: 0.2rem 0; }
 .filter-errors p:first-child { margin-top: 0; }
 .filter-errors p:last-child { margin-bottom: 0; }
+
+/* Split target verdict (issue #100) — same ±5% on/off-target rule as
+   mobile's live tile (docs/SPLIT-TARGETS-PLAN.md D7), just colour + text,
+   no background tint (a table cell, not a tile). */
+.split-on-target { color: var(--ok); font-weight: 600; }
+.split-off-target { color: var(--danger); font-weight: 600; }

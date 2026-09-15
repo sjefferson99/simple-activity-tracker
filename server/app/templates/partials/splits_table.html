@@ -1,4 +1,24 @@
 {% set unit_label = {"distance_km": "km", "distance_mi": "mi", "time_min": "min"}[split_type or "distance_km"] %}
+{% if reset_controls %}
+{# activity_splits_reset (issue #100 follow-up "reset to my plan" link):
+   htmx only swaps the element it targeted (#splits-table below), so the
+   split-size input/select need an explicit out-of-band swap to show the
+   plan's own size again — otherwise they'd keep displaying whatever size
+   the user had last picked even though the table below no longer matches
+   it. hx-swap-oob="true" matches by id against the *existing* page element
+   (split_value/split_type in activity_detail.html's form) and replaces it
+   in place, staying inside that form — it does not need to be inside this
+   fragment's own DOM subtree to work. #}
+<input type="number" id="split_value" name="split_value" min="1" max="1000"
+       value="{{ '' if is_custom_plan else (split_value or 1) }}"
+       placeholder="{{ '—' if is_custom_plan else '' }}" hx-swap-oob="true">
+<select id="split_type" name="split_type" aria-label="Split unit" hx-swap-oob="true">
+  {% if is_custom_plan %}<option value="" selected disabled hidden>—</option>{% endif %}
+  <option value="distance_km" {% if not is_custom_plan and (not split_type or split_type == "distance_km") %}selected{% endif %}>Kilometers</option>
+  <option value="distance_mi" {% if not is_custom_plan and split_type == "distance_mi" %}selected{% endif %}>Miles</option>
+  <option value="time_min" {% if not is_custom_plan and split_type == "time_min" %}selected{% endif %}>Minutes</option>
+</select>
+{% endif %}
 {# Re-run on every htmx swap of this fragment (split-size control changed) as
    well as the initial full-page render, so the map markers and chart split
    lines always match the table currently on screen — see
@@ -14,12 +34,22 @@
     window.updateSplitMarkers({{ (splits or []) | tojson }});
   }
 </script>
+{% set has_targets = splits and splits | selectattr("target_speed_mps", "ne", none) | list | length > 0 %}
 {% if splits %}
-<h2 style="margin-top:1.5rem;">Splits ({{ split_value or 1 }} {{ unit_label }})</h2>
+{# A custom plan's splits vary in size (see activity_detail.html's
+   is_custom_plan comment) — "Splits (1 min)" would misstate that every
+   split below is 1 minute, so a custom plan just gets a plain heading. #}
+<h2 style="margin-top:1.5rem;">{% if is_custom_plan %}Splits{% else %}Splits ({{ split_value or 1 }} {{ unit_label }}){% endif %}</h2>
 <table>
-  <thead><tr><th>#</th><th>Distance</th><th>Time</th><th>Pace</th><th>Elevation</th></tr></thead>
+  <thead>
+    <tr>
+      <th>#</th><th>Distance</th><th>Time</th><th>Pace</th><th>Speed</th><th>Elevation</th>
+      {% if has_targets %}<th>Target</th>{% endif %}
+    </tr>
+  </thead>
   <tbody>
     {% for split in splits %}
+    {% set verdict_class = {"on_target": "split-on-target", "too_fast": "split-off-target", "too_slow": "split-off-target"}.get(split.verdict, "") %}
     <tr>
       <td>{{ split.index }}</td>
       <td>
@@ -29,8 +59,18 @@
         {% endif %}
       </td>
       <td>{{ split.duration_seconds | duration }}</td>
-      <td>{{ split.avg_speed_mps | pace }}</td>
+      <td class="{{ verdict_class }}">{{ split.avg_speed_mps | pace }}</td>
+      <td class="{{ verdict_class }}">{{ split.avg_speed_mps | kmh }}</td>
       <td>{{ "%+.0f"|format(split.elevation_delta_m) }} m</td>
+      {% if has_targets %}
+      <td>
+        {% if split.target_speed_mps %}
+          {{ split.target_speed_mps | split_target(split_targets_as) }}
+          {% set delta = split.avg_speed_mps | speed_delta(split.target_speed_mps, split_targets_as) %}
+          {% if delta %}<br><span class="{{ verdict_class }}">{{ delta }}</span>{% endif %}
+        {% else %}—{% endif %}
+      </td>
+      {% endif %}
     </tr>
     {% endfor %}
   </tbody>

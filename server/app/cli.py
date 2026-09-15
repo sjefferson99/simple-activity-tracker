@@ -80,7 +80,7 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
     of activity_id/all_activities must be given by the caller (main() enforces
     this).
     """
-    from app.analysis.gpx_parser import GpxParseError, parse_gpx, parse_split_preference
+    from app.analysis.gpx_parser import GpxParseError, parse_gpx, parse_split_plan
     from app.analysis.track_sampling import DEFAULT_MAX_POINTS, sample_track
     from app.analysis.v1 import (
         ANALYSIS_VERSION,
@@ -122,13 +122,22 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
                 gpx_bytes = blob_store.get(activity.gpx_blob_key)
                 track = parse_gpx(gpx_bytes)
                 # Reanalyze refreshes the derived ActivityAnalysis.result only —
-                # it deliberately does not touch activity.split_type/split_value,
-                # which were set once at upload time and stay upload-time-fixed
-                # (see docs history: pre-existing defaults aren't backfilled).
-                split_pref = parse_split_preference(gpx_bytes)
+                # it deliberately does not touch activity.split_type/split_value/
+                # split_plan, which were set once at upload time and stay
+                # upload-time-fixed (see docs history: pre-existing defaults
+                # aren't backfilled). The plan is re-parsed from the GPX itself
+                # (issue #100) rather than read from the stored column, for the
+                # same reason split_type/split_value are re-derived here too.
+                split_plan = parse_split_plan(gpx_bytes)
                 result = (
-                    analyzer.analyze(track, *split_pref, activity_type=activity.activity_type)
-                    if split_pref
+                    analyzer.analyze(
+                        track,
+                        split_plan.split_type,
+                        split_plan.split_value,
+                        activity_type=activity.activity_type,
+                        split_plan=split_plan,
+                    )
+                    if split_plan
                     else analyzer.analyze(track, activity_type=activity.activity_type)
                 )
                 cached_track = sample_track(track, max_points=DEFAULT_MAX_POINTS)

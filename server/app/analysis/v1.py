@@ -3,17 +3,29 @@ from dataclasses import dataclass, field
 
 from app.analysis.analyzer import AnalysisResult
 from app.analysis.geo_math import haversine_distance_meters, speed_mps_between
+from app.analysis.gpx_parser import SplitPlanData
 from app.analysis.track import Point, Track, drop_inaccurate_points
 
-# 6: implied-speed GPS-jump rejection now varies by activity_type instead of
-# always using the running threshold (issue #83 — genuine cycling speeds were
-# being misclassified as jumps), and points with a poor/missing sat:accuracy
-# extension (e.g. a stale fix before the GPS lock settles) are dropped before
-# analysis rather than left to poison `start`/`bounds`/the series' first
-# sample. Bump this whenever the result shape or algorithm changes, then run
+# 7: splits now honour a phone-supplied SplitPlanData (issue #100) — a
+# custom plan's variable per-split sizes, and/or a target speed per split —
+# instead of always using a constant boundary derived from split_type/
+# split_value alone. Each split dict gains target_speed_mps/verdict, and the
+# result gains split_targets_as. A GPX/activity with no plan (the common
+# case, and every activity analyzed before this version) is unaffected: same
+# splits, target_speed_mps/verdict null, split_targets_as null. Bump this
+# whenever the result shape or algorithm changes, then run
 # `simple-activity-tracker-server reanalyze --all` on each deployment so
 # stored analyses catch up — the web UI reads stored results as-is.
-ANALYSIS_VERSION = 6
+ANALYSIS_VERSION = 7
+
+# Green within ±5% of target speed, red outside in either direction — same
+# rule and tolerance as mobile's splitTargetTolerance
+# (mobile/lib/domain/tracking/split_target.dart), so a split judged on the
+# live screen is judged identically once the activity is analyzed here.
+# Unlike the live tile, a finished split's verdict has no grace period: the
+# live grace only exists to avoid tinting a split that has barely started,
+# which is not a concept a completed split has.
+_SPLIT_TARGET_TOLERANCE = 0.05
 
 # ~2:08 min/km for running; a cyclist routinely exceeds that, so use a higher
 # cap for cycling — mirrors mobile MetricsEngine's per-ActivityMode
@@ -153,24 +165,81 @@ def _split_boundary_meters(split_type: str, split_value: int) -> float | None:
     return None
 
 
+def _verdict(avg_speed_mps: float, target_speed_mps: float | None) -> str | None:
+    """ "on_target"/"too_fast"/"too_slow" against ±_SPLIT_TARGET_TOLERANCE of
+    target_speed_mps, or None when there is no target — mirrors mobile's
+    splitVerdict (domain/tracking/split_target.dart) with no grace period,
+    since a completed split's full-duration average is never "too early"."""
+    if target_speed_mps is None:
+        return None
+    ratio = avg_speed_mps / target_speed_mps
+    if ratio > 1 + _SPLIT_TARGET_TOLERANCE:
+        return "too_fast"
+    if ratio < 1 - _SPLIT_TARGET_TOLERANCE:
+        return "too_slow"
+    return "on_target"
+
+
+@dataclass(frozen=True)
+class _SplitSizing:
+    """Per-index split size/target lookup — a constant rolling boundary when
+    split_plan is None or has no custom splits, else the custom plan's own
+    sizes/targets for splits 1..N, rolling on at the rolling size with no
+    target once exhausted (mirrors mobile's SplitPlan.sizeOf/targetOf,
+    issue #99 D5). base_size is metres for a distance split_type, seconds
+    for time_min — same unit _compute_distance_splits/_compute_time_splits
+    already worked in before this generalization."""
+
+    base_size: float
+    rolling_target_mps: float | None
+    custom_splits: tuple[tuple[float, float | None], ...] = ()
+
+    def size_of(self, index: int) -> float:
+        """1-based split index."""
+        if index <= len(self.custom_splits):
+            return self.custom_splits[index - 1][0]
+        return self.base_size
+
+    def target_of(self, index: int) -> float | None:
+        if index <= len(self.custom_splits):
+            return self.custom_splits[index - 1][1]
+        if self.custom_splits:
+            return None  # rolled on past a custom plan: no target (D5)
+        return self.rolling_target_mps
+
+
 def _compute_splits(
     steps: list[_Step],
     first_point: Point,
     split_type: str = _DEFAULT_SPLIT_TYPE,
     split_value: int = _DEFAULT_SPLIT_VALUE,
+    split_plan: SplitPlanData | None = None,
 ) -> list[dict[str, object]]:
     if not steps:
         return []
 
     boundary_meters = _split_boundary_meters(split_type, split_value)
+    custom_splits = tuple(split_plan.custom_splits) if split_plan else ()
+    rolling_target = split_plan.rolling_target_mps if split_plan else None
+
     if boundary_meters is not None:
-        return _compute_distance_splits(steps, first_point, boundary_meters)
+        sizing = _SplitSizing(
+            base_size=boundary_meters,
+            rolling_target_mps=rolling_target,
+            custom_splits=custom_splits,
+        )
+        return _compute_distance_splits(steps, first_point, sizing)
     boundary_seconds = split_value * 60.0
-    return _compute_time_splits(steps, first_point, boundary_seconds)
+    sizing = _SplitSizing(
+        base_size=boundary_seconds,
+        rolling_target_mps=rolling_target,
+        custom_splits=custom_splits,
+    )
+    return _compute_time_splits(steps, first_point, sizing)
 
 
 def _compute_distance_splits(
-    steps: list[_Step], first_point: Point, boundary_meters: float
+    steps: list[_Step], first_point: Point, sizing: _SplitSizing
 ) -> list[dict[str, object]]:
     splits: list[dict[str, object]] = []
     builder = _SplitBuilder(
@@ -178,6 +247,7 @@ def _compute_distance_splits(
     )
     prev_cum_time = 0.0
     prev_ele = first_point.ele
+    next_boundary = builder.start_distance_m + sizing.size_of(builder.index)
 
     for step in steps:
         builder.elevation_delta_m += _elevation_delta(prev_ele, step.point.ele)
@@ -186,9 +256,10 @@ def _compute_distance_splits(
         # A while loop, not if: a single sparse step (a gap between fixes)
         # can span more than one split boundary, e.g. a backgrounded app
         # resuming after several minutes — every boundary it crosses needs
-        # its own split, not just the first.
-        while step.cum_distance_m >= builder.index * boundary_meters and step.distance_m > 0:
-            next_boundary = builder.index * boundary_meters
+        # its own split, not just the first. Each iteration re-derives
+        # next_boundary from sizing.size_of(builder.index), since a custom
+        # plan's splits may each be a different size.
+        while step.cum_distance_m >= next_boundary and step.distance_m > 0:
             # Interpolate the crossing time — a point rarely lands exactly on
             # the boundary (mirrors mobile MetricsEngine's approach).
             overshoot = step.cum_distance_m - next_boundary
@@ -197,6 +268,7 @@ def _compute_distance_splits(
             duration_s = crossing_time_s - builder.start_time_s
             split_distance_m = next_boundary - builder.start_distance_m
             avg_speed = split_distance_m / duration_s if duration_s > 0 else 0.0
+            target_speed_mps = sizing.target_of(builder.index)
             lat, lon = _interpolate_latlon(step, fraction)
             splits.append(
                 {
@@ -205,6 +277,8 @@ def _compute_distance_splits(
                     "avg_speed_mps": avg_speed,
                     "elevation_delta_m": builder.elevation_delta_m,
                     "distance_m": split_distance_m,
+                    "target_speed_mps": target_speed_mps,
+                    "verdict": _verdict(avg_speed, target_speed_mps),
                     "boundary": {
                         "t_s": crossing_time_s,
                         "dist_m": next_boundary,
@@ -219,6 +293,7 @@ def _compute_distance_splits(
                 start_time_s=crossing_time_s,
                 start_ele=step.point.ele,
             )
+            next_boundary = builder.start_distance_m + sizing.size_of(builder.index)
 
         prev_cum_time = step.cum_time_s
 
@@ -226,7 +301,7 @@ def _compute_distance_splits(
 
 
 def _compute_time_splits(
-    steps: list[_Step], first_point: Point, boundary_seconds: float
+    steps: list[_Step], first_point: Point, sizing: _SplitSizing
 ) -> list[dict[str, object]]:
     splits: list[dict[str, object]] = []
     builder = _SplitBuilder(
@@ -234,6 +309,7 @@ def _compute_time_splits(
     )
     prev_cum_distance = 0.0
     prev_ele = first_point.ele
+    next_boundary = builder.start_time_s + sizing.size_of(builder.index)
 
     for step in steps:
         builder.elevation_delta_m += _elevation_delta(prev_ele, step.point.ele)
@@ -241,9 +317,9 @@ def _compute_time_splits(
 
         # A while loop, not if — see _compute_distance_splits's identical
         # comment: a single sparse step can cross more than one time
-        # boundary.
-        while step.cum_time_s >= builder.index * boundary_seconds and step.dt_s > 0:
-            next_boundary = builder.index * boundary_seconds
+        # boundary, and next_boundary is re-derived per split for the same
+        # variable-size-plan reason.
+        while step.cum_time_s >= next_boundary and step.dt_s > 0:
             # Interpolate the crossing distance — the mirror image of the
             # distance-mode loop's time interpolation (see
             # _compute_distance_splits): here the boundary is time, so the
@@ -254,6 +330,7 @@ def _compute_time_splits(
             duration_s = next_boundary - builder.start_time_s
             split_distance_m = crossing_distance_m - builder.start_distance_m
             avg_speed = split_distance_m / duration_s if duration_s > 0 else 0.0
+            target_speed_mps = sizing.target_of(builder.index)
             lat, lon = _interpolate_latlon(step, fraction)
             splits.append(
                 {
@@ -262,6 +339,8 @@ def _compute_time_splits(
                     "avg_speed_mps": avg_speed,
                     "elevation_delta_m": builder.elevation_delta_m,
                     "distance_m": split_distance_m,
+                    "target_speed_mps": target_speed_mps,
+                    "verdict": _verdict(avg_speed, target_speed_mps),
                     "boundary": {
                         "t_s": next_boundary,
                         "dist_m": crossing_distance_m,
@@ -276,6 +355,7 @@ def _compute_time_splits(
                 start_time_s=next_boundary,
                 start_ele=step.point.ele,
             )
+            next_boundary = builder.start_time_s + sizing.size_of(builder.index)
 
         prev_cum_distance = step.cum_distance_m
 
@@ -462,6 +542,7 @@ class AnalyzerV1:
         split_type: str = _DEFAULT_SPLIT_TYPE,
         split_value: int = _DEFAULT_SPLIT_VALUE,
         activity_type: str = "running",
+        split_plan: SplitPlanData | None = None,
     ) -> AnalysisResult:
         all_points = [p for segment in track.segments for p in segment.points]
         if not all_points:
@@ -503,7 +584,8 @@ class AnalyzerV1:
             "elevation": _elevation_stats(smoothed),
             "split_type": split_type,
             "split_value": split_value,
-            "splits": _compute_splits(steps, all_points[0], split_type, split_value),
+            "split_targets_as": split_plan.targets_as if split_plan else None,
+            "splits": _compute_splits(steps, all_points[0], split_type, split_value, split_plan),
             "best_efforts": _best_efforts(steps),
             "series": _series(steps, smoothed, windowed_speeds, all_points[0]),
             "bounds": _bounds(filtered_segments),

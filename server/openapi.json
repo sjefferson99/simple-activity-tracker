@@ -159,6 +159,16 @@
             "title": "Source Platform",
             "type": "string"
           },
+          "split_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SplitPlanOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "started_at": {
             "format": "date-time",
             "title": "Started At",
@@ -689,6 +699,61 @@
           "user"
         ],
         "title": "LoginResponse",
+        "type": "object"
+      },
+      "SplitPlanOut": {
+        "description": "The split plan an activity was uploaded with (issue #100) \u2014 mirrors\nActivity.split_plan/app.analysis.gpx_parser.SplitPlanData. None on\nActivityOut for an activity with no plan at all (an old upload, or a\nplain rolling preference with no target).",
+        "properties": {
+          "custom_splits": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Custom Splits",
+            "type": "array"
+          },
+          "rolling_target_mps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rolling Target Mps"
+          },
+          "targets_as": {
+            "enum": [
+              "pace",
+              "speed"
+            ],
+            "title": "Targets As",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rolling_target_mps",
+          "custom_splits",
+          "targets_as"
+        ],
+        "title": "SplitPlanOut",
         "type": "object"
       },
       "StravaImportJobCreated": {
