@@ -128,6 +128,91 @@ def test_reanalyze_picks_up_gpx_split_extension_without_touching_activity_column
         assert activity.split_value is None
 
 
+def test_reanalyze_backfills_a_null_split_plan_from_the_gpx(app_client, auth_headers) -> None:
+    """Issue #100 follow-up: an activity uploaded after the phone started
+    writing split-plan extensions (#99) but before the server understood
+    them (#100) has a plan-shaped GPX but a null Activity.split_plan row —
+    unlike split_type/split_value (set once, never backfilled),
+    split_plan must be backfilled here, or the web page's "reset to my
+    uploaded plan" control and custom-plan heading/controls fix can never
+    appear for such a row short of a full re-upload."""
+    from app.models.activity import Activity
+
+    ns = "https://simple-activity-tracker.local/gpx-extensions"
+    gpx = (
+        f'<?xml version="1.0"?><gpx version="1.1" xmlns:sat="{ns}">'
+        f"<extensions><sat:split_type>distance_km</sat:split_type>"
+        f"<sat:split_value>1</sat:split_value>"
+        f"<sat:split_target>3.0</sat:split_target>"
+        f"<sat:split_targets_as>speed</sat:split_targets_as></extensions>"
+        '<trk><trkseg><trkpt lat="51.5" lon="-0.1"><time>2026-01-01T07:00:00Z</time></trkpt>'
+        '<trkpt lat="51.51" lon="-0.1"><time>2026-01-01T07:05:00Z</time></trkpt>'
+        "</trkseg></trk></gpx>"
+    ).encode()
+
+    upload = upload_sample_activity(app_client, auth_headers, gpx)
+    activity_id = upload.json()["id"]
+    _stale_the_analysis(activity_id)
+
+    # Simulate the pre-#100 upload path: the row was inserted before the
+    # server parsed these extensions at all, so split_plan is null despite
+    # the GPX itself carrying a real plan.
+    with get_session_factory()() as session:
+        activity = session.get(Activity, activity_id)
+        assert activity is not None
+        activity.split_plan = None
+        session.commit()
+
+    reanalyze(activity_id=activity_id, all_activities=False)
+
+    with get_session_factory()() as session:
+        activity = session.get(Activity, activity_id)
+        assert activity is not None
+        assert activity.split_plan == {
+            "rolling_target_mps": 3.0,
+            "custom_splits": [],
+            "targets_as": "speed",
+        }
+
+
+def test_reanalyze_never_overwrites_an_existing_split_plan(app_client, auth_headers) -> None:
+    """A real (non-null) split_plan is the record of what the activity was
+    actually uploaded with — reanalyze must leave it alone even if the GPX
+    could in principle be parsed into a different-looking plan, same
+    upload-time-fixed rule as split_type/split_value."""
+    from app.models.activity import Activity
+
+    ns = "https://simple-activity-tracker.local/gpx-extensions"
+    gpx = (
+        f'<?xml version="1.0"?><gpx version="1.1" xmlns:sat="{ns}">'
+        f"<extensions><sat:split_type>distance_km</sat:split_type>"
+        f"<sat:split_value>1</sat:split_value>"
+        f"<sat:split_target>3.0</sat:split_target></extensions>"
+        '<trk><trkseg><trkpt lat="51.5" lon="-0.1"><time>2026-01-01T07:00:00Z</time></trkpt>'
+        '<trkpt lat="51.51" lon="-0.1"><time>2026-01-01T07:05:00Z</time></trkpt>'
+        "</trkseg></trk></gpx>"
+    ).encode()
+
+    upload = upload_sample_activity(app_client, auth_headers, gpx)
+    activity_id = upload.json()["id"]
+    _stale_the_analysis(activity_id)
+
+    with get_session_factory()() as session:
+        activity = session.get(Activity, activity_id)
+        assert activity is not None
+        assert activity.split_plan is not None  # sanity: the upload path set it
+        sentinel = {"rolling_target_mps": 99.0, "custom_splits": [], "targets_as": "pace"}
+        activity.split_plan = sentinel
+        session.commit()
+
+    reanalyze(activity_id=activity_id, all_activities=False)
+
+    with get_session_factory()() as session:
+        activity = session.get(Activity, activity_id)
+        assert activity is not None
+        assert activity.split_plan == sentinel
+
+
 def test_reanalyze_repopulates_the_endpoint_coordinate_columns(
     app_client, auth_headers, sample_gpx_bytes
 ) -> None:

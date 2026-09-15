@@ -1,8 +1,7 @@
 # Server split-plan plan — issue #100
 
-Status: **implemented and verified in the real dev-stack container, on
-branch `server-100-split-plan-honour`, not yet committed — awaiting
-sign-off before commit/push/PR (2026-09-15).** All 7 work items (§4) done.
+Status: **implemented, code-reviewed, and MERGED to `main` via PR #104
+(2026-09-15).** All 7 work items (§4) done.
 448 server tests, `ruff`/`ruff format`/`mypy --strict` clean, Snyk clean (no
 new findings — the only pre-existing findings in touched files are two Low
 path-traversal hits in `cli.py`'s `backup()`/Strava-import code, untouched
@@ -62,6 +61,28 @@ against the rebuilt dev container: reset button now renders on the same
 line as the split-size controls, Speed column present with correct values
 (e.g. 14.0 km/h actual next to a 4.0 target correctly shown as 14.4 km/h),
 clean `docker logs`.
+
+**Real production gap found after merge, same day: `reanalyze` didn't
+backfill `Activity.split_plan`.** After PR #104 merged and the user pulled
+the new image to their real prod stack, an activity uploaded on
+2026-09-15 (after #99 shipped on the phone, before #100 shipped on the
+server) showed the new Speed column but not the reset button or the
+custom-plan heading/controls fix. Traced to the database directly
+(`activities.split_plan` was `NULL` for every recent row) rather than
+guessed at — confirmed the running container's image digest matched the
+just-pushed build first, ruling out a stale-image red herring. Root cause:
+`Activity.split_plan` is set only at upload/import time (§2's "Storage"
+bullet, as designed), and `reanalyze` — the standard recovery path for a
+row analyzed under old logic — re-parsed the plan from the GPX only to feed
+`AnalyzerV1.analyze()`, never writing it back to the column. Fixed:
+`reanalyze` (`app/cli.py`) now sets `activity.split_plan` from the
+re-parsed `SplitPlanData` (via the existing `_split_plan_to_json` helper,
+imported from `app.api.v1.activities`) whenever the column is currently
+null — never overwriting a real value, so this is strictly additive
+recovery, not a change to what a fresh upload does. 2 new tests
+(`test_reanalyze_backfills_a_null_split_plan_from_the_gpx`,
+`test_reanalyze_never_overwrites_an_existing_split_plan`) — 465 server
+tests total. Branch `server-100-reanalyze-backfill-split-plan`.
 
 **Code review (direct, no sub-agents), same session.** One confirmed
 finding: `format_speed_delta` decided "on target" via a near-zero absolute
@@ -141,12 +162,12 @@ Root `<extensions>`, alongside the unchanged `sat:split_type`/`sat:split_value`:
 - **Storage**: new nullable `Activity.split_plan` JSON column (migration,
   same pattern as `f02d59257d57`'s `split_type`/`split_value` addition)
   storing `SplitPlanData` as JSON (`custom_splits` as `[[size, target], ...]`,
-  `null` target). Written once at upload/import time, never backfilled for
-  older rows (matches `split_type`/`split_value`'s own precedent — see
-  `cli.py`'s reanalyze comment). This is what lets a custom plan survive
-  reanalysis without re-parsing the GPX's `sat:split_plan` every time, and is
-  the source `AnalyzerV1` reads by default (see below) instead of taking the
-  plan as a fresh parameter on every call site.
+  `null` target). Written at upload/import time; also backfilled by the
+  `reanalyze` CLI when null (see below) — unlike `split_type`/`split_value`,
+  which really do stay upload-time-fixed forever. This is what lets a custom
+  plan survive reanalysis without re-parsing the GPX's `sat:split_plan`
+  every time, and is the source `AnalyzerV1` reads by default (see below)
+  instead of taking the plan as a fresh parameter on every call site.
 - **`AnalyzerV1.analyze()`**: gains an optional `split_plan: SplitPlanData |
   None = None` parameter. When given and `custom_splits` is non-empty,
   `_compute_splits` walks the custom sizes/targets by index instead of a
@@ -180,9 +201,18 @@ Root `<extensions>`, alongside the unchanged `sat:split_type`/`sat:split_value`:
   anyway (existing behavior for `split_type`/`split_value`) — do the same
   for the plan rather than reading the stored column, for consistency with
   how `split_type`/`split_value` are handled there (re-derived from the GPX
-  every time, never trusted from the row). Does **not** touch
-  `Activity.split_plan` itself (same "set once at upload time" rule as
-  `split_type`/`split_value` — see the existing comment in `cli.py`).
+  every time, never trusted from the row). **Unlike** `split_type`/
+  `split_value`, `Activity.split_plan` **is backfilled** when it's currently
+  null (found post-merge: a real deployment had activities uploaded after
+  #99 shipped on the phone but before #100 shipped on the server, so their
+  GPX genuinely carries plan extensions but the row was inserted before the
+  server understood them — reanalyze is the only recovery path for those
+  rows short of a full re-upload/re-import, and without backfilling
+  `split_plan` the analysis result would gain targets/verdicts but the web
+  page's reset control and custom-plan heading fix would never appear for
+  them). Never overwrites an already-set `split_plan` — same "what the
+  activity was actually uploaded with" reasoning as leaving `split_type`/
+  `split_value` alone.
 - **Re-slice routes** (`GET .../analysis?split_type=&split_value=`, the web
   splits-fragment route): unchanged signature. When explicit query params
   are given, analysis is recomputed at that plain rolling size with **no**
