@@ -106,7 +106,7 @@ class _SplitsSummaryRow extends ConsumerWidget {
     final summary = plan.isCustom
         ? 'Splits: custom, ${plan.customSplits.length} splits'
         : plan.rollingTargetSpeedMps != null
-        ? 'Splits: every ${formatSplitSizeMeters(_rollingSizeMeters(plan), plan.base.effectiveDistanceUnit)} '
+        ? 'Splits: every ${_rollingSizeLabel(plan)} '
               '@ ${formatTargetForEditing(plan.rollingTargetSpeedMps!, unit)} ${unit.suffix}'
         : 'Splits: every ${_rollingSizeLabel(plan)}';
 
@@ -326,18 +326,36 @@ class LiveRunScreen extends ConsumerWidget {
                         if (metrics != null)
                           Expanded(
                             flex: 5,
-                            child: _MetricGrid(
-                              metrics: metrics,
-                              speedUnit: effectiveUnit,
-                              unit: unit,
-                              activityMode: runActivityMode,
+                            // Scrollable rather than a bare Column: a tile
+                            // showing both a target and a settled delta (or
+                            // two such tiles adjacent) can be taller than
+                            // this shared type scale expects, and the
+                            // available height itself differs between the
+                            // live-tracking and run-finished layouts (extra
+                            // controls/upload status below). A real
+                            // vertical-overflow error banner was found
+                            // on-device in exactly that combination — this
+                            // makes it scroll instead of physically unable
+                            // to overflow, rather than trying to keep
+                            // shrinking tile content to guess-fit every case.
+                            child: SingleChildScrollView(
+                              child: Column(
+                                children: [
+                                  _MetricGrid(
+                                    metrics: metrics,
+                                    speedUnit: effectiveUnit,
+                                    unit: unit,
+                                    activityMode: runActivityMode,
+                                  ),
+                                  if (!isCycling)
+                                    _SplitsPanel(
+                                      completedSplits: metrics.completedSplits,
+                                      speedUnit: effectiveUnit,
+                                      unit: unit,
+                                    ),
+                                ],
+                              ),
                             ),
-                          ),
-                        if (metrics != null && !isCycling)
-                          _SplitsPanel(
-                            completedSplits: metrics.completedSplits,
-                            speedUnit: effectiveUnit,
-                            unit: unit,
                           ),
                         SizedBox(height: unit * 3),
                         _Controls(state: state, controller: controller),
@@ -492,9 +510,14 @@ class _MetricGrid extends StatelessWidget {
     ];
 
     return Column(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      // Explicit gaps rather than mainAxisAlignment.spaceEvenly: this
+      // Column now lives inside a SingleChildScrollView (to fix a real
+      // vertical-overflow bug — see the caller), which gives it unbounded
+      // height, and spaceEvenly can't distribute infinite space.
+      mainAxisSize: MainAxisSize.min,
       children: [
-        for (final row in rows)
+        for (final row in rows) ...[
+          if (row != rows.first) SizedBox(height: unit * 1.5),
           Row(
             children: [
               // Half-width padding either side keeps a lone final tile
@@ -515,6 +538,7 @@ class _MetricGrid extends StatelessWidget {
               if (row.length == 1) const Spacer(),
             ],
           ),
+        ],
       ],
     );
   }
@@ -705,6 +729,14 @@ class _MetricTile extends StatelessWidget {
     // multi-line, so the value gets the smaller two-line size in both cases.
     final valueLines = value.split('\n').length;
     final hasDetail = detail != null;
+    // A tile with both a two-line detail (target + delta once judged) and a
+    // verdict tint is taller than every other tile at this screen's shared
+    // type scale — found on-device as a real vertical overflow once the
+    // target line was added back alongside the delta. Trimming this
+    // specific combination's detail size/padding keeps every tile within
+    // the grid's fixed row height without shrinking anything else.
+    final hasTwoLineDetail = hasDetail && detail!.contains('\n');
+    final isTallTintedTile = hasTwoLineDetail && verdict != null;
 
     // A fixed green/red pair rather than theme tokens — Material's
     // ColorScheme has no "success" role, and error/onErrorContainer alone
@@ -737,7 +769,7 @@ class _MetricTile extends StatelessWidget {
               ),
         padding: EdgeInsets.symmetric(
           horizontal: unit * 0.5,
-          vertical: tintColor == null ? 0 : unit * 0.8,
+          vertical: tintColor == null ? 0 : (isTallTintedTile ? unit * 0.4 : unit * 0.8),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -770,7 +802,8 @@ class _MetricTile extends StatelessWidget {
                     textAlign: TextAlign.center,
                     maxLines: 2,
                     style: TextStyle(
-                      fontSize: unit * 2.4,
+                      fontSize: isTallTintedTile ? unit * 2.0 : unit * 2.4,
+                      height: isTallTintedTile ? 1.0 : null,
                       color: tintColor != null
                           ? theme.colorScheme.onSurface
                           : theme.colorScheme.onSurfaceVariant,

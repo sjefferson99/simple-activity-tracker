@@ -382,6 +382,125 @@ void main() {
       expect(detail, contains('▲')); // pace faster => arrow up (slow down)
       expect(spec.verdict!(metrics), SplitVerdict.tooFast);
     });
+
+    test(
+      'detail keeps showing the target itself once a delta is available, not just the delta',
+      () {
+        // Regression: on-device the header lost its "@ 5:00" target the
+        // moment a delta appeared, leaving only "how far off" with no
+        // "off from what" visible anywhere on the tile.
+        final spec = _specFor('current_split', ActivityMode.running);
+        final metrics = LiveMetrics(
+          elapsed: Duration.zero,
+          distanceMeters: 0,
+          avgSpeedMps: null,
+          completedSplits: const [],
+          currentSplitElapsed: const Duration(seconds: 15),
+          currentSplitDistanceMeters: 15 * (1000 / 250),
+          currentSplit: withTarget,
+        );
+        final detail = spec.detail!(metrics, SpeedUnit.minKm);
+        expect(detail, contains('@ 5:00'));
+      },
+    );
+  });
+
+  group('split_remaining value', () {
+    test('distance-kind: shows remaining distance and an ETA from current split pace', () {
+      final spec = _specFor('split_remaining', ActivityMode.running);
+      // 1km split, 200m covered in 100s => 2 m/s so far, 800m left => 400s.
+      final metrics = LiveMetrics(
+        elapsed: const Duration(seconds: 100),
+        distanceMeters: 200,
+        avgSpeedMps: 2,
+        completedSplits: const [],
+        currentSplitElapsed: const Duration(seconds: 100),
+        currentSplitDistanceMeters: 200,
+        currentSplit: const CurrentSplitInfo(
+          index: 1,
+          plannedCount: null,
+          sizeKind: SplitSizeKind.distanceMeters,
+          size: 1000,
+          targetSpeedMps: null,
+        ),
+      );
+      final value = spec.valueOf(metrics, null, SpeedUnit.kmh);
+      expect(value, contains('800 m'));
+      expect(value, contains('6:40'));
+    });
+
+    test('distance-kind: shows "--:--" for the ETA with no moving time yet', () {
+      final spec = _specFor('split_remaining', ActivityMode.running);
+      final metrics = LiveMetrics(
+        elapsed: Duration.zero,
+        distanceMeters: 0,
+        avgSpeedMps: null,
+        completedSplits: const [],
+        currentSplitElapsed: Duration.zero,
+        currentSplitDistanceMeters: 0,
+        currentSplit: _defaultCurrentSplit,
+      );
+      final value = spec.valueOf(metrics, null, SpeedUnit.kmh);
+      expect(value, contains('1 km'));
+      expect(value, contains('--:--'));
+    });
+
+    test('distance-kind: shows zero remaining once the split size is covered', () {
+      final spec = _specFor('split_remaining', ActivityMode.running);
+      final metrics = LiveMetrics(
+        elapsed: const Duration(seconds: 200),
+        distanceMeters: 1000,
+        avgSpeedMps: 5,
+        completedSplits: const [],
+        currentSplitElapsed: const Duration(seconds: 200),
+        currentSplitDistanceMeters: 1000,
+        currentSplit: _defaultCurrentSplit,
+      );
+      final value = spec.valueOf(metrics, null, SpeedUnit.kmh);
+      expect(value, contains('0 m'));
+    });
+
+    test('time-kind: shows remaining time counting down from the split size', () {
+      final spec = _specFor('split_remaining', ActivityMode.running);
+      final metrics = LiveMetrics(
+        elapsed: const Duration(seconds: 40),
+        distanceMeters: 100,
+        avgSpeedMps: 2.5,
+        completedSplits: const [],
+        currentSplitElapsed: const Duration(seconds: 40),
+        currentSplitDistanceMeters: 100,
+        currentSplit: const CurrentSplitInfo(
+          index: 1,
+          plannedCount: 3,
+          sizeKind: SplitSizeKind.durationSeconds,
+          size: 60,
+          targetSpeedMps: null,
+        ),
+      );
+      final value = spec.valueOf(metrics, null, SpeedUnit.kmh);
+      expect(value, '0:20');
+    });
+
+    test('time-kind: never goes negative once past the split boundary', () {
+      final spec = _specFor('split_remaining', ActivityMode.running);
+      final metrics = LiveMetrics(
+        elapsed: const Duration(seconds: 65),
+        distanceMeters: 100,
+        avgSpeedMps: 1.5,
+        completedSplits: const [],
+        currentSplitElapsed: const Duration(seconds: 65),
+        currentSplitDistanceMeters: 100,
+        currentSplit: const CurrentSplitInfo(
+          index: 1,
+          plannedCount: 3,
+          sizeKind: SplitSizeKind.durationSeconds,
+          size: 60,
+          targetSpeedMps: null,
+        ),
+      );
+      final value = spec.valueOf(metrics, null, SpeedUnit.kmh);
+      expect(value, '0:00');
+    });
   });
 
   group('last_split detail/verdict (issue #99)', () {

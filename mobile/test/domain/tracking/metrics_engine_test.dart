@@ -817,6 +817,86 @@ void main() {
     });
   });
 
+  group('credited distance integrates chip speed, not position deltas', () {
+    // Replaying three real S23 captures showed position-delta distance
+    // running 17-19% over Doppler-integrated distance across identical
+    // accepted points — the per-fix position jitter at 1 Hz is the same
+    // order as a walking stride, and summing |deltas| banks all of it. The
+    // chip speed readout (Doppler) had no such bias, so split averages built
+    // on position deltas read ~1 km/h hotter than the speed actually held.
+    DateTime start() => DateTime(2026, 1, 1, 0, 0, 0);
+
+    /// Four fixes at a steady 1.2 m/s, 1.2 m apart: confirms "moving" as of
+    /// the fourth, with nothing credited yet (see the step 3a tests).
+    int walkOff(MetricsEngine engine) {
+      for (var t = 0; t < 4; t++) {
+        engine.addPoint(
+          _pointAtMeters(
+            1.2 * t,
+            start().add(Duration(seconds: t)),
+            speedMps: 1.2,
+            hasSpeed: true,
+          ),
+        );
+      }
+      return 4;
+    }
+
+    test('jittered positions at a steady chip speed credit speed × time, not '
+        'the inflated point-to-point path', () {
+      final engine = MetricsEngine();
+      var t = walkOff(engine);
+      // Positions lurch +2.5 m, -0.5 m, +2.5 m, -0.5 m (a 6.0 m point-to-point
+      // path for 4.0 m of net progress) while the chip reports a steady
+      // 1.0 m/s throughout.
+      for (final meters in [6.1, 5.6, 8.1, 7.6]) {
+        engine.addPoint(
+          _pointAtMeters(
+            meters,
+            start().add(Duration(seconds: t++)),
+            speedMps: 1.0,
+            hasSpeed: true,
+          ),
+        );
+      }
+
+      // First segment blends the 1.2 m/s walk-off endpoint with 1.0 m/s
+      // (1.1 m), the other three are 1.0 m each.
+      expect(engine.metrics.distanceMeters, closeTo(4.1, 0.01));
+      expect(engine.metrics.distanceMeters, lessThan(6.0));
+    });
+
+    test('falls back to the position delta when either fix has no chip speed',
+        () {
+      final engine = MetricsEngine();
+      final t = walkOff(engine);
+      // No speed on this fix: the stationary gate falls back to its position
+      // floor (2.5 m clears it) and so must the credited distance.
+      engine.addPoint(_pointAtMeters(6.1, start().add(Duration(seconds: t))));
+
+      expect(engine.metrics.distanceMeters, closeTo(2.5, 0.01));
+    });
+
+    test('falls back to the position delta across a long gap between fixes',
+        () {
+      final engine = MetricsEngine();
+      final t = walkOff(engine);
+      // 30 m in 10 s (plausible), but 10 s is past the integration gap —
+      // two endpoint speeds can't describe the path between them, so the
+      // position delta is credited rather than (1.2 + 1.2) / 2 × 10 = 12 m.
+      engine.addPoint(
+        _pointAtMeters(
+          3.6 + 30,
+          start().add(Duration(seconds: t + 9)),
+          speedMps: 1.2,
+          hasSpeed: true,
+        ),
+      );
+
+      expect(engine.metrics.distanceMeters, closeTo(30, 0.1));
+    });
+  });
+
   group('#49: a real out-and-back route is never mistaken for GPS drift', () {
     // A "straightness" filter (net displacement over a window vs. total path
     // walked in it) was tried and reverted here: a genuine on-device capture

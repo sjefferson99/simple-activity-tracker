@@ -434,9 +434,7 @@ class _CustomPlanSection extends StatelessWidget {
                 parse: (text) =>
                     int.tryParse(text)?.let((v) => (v > 0 && v <= maxCustomSplits) ? v : null),
                 format: (v) => '$v',
-                onCommit: (count) => notifier.select(
-                  plan.copyWith(customSplits: _resized(plan.customSplits, count)),
-                ),
+                onCommit: (count) => _changeCount(context, count),
               ),
             ),
           ],
@@ -492,11 +490,41 @@ class _CustomPlanSection extends StatelessWidget {
     );
   }
 
+  Future<void> _changeCount(BuildContext context, int count) async {
+    final splits = plan.customSplits;
+    if (count < splits.length) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Remove splits?'),
+          content: Text(
+            'Reducing the split count to $count discards the last '
+            '${splits.length - count} configured split'
+            '${splits.length - count == 1 ? '' : 's'}, including any targets '
+            'set on them.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Remove'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    await notifier.select(plan.copyWith(customSplits: _resized(splits, count)));
+  }
+
   List<PlannedSplit> _resized(List<PlannedSplit> splits, int count) {
     if (count == splits.length) return splits;
     if (count < splits.length) return splits.sublist(0, count);
     final fill = splits.isEmpty
-        ? const PlannedSplit(size: 1000)
+        ? PlannedSplit(size: _rollingSizeInPlanUnits(plan.base))
         : splits.last;
     return [...splits, for (var i = splits.length; i < count; i++) fill];
   }
@@ -557,7 +585,9 @@ class _CustomSplitRow extends StatelessWidget {
                       : _sizeToDecimalText(split.size, plan.base.effectiveDistanceUnit),
                   hintText: isTimeKind ? 'm:ss' : sizeHint,
                   parse: (text) => isTimeKind
-                      ? parseMinSec(text)?.inMilliseconds.let((ms) => ms / 1000)
+                      ? parseMinSec(text, bareNumberAsSeconds: true)
+                          ?.inMilliseconds
+                          .let((ms) => ms / 1000)
                       : _parseDecimalSize(text, plan.base.effectiveDistanceUnit),
                   format: (v) => isTimeKind
                       ? formatMinSec(Duration(milliseconds: (v * 1000).round()))
@@ -669,6 +699,16 @@ class _CommittingTextFieldState<T> extends State<_CommittingTextField<T>> {
   late final _controller = TextEditingController(text: widget.initialValue);
   late final _focusNode = FocusNode()..addListener(_onFocusChange);
 
+  // Guards against double-committing the same text: onFieldSubmitted (the
+  // keyboard's Done key) and the focus-loss listener below can both fire for
+  // a single edit — e.g. Done triggers a commit whose onCommit callback
+  // opens a dialog, which itself steals focus and re-triggers the listener
+  // before the text has changed again. Without this, a commit that shows a
+  // confirmation dialog would show it twice (found via a widget test).
+  // Cleared on the next focus gain so a deliberate retry of the same text
+  // (e.g. after cancelling that confirmation dialog) is never suppressed.
+  String? _suppressedCommitText;
+
   // A real on-device bug: this screen has many stacked fields and no
   // navigation guard, so onTapOutside/onFieldSubmitted alone were not
   // enough — tapping a *different* field (rather than empty space) doesn't
@@ -678,11 +718,17 @@ class _CommittingTextFieldState<T> extends State<_CommittingTextField<T>> {
   // loss itself is the one signal that fires in every one of those cases,
   // since the framework always unfocuses a field before it's disposed.
   void _onFocusChange() {
-    if (!_focusNode.hasFocus) _commit();
+    if (_focusNode.hasFocus) {
+      _suppressedCommitText = null;
+    } else {
+      _commit();
+    }
   }
 
   void _commit() {
     final text = _controller.text.trim();
+    if (text == _suppressedCommitText) return;
+    _suppressedCommitText = text;
     if (widget.allowEmpty && text.isEmpty) {
       widget.onCleared?.call();
       return;

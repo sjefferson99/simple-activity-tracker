@@ -709,14 +709,15 @@
 
     <h3 style="font-size:18px;margin:40px 0 16px;">The core geometry</h3>
     <div class="prose">
-      <p>Every distance calculation starts with the <strong>haversine formula</strong> — the standard way to find the straight-line distance between two latitude/longitude points on a sphere. Given any two consecutive fixes, it returns the distance between them in metres; dividing that by the time between their timestamps gives the implied speed for that segment.</p>
+      <p>Every question about <em>where</em> two fixes are starts with the <strong>haversine formula</strong> — the standard way to find the straight-line distance between two latitude/longitude points on a sphere. Given any two consecutive fixes, it returns the distance between them in metres; dividing that by the time between their timestamps gives the implied speed for that segment. That figure drives every §4 plausibility check.</p>
+      <p>It is <em>not</em>, however, what gets credited as distance once a segment passes those checks. GPS positions jitter by a metre or so from fix to fix, and at walking pace that is the same size as a real stride — so simply adding up the straight-line hops over-counts the path by roughly 15–20% (measured on real captures: identical accepted points gave 17–19% more distance from positions than from the chip's own speed). The GPS chip's speed reading comes from the Doppler shift of the satellite signals, not from differencing positions, and has no such bias. So an accepted segment credits <strong>the average of the chip speed at its two ends × the time between them</strong>, and only falls back to the haversine distance when either fix reports no speed or the gap between them is longer than a few seconds (fixes were dropped in between, so two endpoint speeds no longer describe the path).</p>
     </div>
 
     <div class="metric-grid">
       <div class="metric-card">
         <div class="mhead"><span class="mname">Current speed</span><span class="munit">km/h · min/km</span></div>
-        <div class="mformula">the GPS chip's own reported speed<br>for the latest fix</div>
-        <div class="mnote">The big number on the tracking screen reads the phone's GPS chipset's own speed measurement directly, not something the app derives from position — it isn't smoothed and isn't passed through any of the §4 filters, so it's the reading most exposed to a single noisy fix. If the chip doesn't report a speed for a given fix, it falls back to distance ÷ time between that fix and the previous one.</div>
+        <div class="mformula">the GPS chip's own reported speed,<br>lightly smoothed (~3 s)</div>
+        <div class="mnote">The big number on the tracking screen reads the phone's GPS chipset's own speed measurement, not something the app derives from position, and isn't passed through any of the §4 filters. Each new fix is blended into the previous reading in proportion to the time since it (a ~3-second time constant), which damps single-fix jitter enough to pace against while still showing a real change of pace within a few seconds — a fix arriving after a long gap is trusted almost fully. If the chip doesn't report a speed for a given fix, it falls back to distance ÷ time between that fix and the previous one.</div>
       </div>
       <div class="metric-card">
         <div class="mhead"><span class="mname">Average speed</span><span class="munit">km/h · min/km</span></div>
@@ -725,8 +726,8 @@
       </div>
       <div class="metric-card">
         <div class="mhead"><span class="mname">Distance</span><span class="munit">km, 2 d.p.</span></div>
-        <div class="mformula">Σ haversine(fix<sub>n</sub>, fix<sub>n+1</sub>)<br>— summed segment by segment</div>
-        <div class="mnote">Built incrementally, one fix at a time — the app never needs to replay the whole run's history to update this number.</div>
+        <div class="mformula">Σ ½(speed<sub>n</sub> + speed<sub>n+1</sub>) × Δt<br>— chip speed integrated segment by segment</div>
+        <div class="mnote">Built incrementally, one fix at a time — the app never needs to replay the whole run's history to update this number. Falls back to haversine(fix<sub>n</sub>, fix<sub>n+1</sub>) for a segment where either fix has no chip speed, or whose gap is over 5 s — see "The core geometry" above for why positions alone over-count.</div>
       </div>
       <div class="metric-card">
         <div class="mhead"><span class="mname">Split pace</span><span class="munit">current km in progress</span></div>

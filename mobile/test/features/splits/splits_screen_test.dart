@@ -35,6 +35,19 @@ Finder _rollingTargetField() {
   );
 }
 
+/// Finds the "Number of splits" count field. Unlike the rolling/custom
+/// fields it has no stable key prefix, so locate it via the fixed "Number
+/// of splits" label instead of by its (changing) current text.
+Finder _splitCountField() {
+  return find.descendant(
+    of: find.ancestor(
+      of: find.text('Number of splits'),
+      matching: find.byType(Row),
+    ),
+    matching: find.byType(TextFormField),
+  );
+}
+
 /// Finds the [index]th custom split row's size or target field by its key
 /// prefix, same rationale as [_rollingTargetField].
 Finder _customSplitField(int index, {required bool target}) {
@@ -202,6 +215,120 @@ void main() {
     expect(plan.customSplits, hasLength(1));
     expect(plan.customSplits.first.size, 200);
   });
+
+  testWidgets(
+    'shrinking the split count asks for confirmation before discarding splits',
+    (tester) async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(
+        {},
+      );
+      await container
+          .read(splitPlanControllerProvider.notifier)
+          .select(
+            const SplitPlan(
+              base: SplitPreference.defaultPreference,
+              customSplits: [
+                PlannedSplit(size: 400),
+                PlannedSplit(size: 200),
+                PlannedSplit(size: 100),
+              ],
+            ),
+          );
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: SplitsScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final countField = _splitCountField();
+      await tester.dragUntilVisible(
+        countField,
+        find.byType(ListView),
+        const Offset(0, -100),
+      );
+      await tester.enterText(countField, '1');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Remove splits?'), findsOneWidget);
+
+      // Cancel: the plan must be unchanged.
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(
+        container.read(splitPlanControllerProvider).customSplits,
+        hasLength(3),
+      );
+
+      // Now confirm: the trailing splits must be discarded.
+      await tester.enterText(countField, '1');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Remove'));
+      await tester.pumpAndSettle();
+
+      expect(
+        container.read(splitPlanControllerProvider).customSplits,
+        hasLength(1),
+      );
+    },
+  );
+
+  testWidgets(
+    'growing the split count from empty seeds a split sized for the plan kind, not a hardcoded 1000',
+    (tester) async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(
+        {},
+      );
+      // A mile-kind rolling plan of 2 miles with no custom splits yet —
+      // growing the count should seed a split sized in metres-per-mile, not
+      // the km-kind default of a bare 1000.
+      await container
+          .read(splitPlanControllerProvider.notifier)
+          .select(
+            const SplitPlan(
+              base: SplitPreference(kind: SplitKind.distanceMi, value: 2),
+            ),
+          );
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: SplitsScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.dragUntilVisible(
+        find.text('Custom'),
+        find.byType(ListView),
+        const Offset(0, -100),
+      );
+      await tester.tap(find.text('Custom'));
+      await tester.pumpAndSettle();
+
+      final countField = _splitCountField();
+      await tester.dragUntilVisible(
+        countField,
+        find.byType(ListView),
+        const Offset(0, -100),
+      );
+      await tester.enterText(countField, '2');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      final plan = container.read(splitPlanControllerProvider);
+      expect(plan.customSplits, hasLength(2));
+      expect(plan.customSplits.last.size, closeTo(2 * 1609.344, 0.001));
+    },
+  );
 
   testWidgets(
     'a size edit commits on focus loss even without pressing Done '

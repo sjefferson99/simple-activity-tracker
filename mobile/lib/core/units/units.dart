@@ -169,7 +169,11 @@ String formatSpeedDelta(double avgMps, double targetMps, SpeedUnit unit) {
     final targetPaceSec = unit == SpeedUnit.minMi
         ? paceSecPerMileFromMps(targetMps)
         : paceSecPerKmFromMps(targetMps);
-    if (avgPaceSec == null || targetPaceSec == null) return 'on target';
+    // avgMps <= 0 means pace is undefined (stopped), not "on target" — the
+    // ratio check above already puts this case outside tolerance since
+    // ratio == 0, so this must report "too slow", not fall back silently.
+    if (avgPaceSec == null) return '▼ stopped';
+    if (targetPaceSec == null) return 'on target';
     final deltaSeconds = (avgPaceSec - targetPaceSec).abs().round();
     final arrow = tooFast ? '▲' : '▼';
     final direction = tooFast ? 'fast' : 'slow';
@@ -226,16 +230,20 @@ String formatMinSec(Duration duration) {
 /// Parses "m:ss" or "mm:ss" into a duration, or null if malformed (more
 /// than one colon, non-numeric parts, or seconds outside 0-59). A plain
 /// whole number with no colon at all (e.g. "5") is accepted as whole
-/// minutes ("5:00") — typing the colon is easy to forget on a phone
-/// keyboard, and "5" meaning "5 minutes" for a pace/duration field is the
-/// only reading a user would expect.
-Duration? parseMinSec(String text) {
+/// minutes by default ("5:00") — typing the colon is easy to forget on a
+/// phone keyboard, and "5" meaning "5 minutes" is the expected reading for
+/// a pace/duration field. Pass [bareNumberAsSeconds] for a field whose
+/// value is naturally seconds-sized (e.g. a short custom split length),
+/// where a colon-less "90" should mean 90 seconds ("1:30"), not 90 minutes.
+Duration? parseMinSec(String text, {bool bareNumberAsSeconds = false}) {
   final trimmed = text.trim();
   final parts = trimmed.split(':');
   if (parts.length == 1) {
-    final minutes = int.tryParse(parts[0]);
-    if (minutes == null || minutes < 0) return null;
-    return Duration(minutes: minutes);
+    final value = int.tryParse(parts[0]);
+    if (value == null || value < 0) return null;
+    return bareNumberAsSeconds
+        ? Duration(seconds: value)
+        : Duration(minutes: value);
   }
   if (parts.length != 2) return null;
   final minutes = int.tryParse(parts[0]);

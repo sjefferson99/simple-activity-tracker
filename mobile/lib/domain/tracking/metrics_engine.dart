@@ -80,6 +80,12 @@ const double _minReanchorMotionMeters = 2;
 /// stationary capture stayed at exactly zero distance down to 1.0m.
 const double _noiseFloorMeters = 1.2;
 
+/// Longest gap between two accepted fixes over which the chip speed at each
+/// end is still integrated for distance (see `MetricsEngine._creditedDistance`).
+/// Fixes are requested at 1 Hz, so anything past this means fixes were dropped
+/// in between and the endpoints no longer describe the path.
+const Duration _maxDopplerIntegrationGap = Duration(seconds: 5);
+
 /// The chip-speed stationary gate (docs/GPS-METRICS-PLAN.md step 3a).
 ///
 /// A segment's *position-implied* speed can't tell genuine drift (indoor
@@ -233,6 +239,10 @@ class MetricsEngine {
       return;
     }
 
+    // The position delta is what the plausibility (teleport), re-anchor and
+    // stationary-floor checks below are judged on — those are questions about
+    // *where* the fixes are. It is deliberately not what gets credited as
+    // distance once a segment is accepted: see [_creditedDistance].
     final segmentDistance = haversineDistanceMeters(previous, point);
     final segmentDuration = point.timestamp.difference(previous.timestamp);
     if (segmentDuration <= Duration.zero) {
@@ -306,7 +316,44 @@ class MetricsEngine {
       return;
     }
 
-    _acceptSegment(segmentDistance, segmentDuration, previous, point);
+    _acceptSegment(
+      _creditedDistance(previous, point, segmentDistance, segmentDuration),
+      segmentDuration,
+      previous,
+      point,
+    );
+  }
+
+  /// The distance an accepted segment actually credits: the chip's Doppler
+  /// speed integrated over the segment (trapezoid of the two endpoint speeds)
+  /// when both fixes report one, else the raw position delta.
+  ///
+  /// Summing position deltas between 1 Hz fixes over-counts path length by
+  /// roughly the per-fix position jitter, which at walking pace is the same
+  /// order as a real stride — replaying three real S23 captures gave 17-19%
+  /// more distance from positions than from Doppler over identical accepted
+  /// points, with the Doppler figure tracking the (independently trusted)
+  /// chip speed readout and the position figure driving every split average
+  /// ~1 km/h hot. Doppler speed comes from carrier frequency shift, not from
+  /// differencing noisy positions, so it has no such inflation.
+  ///
+  /// Over a long gap (fixes dropped by the accuracy filter) two endpoint
+  /// speeds say nothing about the path between them, so the position delta —
+  /// a well-defined lower bound — is credited instead of an extrapolation.
+  double _creditedDistance(
+    TrackPoint previous,
+    TrackPoint point,
+    double positionDistance,
+    Duration duration,
+  ) {
+    final previousSpeed = previous.hasSpeed ? previous.speedMps : null;
+    final speed = point.hasSpeed ? point.speedMps : null;
+    if (previousSpeed == null ||
+        speed == null ||
+        duration > _maxDopplerIntegrationGap) {
+      return positionDistance;
+    }
+    return (previousSpeed + speed) / 2 * (duration.inMilliseconds / 1000);
   }
 
   /// Whether a segment could have been covered under [mode] rather than

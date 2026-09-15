@@ -127,15 +127,61 @@ final MetricSpec _currentSplitSpec = MetricSpec(
     final target = split.targetSpeedMps;
     if (target == null) return header;
 
+    // The target itself stays on screen even once a delta is available —
+    // otherwise the one number you're aiming for disappears the moment you
+    // start moving, leaving only "how far off" with no "off from what"
+    // (found on-device: the header read "1.0 km/h slow" alone, with no way
+    // to see the 5.0 km/h target that judgement was made against).
+    final targetText = formatTargetForEditing(target, unit);
     final avg = _currentSplitAvgSpeedMps(metrics);
-    if (avg == null) return '$header @ ${formatTargetForEditing(target, unit)}';
-    return '$header\n${formatSpeedDelta(avg, target, unit)}';
+    if (avg == null) return '$header @ $targetText';
+    return '$header @ $targetText\n${formatSpeedDelta(avg, target, unit)}';
   },
   verdict: (metrics) => splitVerdict(
     avgSpeedMps: _currentSplitAvgSpeedMps(metrics),
     targetSpeedMps: metrics.currentSplit.targetSpeedMps,
     elapsedInSplit: metrics.currentSplitElapsed,
   ),
+);
+
+/// How much of the current split is left — a countdown of remaining time
+/// (time-kind split) or remaining distance and an estimated time (distance-
+/// kind split, estimated from this split's own average pace so far). Added
+/// after real on-device testing showed there was no way to tell how far
+/// into (or how much was left of) a split without doing mental maths
+/// against the elapsed-so-far/target size shown elsewhere on screen.
+final MetricSpec _remainingSpec = MetricSpec(
+  id: 'split_remaining',
+  label: _staticLabel('Remaining'),
+  description:
+      'How much of the current split is left. For a distance split, the '
+      'time is estimated from this split\'s own average pace so far, so it '
+      'settles in as the split gets underway and may jump early on.',
+  valueOf: (metrics, currentSpeedMps, unit) {
+    final split = metrics.currentSplit;
+    switch (split.sizeKind) {
+      case SplitSizeKind.durationSeconds:
+        final remaining =
+            Duration(milliseconds: (split.size * 1000).round()) -
+            metrics.currentSplitElapsed;
+        return formatDuration(remaining.isNegative ? Duration.zero : remaining);
+      case SplitSizeKind.distanceMeters:
+        final remainingMeters = split.size - metrics.currentSplitDistanceMeters;
+        if (remainingMeters <= 0) {
+          return '${formatSplitSizeMeters(0, unit.distanceUnit)}\n--:--';
+        }
+        final distanceText = formatSplitSizeMeters(
+          remainingMeters,
+          unit.distanceUnit,
+        );
+        final avgSpeed = _currentSplitAvgSpeedMps(metrics);
+        if (avgSpeed == null || avgSpeed <= 0) {
+          return '$distanceText\n--:--';
+        }
+        final etaSeconds = remainingMeters / avgSpeed;
+        return '$distanceText\n${formatDuration(Duration(milliseconds: (etaSeconds * 1000).round()))}';
+    }
+  },
 );
 
 final MetricSpec _lastSplitSpec = MetricSpec(
@@ -218,6 +264,7 @@ final List<MetricSpec> _runningMetricSpecs = [
   _avgSpeedSpec,
   _elapsedSpec,
   _distanceSpec,
+  _remainingSpec,
   _currentSplitSpec,
   _lastSplitSpec,
 ];

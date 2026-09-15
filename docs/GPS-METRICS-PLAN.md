@@ -243,6 +243,43 @@ walking-pace tracking being broken.
   was flaky once in the full suite; if it recurs, raise the test timeout to 200 ms.
 - Close #52 if 3a holds up on device; otherwise re-scope it with the step-1 numbers.
 
+### Step 5 — Credit distance from chip speed, not position deltas (2026-09-15)
+
+Found while testing split targets (issue #99) on the S23: with the readout now smoothed
+(~3 s time-weighted EMA in `LiveRunController`, display-only) the user could hold a
+steady 4.0–4.1 km/h on it, yet every split average climbed to ~5 km/h. Replaying the
+three instrumented captures from that session through the engine's exact filter/gate/
+split logic, with two parallel distance ledgers over the *identical* accepted segments:
+
+| capture | Σ haversine | Σ ½(v<sub>n</sub>+v<sub>n+1</sub>)·Δt | ratio |
+|---|---|---|---|
+| 13:32 walk | 427 m | 367 m | 1.166 |
+| 13:54 walk + jog | 359 m | 301 m | 1.193 |
+| 14:13 walk | 405 m | 341 m | 1.186 |
+
+Per split the ratio was 1.11–1.22, and it held on the one genuine running split
+(9.68 vs 8.32 km/h) — so it is not a walking-only effect on this phone. The Doppler
+ledger tracked the smoothed chip readout to within ~0.1 km/h throughout; the position
+ledger is what every tile was showing. Cause: summing point-to-point hops between 1 Hz
+fixes banks the per-fix position jitter as path length, and at ~1 m/fix that is the
+same order as a stride. Doppler speed is carrier-shift derived (§1.6) and has no such
+term.
+
+Done: `MetricsEngine._creditedDistance` — an accepted segment credits the mean of its
+two endpoint chip speeds × duration; haversine is still what the plausibility, re-anchor
+and gate-floor checks use (they are questions about *where* fixes are), and is the
+credited fallback when either endpoint lacks `hasSpeed` or the gap exceeds
+`_maxDopplerIntegrationGap` (5 s — past that, fixes were dropped in between and two
+endpoint speeds don't describe the path; the position delta is at least a defined
+lower bound). Distance, Avg, splits and max speed all move together, so they agree
+with the readout. Regression-tested with jittered positions at a steady chip speed,
+the no-speed fallback, and the long-gap fallback.
+
+**Not done — server:** `AnalyzerV1` still sums positions, so the web UI's distance and
+splits for these runs read ~17–19% over the phone's, even though the GPX carries
+`sat:speed` per point since Step 1. Worth a server follow-up that integrates
+`sat:speed` when present, with the same fallbacks.
+
 ## 3. What went wrong last time (read this)
 
 - Three fixes were validated against synthetic tests plus **one** class of real

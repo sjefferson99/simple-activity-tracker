@@ -257,6 +257,23 @@ void main() {
         );
       },
     );
+
+    test(
+      'pace: a stopped split (zero avg speed) reports too slow, not "on target"',
+      () {
+        // Regression: avgMps == 0 makes pace undefined, but that must not
+        // be confused with being on target — it's the most-off-target case.
+        final delta = formatSpeedDelta(0, targetMps, SpeedUnit.minKm);
+        expect(delta, isNot('on target'));
+        expect(delta, startsWith('▼'));
+      },
+    );
+
+    test('speed: a stopped split (zero avg speed) reports too slow', () {
+      final delta = formatSpeedDelta(0, targetMps, SpeedUnit.kmh);
+      expect(delta, isNot('on target'));
+      expect(delta, startsWith('▲'));
+    });
   });
 
   group('formatSplitSizeMeters', () {
@@ -309,6 +326,27 @@ void main() {
       expect(parseMinSec('1:60'), isNull);
       expect(parseMinSec('1:-5'), isNull);
     });
+
+    test(
+      'bareNumberAsSeconds treats a colon-less whole number as seconds, not minutes',
+      () {
+        // Regression: a seconds-sized field (e.g. a custom time-kind split's
+        // length) must not silently multiply a bare "90" by 60.
+        expect(
+          parseMinSec('90', bareNumberAsSeconds: true),
+          const Duration(seconds: 90),
+        );
+        expect(
+          parseMinSec('5', bareNumberAsSeconds: true),
+          const Duration(seconds: 5),
+        );
+        // A colon still means m:ss regardless of the flag.
+        expect(
+          parseMinSec('1:30', bareNumberAsSeconds: true),
+          const Duration(minutes: 1, seconds: 30),
+        );
+      },
+    );
   });
 
   group('parsePaceToMps / parseSpeedToMps round trips', () {

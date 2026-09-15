@@ -179,12 +179,17 @@ class SplitPlan {
       if (value <= 0) return null;
       for (final s in customSplits) {
         if (s.size <= 0) return null;
+        if (s.targetSpeedMps != null && s.targetSpeedMps! <= 0) return null;
       }
       if (customSplits.length > maxCustomSplits) return null;
+      final rollingTargetSpeedMps = (json['rollingTargetSpeedMps'] as num?)
+          ?.toDouble();
+      if (rollingTargetSpeedMps != null && rollingTargetSpeedMps <= 0) {
+        return null;
+      }
       return SplitPlan(
         base: base,
-        rollingTargetSpeedMps: (json['rollingTargetSpeedMps'] as num?)
-            ?.toDouble(),
+        rollingTargetSpeedMps: rollingTargetSpeedMps,
         customSplits: customSplits,
         targetsAsPace: json['targetsAsPace'] as bool? ?? true,
       );
