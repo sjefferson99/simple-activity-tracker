@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:gpx/gpx.dart';
 
 import '../../domain/models/track_point.dart';
+import '../../domain/tracking/activity_mode.dart';
 import '../../domain/tracking/split_plan.dart';
 
 /// Namespace for this app's own per-point GPX extensions (accuracy/speed
@@ -25,6 +26,7 @@ const String _extensionsPrefix = 'sat';
 class RunGpxLog {
   final File _targetFile;
   final SplitPlan _splitPlan;
+  final ActivityMode _activityMode;
   final Trk _track = Trk();
   Trkseg? _currentSegment;
 
@@ -32,7 +34,7 @@ class RunGpxLog {
   /// the same temp file concurrently and clobber each other's rename.
   Future<void> _pendingFlush = Future.value();
 
-  RunGpxLog(this._targetFile, this._splitPlan) {
+  RunGpxLog(this._targetFile, this._splitPlan, this._activityMode) {
     _startNewSegment();
   }
 
@@ -86,20 +88,25 @@ class RunGpxLog {
       ..creator = 'Simple Activity Tracker'
       ..trks = [_track]
       ..extensions = {
-        '$_extensionsPrefix:split_type': base.gpxSplitType,
-        '$_extensionsPrefix:split_value': '${base.value}',
-        // Additional, server-ignored-for-now extensions (issue #99 §4.2) —
-        // the phone's own split targets, written alongside the unchanged
-        // split_type/split_value above so the server's existing analysis
-        // and the web UI's re-slice control keep working exactly as today.
-        if (!_splitPlan.isCustom && _splitPlan.rollingTargetSpeedMps != null)
-          '$_extensionsPrefix:split_target':
-              '${_splitPlan.rollingTargetSpeedMps}',
-        if (_splitPlan.gpxPlanValue != null)
-          '$_extensionsPrefix:split_plan': _splitPlan.gpxPlanValue!,
-        '$_extensionsPrefix:split_targets_as': _splitPlan.targetsAsPace
-            ? 'pace'
-            : 'speed',
+        // Split-plan data is running-only (issue #99 D8) — a plan configured
+        // while running must not leak into a cycling activity's GPX just
+        // because the setting is a single global/persisted value (#109).
+        if (_activityMode.supportsSplits) ...{
+          '$_extensionsPrefix:split_type': base.gpxSplitType,
+          '$_extensionsPrefix:split_value': '${base.value}',
+          // Additional, server-ignored-for-now extensions (issue #99 §4.2) —
+          // the phone's own split targets, written alongside the unchanged
+          // split_type/split_value above so the server's existing analysis
+          // and the web UI's re-slice control keep working exactly as today.
+          if (!_splitPlan.isCustom && _splitPlan.rollingTargetSpeedMps != null)
+            '$_extensionsPrefix:split_target':
+                '${_splitPlan.rollingTargetSpeedMps}',
+          if (_splitPlan.gpxPlanValue != null)
+            '$_extensionsPrefix:split_plan': _splitPlan.gpxPlanValue!,
+          '$_extensionsPrefix:split_targets_as': _splitPlan.targetsAsPace
+              ? 'pace'
+              : 'speed',
+        },
       };
     final xml = GpxWriter().asString(
       gpx,

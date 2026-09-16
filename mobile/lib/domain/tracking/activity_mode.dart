@@ -16,4 +16,9 @@ enum ActivityMode {
         ActivityMode.running => 'Run',
         ActivityMode.cycling => 'Cycle',
       };
+
+  /// Whether this mode's UI and recorded GPX include split-plan data.
+  /// Cycling hides splits entirely (issue #99 D8) — anything gated on this
+  /// must not surface a running-configured split plan while cycling.
+  bool get supportsSplits => this == ActivityMode.running;
 }
