@@ -23,6 +23,12 @@ abstract class RunStore {
     Map<String, dynamic> analysisResult,
   );
 
+  /// Marks a record's analysis as permanently failed (issue #101, Slice C) —
+  /// SyncService calls this once its bounded retry is exhausted with no
+  /// result. Distinguishes "gave up" from "still pending" for the summary
+  /// screen's link, since both otherwise look identical (null analysisResult).
+  Future<void> markAnalysisFailed(String clientRunId);
+
   /// Deletes every record currently in [SyncStatusFailed], regardless of
   /// [SyncStatusFailed.retryable] — an explicit "give up on these" action
   /// for a record that can never succeed (e.g. no GPS data at all), so it

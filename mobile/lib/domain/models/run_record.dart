@@ -17,6 +17,13 @@ class RunRecord {
   /// restart without re-fetching. Null until fetched.
   final Map<String, dynamic>? analysisResult;
 
+  /// True once SyncService has exhausted its bounded retry (issue #97/#101,
+  /// Slice C) without the analysis ever completing — distinguishes "genuinely
+  /// failed" from "still pending" for a null [analysisResult], since both
+  /// would otherwise look identical to the summary screen's link. Defaults to
+  /// false; never cleared automatically (a future manual retry would clear it).
+  final bool analysisFailed;
+
   const RunRecord({
     required this.clientRunId,
     required this.gpxPath,
@@ -24,11 +31,13 @@ class RunRecord {
     required this.summary,
     required this.syncStatus,
     this.analysisResult,
+    this.analysisFailed = false,
   });
 
   RunRecord copyWith({
     SyncStatus? syncStatus,
     Map<String, dynamic>? analysisResult,
+    bool? analysisFailed,
   }) => RunRecord(
     clientRunId: clientRunId,
     gpxPath: gpxPath,
@@ -36,6 +45,7 @@ class RunRecord {
     summary: summary,
     syncStatus: syncStatus ?? this.syncStatus,
     analysisResult: analysisResult ?? this.analysisResult,
+    analysisFailed: analysisFailed ?? this.analysisFailed,
   );
 
   /// `activityMode` defaults to [ActivityMode.running] when reading an older
@@ -51,6 +61,7 @@ class RunRecord {
     summary: RunSummary.fromJson(json['summary'] as Map<String, dynamic>),
     syncStatus: SyncStatus.fromJson(json['syncStatus'] as Map<String, dynamic>),
     analysisResult: json['analysisResult'] as Map<String, dynamic>?,
+    analysisFailed: json['analysisFailed'] as bool? ?? false,
   );
 
   Map<String, dynamic> toJson() => {
@@ -60,5 +71,6 @@ class RunRecord {
     'summary': summary.toJson(),
     'syncStatus': syncStatus.toJson(),
     'analysisResult': analysisResult,
+    'analysisFailed': analysisFailed,
   };
 }

@@ -4,9 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth_state_controller.dart';
 import '../../core/sync/file_run_store.dart';
 import '../../core/sync/sync_service.dart';
-import '../../core/units/units.dart';
 import '../../domain/models/run_record.dart';
 import '../../domain/models/sync_status.dart';
+import '../activity_history/activity_detail_screen.dart';
 import '../settings/settings_screen.dart';
 
 /// Tracks one run's [RunRecord] across its whole upload/analysis lifecycle,
@@ -49,9 +49,13 @@ class RunSyncSection extends ConsumerWidget {
       child: Column(
         children: [
           _SyncStatusLine(status: record.syncStatus, isSignedIn: isSignedIn),
-          if (record.syncStatus is SyncStatusUploaded) ...[
+          if (record.syncStatus case SyncStatusUploaded(:final serverRunId)) ...[
             const SizedBox(height: 16),
-            _Insights(analysisResult: record.analysisResult),
+            _AnalysisLink(
+              serverRunId: serverRunId,
+              analysisResult: record.analysisResult,
+              analysisFailed: record.analysisFailed,
+            ),
           ],
         ],
       ),
@@ -88,51 +92,46 @@ class _SyncStatusLine extends StatelessWidget {
   }
 }
 
-class _Insights extends StatelessWidget {
+/// Replaces the old inline "Insights" section (issue #97/#101, Slice C) with
+/// a thin link into the activity detail screen (Slice A), which already
+/// renders the same server analysis/splits/targets — this widget never
+/// duplicates that rendering, only a pending/failed/done state check. See
+/// docs/ACTIVITY-HISTORY-PLAN.md D5 for why: an in-place inline section here
+/// would either show a second, separate splits/targets view or need to
+/// import Slice A's widget anyway, so linking through avoids maintaining two
+/// paths to the same data.
+class _AnalysisLink extends StatelessWidget {
+  final String serverRunId;
   final Map<String, dynamic>? analysisResult;
+  final bool analysisFailed;
 
-  const _Insights({required this.analysisResult});
+  const _AnalysisLink({
+    required this.serverRunId,
+    required this.analysisResult,
+    required this.analysisFailed,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final result = analysisResult;
-    if (result == null) {
-      return const Text('Analysis pending', style: TextStyle(fontStyle: FontStyle.italic));
+    if (analysisResult != null) {
+      return TextButton(
+        onPressed: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ActivityDetailScreen(activityId: serverRunId),
+          ),
+        ),
+        child: const Text('View full summary'),
+      );
     }
-
-    final elevation = result['elevation'] as Map<String, dynamic>?;
-    final gainM = (elevation?['gain_m'] as num?)?.toDouble();
-    final lossM = (elevation?['loss_m'] as num?)?.toDouble();
-    final bestEfforts = (result['best_efforts'] as List<dynamic>?) ?? const [];
-    final best1km = _bestEffortFor(bestEfforts, 1000);
-    final best5km = _bestEffortFor(bestEfforts, 5000);
-    final serverDistanceM = (result['distance_meters'] as num?)?.toDouble();
-    final serverMovingS = (result['moving_seconds'] as num?)?.toDouble();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Insights', style: Theme.of(context).textTheme.titleSmall),
-        const SizedBox(height: 8),
-        if (gainM != null) Text('Elevation gain: ${gainM.toStringAsFixed(0)} m'),
-        if (lossM != null) Text('Elevation loss: ${lossM.toStringAsFixed(0)} m'),
-        if (best1km != null) Text('Best 1 km: ${formatDuration(best1km)}'),
-        if (best5km != null) Text('Best 5 km: ${formatDuration(best5km)}'),
-        if (serverDistanceM != null)
-          Text('Distance (server): ${formatDistanceKm(serverDistanceM)} km'),
-        if (serverMovingS != null)
-          Text('Moving time (server): ${formatDuration(Duration(seconds: serverMovingS.round()))}'),
-      ],
+    if (analysisFailed) {
+      return const Text(
+        'Analysis failed',
+        style: TextStyle(fontStyle: FontStyle.italic),
+      );
+    }
+    return const Text(
+      'Analysis not available yet',
+      style: TextStyle(fontStyle: FontStyle.italic),
     );
-  }
-
-  Duration? _bestEffortFor(List<dynamic> bestEfforts, double targetDistanceMeters) {
-    for (final entry in bestEfforts) {
-      final map = entry as Map<String, dynamic>;
-      if ((map['distance_meters'] as num).toDouble() == targetDistanceMeters) {
-        return Duration(seconds: (map['duration_seconds'] as num).round());
-      }
-    }
-    return null;
   }
 }

@@ -49,6 +49,13 @@ class FakeRunStore implements RunStore {
   }
 
   @override
+  Future<void> markAnalysisFailed(String clientRunId) async {
+    final record = _records[clientRunId];
+    if (record == null) return;
+    _records[clientRunId] = record.copyWith(analysisFailed: true);
+  }
+
+  @override
   Future<int> clearFailed() async {
     final failedIds = _records.entries
         .where((e) => e.value.syncStatus is SyncStatusFailed)

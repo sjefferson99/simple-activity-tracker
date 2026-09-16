@@ -1,6 +1,41 @@
 # Activity history & server analysis plan — issues #97 and #101
 
-Status: **draft, awaiting owner sign-off — nothing implemented yet.**
+Status: **approved 2026-09-16, all three slices implemented on branch
+`mobile-101-activity-detail`, verified on-device.** Slices A+B committed and
+pushed (2026-09-16), verified on a physical Samsung S23 against the real
+dev-stack server — the activity list and detail screens work end-to-end, and
+the splits/targets rendering was cross-checked directly against the raw
+server-side analysis JSON (found no discrepancies; also incidentally
+confirmed the verdict/delta colouring is correct in both directions, not
+just "always fast"). Slice C (the post-Stop summary screen's "View full
+summary" link, plus a bounded retry for a still-pending analysis fetch) is
+implemented, tested, and **verified on-device by the owner** — surfaced and
+fixed two real bugs along the way, both worth knowing:
+
+- **`SyncService.updateAnalysisResult`/`markAnalysisFailed` never notified the
+  UI.** `_runRecordProvider` (run_insights.dart) only re-fetches on
+  `syncService.statusChanges`, which `_setStatus` emits on — but the analysis
+  retry loop wrote straight to `RunStore` without touching that stream, so
+  the "View full summary" link never appeared until the app was relaunched.
+  Found by the owner's own indoor test upload (server had genuinely finished
+  analysing within ~1s, confirmed via the dev-stack DB directly, yet the
+  phone still showed "Analysis pending"). Fixed with
+  `SyncService._notifyRecordChanged()`, called after both terminal outcomes.
+- **A same-medium network switch (Wi-Fi to Wi-Fi) never retries a failed
+  upload.** `ConnectivityMonitor.onConnected` only fires on a none→some
+  transition; switching between two networks that both report "connected"
+  produces no event at all, so a failed upload sat stuck until an unrelated
+  trigger (app resume, a new run finishing, explicit Retry now) happened to
+  fire. Found by the owner switching to a network where the dev-stack
+  hostname (`staustell`) only resolves, and the queued upload never
+  retrying. Fixed with a periodic timer (`_periodicRetryInterval`, 1 minute)
+  independent of connectivity events — `SyncService` now re-checks the queue
+  on a schedule regardless of what connectivity events do or don't fire.
+
+`flutter analyze`/`flutter test` (336 tests) and Snyk clean as of this
+commit. About to be committed as its own checkpoint on the branch, then a
+direct (no sub-agent) code review, per the owner's request — PR comes after
+that and one more on-device build/test pass.
 
 Handoff plan for whoever implements this — read CLAUDE.md first (architecture rules, the
 commit-approval rule, the on-device verification habit), then this file end to end.

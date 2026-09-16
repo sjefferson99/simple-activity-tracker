@@ -260,19 +260,19 @@ class LiveRunScreen extends ConsumerWidget {
                         IconButton(
                           onPressed: () => Navigator.of(context).push(
                             MaterialPageRoute(
+                              builder: (_) => const SettingsScreen(),
+                            ),
+                          ),
+                          icon: const Icon(Icons.settings_outlined),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
                               builder: (_) => const ActivityListScreen(),
                             ),
                           ),
                           icon: const Icon(Icons.history),
                           tooltip: 'Activity history',
-                        ),
-                        IconButton(
-                          onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => const SettingsScreen(),
-                            ),
-                          ),
-                          icon: const Icon(Icons.settings_outlined),
                         ),
                       ],
                     ),
