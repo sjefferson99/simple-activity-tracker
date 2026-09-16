@@ -1263,6 +1263,81 @@ def test_web_export_without_selection_marker_exports_all(
     assert len(manifest["activities"]) == 1
 
 
+def test_web_export_filtered_by_text_query(app_client, sample_gpx_bytes, auth_headers):
+    matching = upload_sample_activity(
+        app_client, auth_headers, sample_gpx_bytes, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    ).json()
+    non_matching = upload_sample_activity(
+        app_client, auth_headers, sample_gpx_bytes, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    ).json()
+    _set_title_and_notes(matching["id"], title="Sunrise Loop", notes=None)
+    _set_title_and_notes(non_matching["id"], title="Evening Jog", notes=None)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/export/filtered", params={"q": "sunrise"})
+    assert response.status_code == 200
+    archive = zipfile.ZipFile(BytesIO(response.content))
+    manifest = json.loads(archive.read("manifest.json"))
+    assert len(manifest["activities"]) == 1
+    assert manifest["activities"][0]["client_activity_id"] == matching["client_activity_id"]
+
+
+def test_web_export_filtered_by_distance(app_client, sample_gpx_bytes, auth_headers):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    # The sample fixture's analyzed distance is well under 5km (see
+    # test_activity_distance_filter_boundary_is_inclusive), so a 5km minimum
+    # excludes it entirely.
+    response = app_client.get("/export/filtered", params={"min_km": "5"})
+    assert response.status_code == 200
+    archive = zipfile.ZipFile(BytesIO(response.content))
+    manifest = json.loads(archive.read("manifest.json"))
+    assert len(manifest["activities"]) == 0
+
+
+def test_web_export_filtered_no_filter_exports_everything(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(
+        app_client, auth_headers, sample_gpx_bytes, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    )
+    upload_sample_activity(
+        app_client, auth_headers, sample_gpx_bytes, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    )
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/export/filtered")
+    assert response.status_code == 200
+    archive = zipfile.ZipFile(BytesIO(response.content))
+    manifest = json.loads(archive.read("manifest.json"))
+    assert len(manifest["activities"]) == 2
+
+
+def test_web_export_filtered_does_not_require_htmx_header(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/export/filtered", params={"q": "anything"})
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+
+
+def test_activities_list_page_shows_export_filtered_link_only_when_filtered(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    unfiltered = app_client.get("/")
+    assert 'href="/export/filtered' not in unfiltered.text
+
+    filtered = app_client.get("/", params={"q": "anything"})
+    assert 'href="/export/filtered?q=anything"' in filtered.text
+
+
 def test_activities_list_page_has_export_and_import_controls(
     app_client, sample_gpx_bytes, auth_headers
 ):
