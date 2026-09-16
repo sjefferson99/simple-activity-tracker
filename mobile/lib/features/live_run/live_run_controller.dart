@@ -156,7 +156,7 @@ class LiveRunController extends Notifier<LiveRunState> {
       splitPlan: _splitPlan!,
     );
     _currentGpxFile = await newRunGpxFile(DateTime.now());
-    _gpxLog = RunGpxLog(_currentGpxFile!, _splitPlan!);
+    _gpxLog = RunGpxLog(_currentGpxFile!, _splitPlan!, _activityMode!);
     // A periodic flush that fails is not fatal: every flush rewrites the
     // whole track, so the next one recovers whatever this one missed.
     // Swallow it here rather than letting it surface as an unhandled error.
