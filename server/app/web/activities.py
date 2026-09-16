@@ -220,6 +220,44 @@ def _parse_geo_filter(
     return lat_value, lon_value, radius_value * 1000.0, geo_mode
 
 
+def _parse_activity_filters(
+    *,
+    q: str,
+    min_km: str,
+    max_km: str,
+    lat: str,
+    lon: str,
+    radius_km: str,
+    geo: str,
+) -> tuple[str, ActivityListFilters, list[str]]:
+    """Shared by `activity_list` and `export_filtered` (issue #111) — both
+    need to turn the same six raw query params into an `ActivityListFilters`
+    the repository understands, so the export button reuses exactly the
+    list page's own filter semantics rather than a second, divergent copy."""
+    q = q.strip()[:_MAX_QUERY_CHARS]
+    filter_errors: list[str] = []
+    min_m = _parse_km(min_km, field_label="Minimum distance", errors=filter_errors)
+    max_m = _parse_km(max_km, field_label="Maximum distance", errors=filter_errors)
+    if min_m is not None and max_m is not None and min_m > max_m:
+        filter_errors.append("Minimum distance must not be greater than maximum distance.")
+        min_m = max_m = None
+
+    lat_value, lon_value, radius_m, geo_mode = _parse_geo_filter(
+        lat=lat, lon=lon, radius_km=radius_km, geo=geo, errors=filter_errors
+    )
+
+    filters = ActivityListFilters(
+        text=q or None,
+        min_m=min_m,
+        max_m=max_m,
+        lat=lat_value,
+        lon=lon_value,
+        radius_m=radius_m,
+        geo=geo_mode,
+    )
+    return q, filters, filter_errors
+
+
 @router.get("/")
 def activity_list(
     request: Request,
@@ -250,27 +288,10 @@ def activity_list(
     sort_value: ActivityListSort = "distance" if sort == "distance" else "date"
     dir_value: ActivityListDirection = "asc" if dir == "asc" else "desc"
 
-    q = q.strip()[:_MAX_QUERY_CHARS]
-    filter_errors: list[str] = []
-    min_m = _parse_km(min_km, field_label="Minimum distance", errors=filter_errors)
-    max_m = _parse_km(max_km, field_label="Maximum distance", errors=filter_errors)
-    if min_m is not None and max_m is not None and min_m > max_m:
-        filter_errors.append("Minimum distance must not be greater than maximum distance.")
-        min_m = max_m = None
-
-    lat_value, lon_value, radius_m, geo_mode = _parse_geo_filter(
-        lat=lat, lon=lon, radius_km=radius_km, geo=geo, errors=filter_errors
+    q, filters, filter_errors = _parse_activity_filters(
+        q=q, min_km=min_km, max_km=max_km, lat=lat, lon=lon, radius_km=radius_km, geo=geo
     )
-
-    filters = ActivityListFilters(
-        text=q or None,
-        min_m=min_m,
-        max_m=max_m,
-        lat=lat_value,
-        lon=lon_value,
-        radius_m=radius_m,
-        geo=geo_mode,
-    )
+    geo_mode = filters.geo
 
     activities_repo = SqlAlchemyActivityRepository(session)
     # list_for_user_page clamps page to [1, total_pages] itself, so a stale
@@ -731,8 +752,14 @@ def export_activities(
             for activity_id in activity_ids
             if activities_repo.get_by_id_for_user(user.id, activity_id) is not None
         ]
+    return _export_archive_response(session, user.id, activity_ids)
+
+
+def _export_archive_response(
+    session: Session, user_id: str, activity_ids: list[str] | None
+) -> Response:
     blob_store = LocalFileBlobStore(Path(get_settings().data_dir))
-    archive_bytes = export_activities_archive(session, blob_store, user.id, activity_ids)
+    archive_bytes = export_activities_archive(session, blob_store, user_id, activity_ids)
 
     filename = f"simple-activity-tracker-export-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.zip"
     return Response(
@@ -740,6 +767,38 @@ def export_activities(
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/export/filtered")
+def export_filtered(
+    user: WebUser,
+    session: Annotated[Session, Depends(db_session)],
+    q: str = "",
+    min_km: str = "",
+    max_km: str = "",
+    lat: str = "",
+    lon: str = "",
+    radius_km: str = "",
+    geo: str = "",
+) -> Response:
+    """Export every activity matching the activity list's current search/
+    distance/location filter (issue #111) — a plain GET for the same reason
+    as `export_activities` above (real browser download, no CSRF header).
+    Reuses `_parse_activity_filters`, the exact parsing `activity_list` uses
+    to build the filter shown on screen, so this always exports what the
+    list page is currently showing. Sort/page/per_page are irrelevant here:
+    every matching activity is included regardless of which page it would
+    land on, so `list_for_user_page` is called with `per_page=None` to get
+    them all in one query rather than exporting just the visible page."""
+    _q, filters, _filter_errors = _parse_activity_filters(
+        q=q, min_km=min_km, max_km=max_km, lat=lat, lon=lon, radius_km=radius_km, geo=geo
+    )
+    activities_repo = SqlAlchemyActivityRepository(session)
+    result = activities_repo.list_for_user_page(
+        user.id, page=1, per_page=None, sort="date", direction="desc", filters=filters
+    )
+    activity_ids = [activity.id for activity, _analysis in result.activities]
+    return _export_archive_response(session, user.id, activity_ids)
 
 
 @router.post("/import", dependencies=[Depends(require_htmx_header)])

@@ -36,6 +36,9 @@
   present is skipped. Deleting cannot be undone.</p>
   <div class="toolbar">
     <a class="button secondary" href="/export">Export all</a>
+    {% if filters_active %}
+    <a class="button secondary" href="{{ export_filtered_url(list_query) }}">Export filtered</a>
+    {% endif %}
     <button type="submit" form="export-form" class="secondary">Export selected</button>
     <button type="button" class="danger"
             hx-post="/activities/bulk-delete"

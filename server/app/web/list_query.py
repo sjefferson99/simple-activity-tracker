@@ -79,6 +79,15 @@ def list_url(query: ActivityListQuery, **overrides: Any) -> str:
     return f"/?{urlencode(params)}" if params else "/"
 
 
+def export_filtered_url(query: ActivityListQuery) -> str:
+    """`{{ export_filtered_url(list_query) }}` — the current search/sort
+    filters (issue #111), pointed at `/export/filtered` instead of `/`, with
+    `page`/`per_page` dropped: export always returns every matching
+    activity, not just the page currently on screen."""
+    params = query.params(page=_DEFAULT_PAGE, per_page=_DEFAULT_PER_PAGE)
+    return f"/export/filtered?{urlencode(params)}" if params else "/export/filtered"
+
+
 def list_vals(
     query: ActivityListQuery, *, omit: tuple[str, ...] = (), **overrides: Any
 ) -> dict[str, str]:
