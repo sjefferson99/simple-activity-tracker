@@ -256,4 +256,86 @@ void main() {
     );
     expect(result.isPending, isTrue);
   });
+
+  test('getActivity parses the full activity record', () async {
+    late Uri capturedUrl;
+    final client = HttpApiClient(
+      client: MockClient((request) async {
+        capturedUrl = request.url;
+        return http.Response(
+          jsonEncode({
+            'id': 'run-1',
+            'client_activity_id': 'abc',
+            'started_at': '2026-01-01T00:00:00Z',
+            'ended_at': '2026-01-01T00:30:00Z',
+            'activity_type': 'running',
+            'title': null,
+            'notes': null,
+            'device_name': 'Pixel 8',
+            'client_summary': <String, dynamic>{},
+            'source_platform': 'android',
+            'source_app_version': '1.0.0+1',
+            'analysis': {'status': 'done', 'result': {'distance_meters': 5000.0}},
+            'tags': <Map<String, dynamic>>[],
+            'split_plan': null,
+          }),
+          200,
+        );
+      }),
+    );
+
+    final result = await client.getActivity(
+      baseUrl: _baseUrl,
+      token: 't',
+      serverRunId: 'run-1',
+    );
+
+    expect(capturedUrl, Uri.parse('$_baseUrl/api/v1/activities/run-1'));
+    expect(result.id, 'run-1');
+    expect(result.deviceName, 'Pixel 8');
+    expect(result.analysis.result?['distance_meters'], 5000.0);
+  });
+
+  test('listActivities passes limit and omits cursor when not given', () async {
+    late Uri capturedUrl;
+    final client = HttpApiClient(
+      client: MockClient((request) async {
+        capturedUrl = request.url;
+        return http.Response(
+          jsonEncode({'activities': <Map<String, dynamic>>[], 'next_cursor': null}),
+          200,
+        );
+      }),
+    );
+
+    await client.listActivities(baseUrl: _baseUrl, token: 't');
+
+    expect(capturedUrl.path, '/api/v1/activities');
+    expect(capturedUrl.queryParameters['limit'], '50');
+    expect(capturedUrl.queryParameters.containsKey('cursor'), isFalse);
+  });
+
+  test('listActivities passes a cursor when given', () async {
+    late Uri capturedUrl;
+    final client = HttpApiClient(
+      client: MockClient((request) async {
+        capturedUrl = request.url;
+        return http.Response(
+          jsonEncode({'activities': <Map<String, dynamic>>[], 'next_cursor': 'next-page'}),
+          200,
+        );
+      }),
+    );
+
+    final result = await client.listActivities(
+      baseUrl: _baseUrl,
+      token: 't',
+      cursor: 'page-2',
+      limit: 20,
+    );
+
+    expect(capturedUrl.queryParameters['cursor'], 'page-2');
+    expect(capturedUrl.queryParameters['limit'], '20');
+    expect(result.nextCursor, 'next-page');
+  });
 }

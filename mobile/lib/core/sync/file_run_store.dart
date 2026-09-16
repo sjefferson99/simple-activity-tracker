@@ -95,6 +95,13 @@ class FileRunStore implements RunStore {
     await save(record.copyWith(analysisResult: analysisResult));
   }
 
+  @override
+  Future<void> markAnalysisFailed(String clientRunId) async {
+    final record = await _findByClientRunId(clientRunId);
+    if (record == null) return;
+    await save(record.copyWith(analysisFailed: true));
+  }
+
   Future<RunRecord?> _findByClientRunId(String clientRunId) async {
     final all = await listAll();
     for (final record in all) {

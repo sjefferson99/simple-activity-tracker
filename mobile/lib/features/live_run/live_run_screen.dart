@@ -12,6 +12,7 @@ import '../../domain/tracking/run_phase.dart';
 import '../../domain/tracking/split_plan.dart';
 import '../../domain/tracking/split_preference.dart' show SplitKind;
 import '../../domain/tracking/split_target.dart';
+import '../activity_history/activity_list_screen.dart';
 import '../export_help/export_help_screen.dart';
 import '../settings/settings_screen.dart';
 import '../splits/splits_screen.dart';
@@ -253,13 +254,27 @@ class LiveRunScreen extends ConsumerWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    IconButton(
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const SettingsScreen(),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const SettingsScreen(),
+                            ),
+                          ),
+                          icon: const Icon(Icons.settings_outlined),
                         ),
-                      ),
-                      icon: const Icon(Icons.settings_outlined),
+                        IconButton(
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const ActivityListScreen(),
+                            ),
+                          ),
+                          icon: const Icon(Icons.history),
+                          tooltip: 'Activity history',
+                        ),
+                      ],
                     ),
                     // Cycling never shows a unit toggle at all — pace isn't a
                     // cycling concept, so there's nothing to switch to.

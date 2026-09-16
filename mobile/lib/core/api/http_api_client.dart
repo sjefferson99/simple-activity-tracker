@@ -10,6 +10,7 @@ import '../../domain/models/run_summary.dart';
 import 'api_client.dart';
 import 'api_exception.dart';
 import 'cert_trust_store.dart';
+import 'dto/activity_list_item_dto.dart';
 import 'dto/analysis_dto.dart';
 import 'dto/login_response_dto.dart';
 import 'dto/run_dto.dart';
@@ -205,6 +206,43 @@ class HttpApiClient implements ApiClient {
           .timeout(_requestTimeout),
     );
     return AnalysisDto.fromJson(_decodeJson(response));
+  }
+
+  @override
+  Future<RunDto> getActivity({
+    required String baseUrl,
+    required String token,
+    required String serverRunId,
+  }) async {
+    final response = await _send(
+      () => _client
+          .get(
+            _uri(baseUrl, '/api/v1/activities/$serverRunId'),
+            headers: _authHeaders(token),
+          )
+          .timeout(_requestTimeout),
+    );
+    return RunDto.fromJson(_decodeJson(response));
+  }
+
+  @override
+  Future<ActivityListResponseDto> listActivities({
+    required String baseUrl,
+    required String token,
+    String? cursor,
+    int limit = 50,
+  }) async {
+    final query = <String, String>{'limit': '$limit'};
+    if (cursor != null) query['cursor'] = cursor;
+    final response = await _send(
+      () => _client
+          .get(
+            _uri(baseUrl, '/api/v1/activities').replace(queryParameters: query),
+            headers: _authHeaders(token),
+          )
+          .timeout(_requestTimeout),
+    );
+    return ActivityListResponseDto.fromJson(_decodeJson(response));
   }
 
   Map<String, dynamic> _decodeJson(http.Response response) =>

@@ -275,6 +275,32 @@ double? parseSpeedToMps(String text, SpeedUnit unit) {
   return unit == SpeedUnit.mph ? value * _metersPerMile / 3600 : value / 3.6;
 }
 
+const _monthNames = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/// Formats a local [dateTime] as "12 Sep 2026, 14:07" — used wherever an
+/// activity's date/time is shown (activity list, activity detail), so it
+/// always appears even when a title is set (issue #101 follow-up: an
+/// activity list row previously showed nothing but the title once one was
+/// set, hiding the date entirely).
+String formatActivityDate(DateTime dateTime) {
+  final hour = dateTime.hour.toString().padLeft(2, '0');
+  final minute = dateTime.minute.toString().padLeft(2, '0');
+  return '${dateTime.day} ${_monthNames[dateTime.month - 1]} ${dateTime.year}, $hour:$minute';
+}
+
 /// Formats a target speed ([targetMps]) for display in an editor field —
 /// pace as "m:ss", speed as a plain one-decimal number (no unit suffix,
 /// since the field's own label/segmented control already shows the unit).

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:simple_activity_tracker/core/api/dto/activity_list_item_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/login_response_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/run_dto.dart';
 
@@ -39,6 +40,12 @@ void main() {
       expect(dto.analysis.isDone, isTrue);
       expect(dto.analysis.result?['distance_meters'], 3017.6);
       expect(dto.analysis.result?['splits'], hasLength(1));
+      expect(dto.deviceName, 'Pixel 8');
+      expect(dto.tags, hasLength(1));
+      expect(dto.tags.single.name, 'morning');
+      expect(dto.splitPlan?.rollingTargetMps, 3.33);
+      expect(dto.splitPlan?.targetsAs, 'pace');
+      expect(dto.splitPlan?.customSplits, isEmpty);
     });
 
     test('a pending analysis has a null result', () {
@@ -49,6 +56,77 @@ void main() {
 
       expect(dto.analysis.isPending, isTrue);
       expect(dto.analysis.result, isNull);
+    });
+
+    test(
+      'tolerates a pre-#101 record with no device_name/tags/split_plan',
+      () {
+        final json = _loadFixture('run_dto_sample.json');
+        json.remove('device_name');
+        json.remove('tags');
+        json.remove('split_plan');
+
+        final dto = RunDto.fromJson(json);
+
+        expect(dto.deviceName, isNull);
+        expect(dto.tags, isEmpty);
+        expect(dto.splitPlan, isNull);
+      },
+    );
+
+    test('custom_splits parses (size, target) pairs, including a null target', () {
+      final json = _loadFixture('run_dto_sample.json');
+      json['split_plan'] = {
+        'rolling_target_mps': null,
+        'custom_splits': [
+          [500.0, 3.33],
+          [300.0, null],
+        ],
+        'targets_as': 'speed',
+      };
+
+      final dto = RunDto.fromJson(json);
+
+      expect(dto.splitPlan?.rollingTargetMps, isNull);
+      expect(dto.splitPlan?.customSplits, [(500.0, 3.33), (300.0, null)]);
+      expect(dto.splitPlan?.targetsAs, 'speed');
+    });
+  });
+
+  group('ActivityListResponseDto', () {
+    test('parses a page of activities and a next_cursor', () {
+      final dto = ActivityListResponseDto.fromJson({
+        'activities': [
+          {
+            'id': 'a1',
+            'activity_type': 'running',
+            'started_at': '2026-01-01T07:00:00Z',
+            'ended_at': '2026-01-01T07:30:00Z',
+            'title': 'Morning run',
+            'distance_meters': 5000.0,
+            'moving_seconds': 1500.0,
+            'tags': [
+              {'id': 't1', 'name': 'morning'},
+            ],
+          },
+        ],
+        'next_cursor': 'abc123',
+      });
+
+      expect(dto.activities, hasLength(1));
+      expect(dto.activities.single.title, 'Morning run');
+      expect(dto.activities.single.tags.single.name, 'morning');
+      expect(dto.nextCursor, 'abc123');
+    });
+
+    test('a null next_cursor means there is no further page', () {
+      final dto = ActivityListResponseDto.fromJson({
+        'activities': <Map<String, dynamic>>[],
+        'next_cursor': null,
+      });
+
+      expect(dto.activities, isEmpty);
+      expect(dto.nextCursor, isNull);
     });
   });
 }

@@ -417,4 +417,239 @@ void main() {
       'later',
     ]);
   });
+
+  group('periodic retry (found via on-device testing: a same-medium '
+      'network switch never fires onConnected at all)', () {
+    test(
+      'a periodic tick retries a failed record once its backoff window has '
+      'passed, with no other trigger',
+      () async {
+        var shouldFail = true;
+        final api = FakeApiClient()
+          ..uploadRunHandler =
+              ({
+                required baseUrl,
+                required token,
+                required summary,
+                required gpxFile,
+              }) async {
+                if (shouldFail) {
+                  throw const ApiNetworkException('offline');
+                }
+                return FakeApiClient().uploadRun(
+                  baseUrl: baseUrl,
+                  token: token,
+                  summary: summary,
+                  gpxFile: gpxFile,
+                );
+              };
+        final store = FakeRunStore()..seed(_record());
+        final auth = await _signedInAuthService(api);
+        final connectivity = FakeConnectivityMonitor();
+        // A controllable clock: the first failure's backoff window
+        // (_backoffSchedule[0] = 30s) is "passed" the moment the test
+        // advances it, without a real 30-second wait.
+        var clock = DateTime.utc(2026, 1, 1);
+        final service = SyncService(
+          apiClient: api,
+          runStore: store,
+          authService: auth,
+          connectivity: connectivity,
+          now: () => clock,
+          periodicRetryInterval: const Duration(milliseconds: 20),
+        );
+        addTearDown(service.dispose);
+        addTearDown(connectivity.dispose);
+
+        service.runFinished();
+        await pumpEventQueue();
+        expect(api.uploadCallCount, 1);
+        expect(
+          (await store.listAll()).single.syncStatus,
+          isA<SyncStatusFailed>(),
+        );
+
+        // Advance past the backoff window and let network access succeed,
+        // then wait only for the periodic timer to tick — no connectivity
+        // event, no app-resume, no retryNow. Without the periodic timer,
+        // this record would never be retried again in this scenario (a
+        // same-medium network switch that never fires `onConnected`).
+        clock = clock.add(const Duration(seconds: 31));
+        shouldFail = false;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        expect(api.uploadCallCount, greaterThan(1));
+        expect(
+          (await store.listAll()).single.syncStatus,
+          isA<SyncStatusUploaded>(),
+        );
+      },
+    );
+  });
+
+  group('analysis retry (issue #97/#101 Slice C)', () {
+    test(
+      // Regression: found via real on-device testing before this shipped —
+      // updateAnalysisResult() wrote the new analysis to disk, but nothing
+      // told run_insights.dart's _runRecordProvider to re-fetch (it only
+      // reacts to statusChanges, which _setStatus alone used to emit onto),
+      // so the summary screen's "View full summary" link never appeared
+      // until the app was relaunched. This must emit on statusChanges too.
+      'emits on statusChanges once analysis completes, even though the '
+      'sync status itself (already uploaded) does not change',
+      () async {
+        final api = FakeApiClient()
+          ..getAnalysisHandler = ({required baseUrl, required token, required serverRunId}) async =>
+              const AnalysisDto(status: 'done', result: {'distance_meters': 1234.0});
+        final store = FakeRunStore()..seed(_record());
+        final auth = await _signedInAuthService(api);
+        final connectivity = FakeConnectivityMonitor();
+        final service = SyncService(
+          apiClient: api,
+          runStore: store,
+          authService: auth,
+          connectivity: connectivity,
+          delay: (_) async {},
+        );
+        addTearDown(service.dispose);
+        addTearDown(connectivity.dispose);
+
+        final events = <String>[];
+        final subscription = service.statusChanges.listen(
+          (event) => events.add(event.$1),
+        );
+        addTearDown(subscription.cancel);
+
+        service.runFinished();
+        await pumpEventQueue();
+
+        // At least two events for this run: the upload's own status change
+        // to `uploaded`, and a second one once analysis lands.
+        expect(events.where((id) => id == 'run-1').length, greaterThanOrEqualTo(2));
+      },
+    );
+
+    test(
+      'retries a still-pending analysis and stores the result once done',
+      () async {
+        var callCount = 0;
+        final api = FakeApiClient()
+          ..getAnalysisHandler = ({required baseUrl, required token, required serverRunId}) async {
+            callCount++;
+            if (callCount < 3) {
+              return const AnalysisDto(status: 'pending', result: null);
+            }
+            return const AnalysisDto(status: 'done', result: {'distance_meters': 1234.0});
+          };
+        final store = FakeRunStore()..seed(_record());
+        final auth = await _signedInAuthService(api);
+        final connectivity = FakeConnectivityMonitor();
+        final service = SyncService(
+          apiClient: api,
+          runStore: store,
+          authService: auth,
+          connectivity: connectivity,
+          delay: (_) async {},
+        );
+        addTearDown(service.dispose);
+        addTearDown(connectivity.dispose);
+
+        service.runFinished();
+        await pumpEventQueue();
+
+        expect(callCount, 3);
+        final record = (await store.listAll()).single;
+        expect(record.analysisResult?['distance_meters'], 1234.0);
+        expect(record.analysisFailed, isFalse);
+      },
+    );
+
+    test(
+      'marks analysis failed once every retry is exhausted while still pending',
+      () async {
+        final api = FakeApiClient()
+          ..getAnalysisHandler = ({required baseUrl, required token, required serverRunId}) async =>
+              const AnalysisDto(status: 'pending', result: null);
+        final store = FakeRunStore()..seed(_record());
+        final auth = await _signedInAuthService(api);
+        final connectivity = FakeConnectivityMonitor();
+        final service = SyncService(
+          apiClient: api,
+          runStore: store,
+          authService: auth,
+          connectivity: connectivity,
+          delay: (_) async {},
+        );
+        addTearDown(service.dispose);
+        addTearDown(connectivity.dispose);
+
+        service.runFinished();
+        await pumpEventQueue();
+
+        final record = (await store.listAll()).single;
+        expect(record.analysisResult, isNull);
+        expect(record.analysisFailed, isTrue);
+        // 1 initial attempt + one per configured retry delay.
+        expect(api.getAnalysisCallCount, greaterThan(1));
+      },
+    );
+
+    test('marks analysis failed immediately when the server reports failed', () async {
+      final api = FakeApiClient()
+        ..getAnalysisHandler = ({required baseUrl, required token, required serverRunId}) async =>
+            const AnalysisDto(status: 'failed', result: null);
+      final store = FakeRunStore()..seed(_record());
+      final auth = await _signedInAuthService(api);
+      final connectivity = FakeConnectivityMonitor();
+      final service = SyncService(
+        apiClient: api,
+        runStore: store,
+        authService: auth,
+        connectivity: connectivity,
+        delay: (_) async {},
+      );
+      addTearDown(service.dispose);
+      addTearDown(connectivity.dispose);
+
+      service.runFinished();
+      await pumpEventQueue();
+
+      expect(api.getAnalysisCallCount, 1);
+      final record = (await store.listAll()).single;
+      expect(record.analysisFailed, isTrue);
+    });
+
+    test(
+      'a transient network error while polling is retried, not given up on immediately',
+      () async {
+        var callCount = 0;
+        final api = FakeApiClient()
+          ..getAnalysisHandler = ({required baseUrl, required token, required serverRunId}) async {
+            callCount++;
+            if (callCount == 1) throw const ApiNetworkException('offline');
+            return const AnalysisDto(status: 'done', result: {'distance_meters': 42.0});
+          };
+        final store = FakeRunStore()..seed(_record());
+        final auth = await _signedInAuthService(api);
+        final connectivity = FakeConnectivityMonitor();
+        final service = SyncService(
+          apiClient: api,
+          runStore: store,
+          authService: auth,
+          connectivity: connectivity,
+          delay: (_) async {},
+        );
+        addTearDown(service.dispose);
+        addTearDown(connectivity.dispose);
+
+        service.runFinished();
+        await pumpEventQueue();
+
+        expect(callCount, 2);
+        final record = (await store.listAll()).single;
+        expect(record.analysisResult?['distance_meters'], 42.0);
+        expect(record.analysisFailed, isFalse);
+      },
+    );
+  });
 }

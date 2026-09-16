@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/models/run_summary.dart';
 import 'cert_trust_store.dart';
+import 'dto/activity_list_item_dto.dart';
 import 'dto/analysis_dto.dart';
 import 'dto/login_response_dto.dart';
 import 'dto/run_dto.dart';
@@ -52,5 +53,22 @@ abstract class ApiClient {
     required String baseUrl,
     required String token,
     required String serverRunId,
+  });
+
+  /// The full activity record — headline stats, tags, split plan, and
+  /// analysis — for the activity detail screen (issue #101).
+  Future<RunDto> getActivity({
+    required String baseUrl,
+    required String token,
+    required String serverRunId,
+  });
+
+  /// One page of the signed-in user's activities, newest first (issue #101).
+  /// [cursor] is the previous page's `nextCursor`; omit for the first page.
+  Future<ActivityListResponseDto> listActivities({
+    required String baseUrl,
+    required String token,
+    String? cursor,
+    int limit = 50,
   });
 }

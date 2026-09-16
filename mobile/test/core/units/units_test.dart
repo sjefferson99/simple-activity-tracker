@@ -409,4 +409,17 @@ void main() {
       expect(formatTargetForEditing(10 / 3.6, SpeedUnit.kmh), '10.0');
     });
   });
+
+  group('formatActivityDate', () {
+    test('formats day, month name, year, and 24-hour time', () {
+      expect(
+        formatActivityDate(DateTime(2026, 9, 12, 14, 7)),
+        '12 Sep 2026, 14:07',
+      );
+    });
+
+    test('pads a single-digit hour/minute', () {
+      expect(formatActivityDate(DateTime(2026, 1, 1, 7, 5)), '1 Jan 2026, 07:05');
+    });
+  });
 }

@@ -36,12 +36,36 @@ const _backoffSchedule = [
   Duration(minutes: 10),
 ];
 
+/// How often a periodic pass re-checks the queue, independent of any
+/// connectivity-change event. `ConnectivityMonitor.onConnected` only fires
+/// on a none→some transition — switching between two networks that both
+/// report "connected" the whole time (e.g. Wi-Fi to Wi-Fi, or a network the
+/// phone hands off seamlessly) never fires it at all, so a failed upload
+/// could otherwise sit stuck until some unrelated trigger (app resume, a new
+/// run finishing) happened to come along. Found via real on-device testing:
+/// switching networks produced no retry until this periodic tick was added.
+const _periodicRetryInterval = Duration(minutes: 1);
+
+/// Bounded retry for a still-`pending` analysis fetch right after upload
+/// (issue #97/#101, Slice C) — short-lived (well under a minute total), so
+/// the post-Stop summary screen's "View full summary" link has a real
+/// chance to become available before the user has moved on, without
+/// retrying indefinitely. Distinct from [_backoffSchedule], which is for
+/// upload retries, not analysis polling.
+const _analysisRetryDelays = [
+  Duration(seconds: 2),
+  Duration(seconds: 5),
+  Duration(seconds: 10),
+  Duration(seconds: 15),
+];
+
 /// Single-flight worker over the run queue: uploads pending/retryable
 /// [RunRecord]s oldest-first, one at a time, then fetches analysis for
 /// whatever just landed. Triggered by [runFinished], [onAppResumed],
-/// connectivity regained, and [retryNow] — never runs two passes
-/// concurrently (a trigger arriving mid-pass just requests one more pass
-/// after the current one finishes, rather than overlapping).
+/// connectivity regained, a periodic timer (see [_periodicRetryInterval]),
+/// and [retryNow] — never runs two passes concurrently (a trigger arriving
+/// mid-pass just requests one more pass after the current one finishes,
+/// rather than overlapping).
 class SyncService {
   final ApiClient _apiClient;
   final RunStore _runStore;
@@ -49,7 +73,12 @@ class SyncService {
   final ConnectivityMonitor _connectivity;
   final DateTime Function() _now;
 
+  /// Overridable in tests so the analysis retry loop doesn't actually wait —
+  /// production always uses a real [Future.delayed].
+  final Future<void> Function(Duration) _delay;
+
   StreamSubscription<void>? _connectivitySubscription;
+  Timer? _periodicRetryTimer;
   Future<void>? _inFlightPass;
   bool _rerunRequested = false;
 
@@ -74,16 +103,28 @@ class SyncService {
     required AuthService authService,
     required ConnectivityMonitor connectivity,
     DateTime Function()? now,
+    Future<void> Function(Duration)? delay,
+    // Null disables the periodic timer entirely — used by tests, which
+    // don't want a real-time repeating timer running in the background
+    // (and would otherwise need to explicitly cancel one on every test to
+    // avoid a "Timer still pending" failure). Production always passes the
+    // real interval via the default.
+    Duration? periodicRetryInterval = _periodicRetryInterval,
   })  : _apiClient = apiClient,
         _runStore = runStore,
         _authService = authService,
         _connectivity = connectivity,
-        _now = now ?? DateTime.now {
+        _now = now ?? DateTime.now,
+        _delay = delay ?? ((duration) => Future<void>.delayed(duration)) {
     _connectivitySubscription = _connectivity.onConnected.listen((_) => _runPass());
+    if (periodicRetryInterval != null) {
+      _periodicRetryTimer = Timer.periodic(periodicRetryInterval, (_) => _runPass());
+    }
   }
 
   void dispose() {
     _connectivitySubscription?.cancel();
+    _periodicRetryTimer?.cancel();
     _statusController.close();
   }
 
@@ -112,6 +153,24 @@ class SyncService {
   Future<void> _setStatus(String clientRunId, SyncStatus status) async {
     await _runStore.updateSyncStatus(clientRunId, status);
     _statusController.add((clientRunId, status));
+  }
+
+  /// Re-broadcasts [clientRunId]'s current sync status on [statusChanges] —
+  /// used when a record's analysis result/failure changes without its sync
+  /// status itself changing (it's already `uploaded`), so `_runRecordProvider`
+  /// (run_insights.dart) actually re-fetches and the summary screen's link
+  /// updates. Without this, `updateAnalysisResult`/`markAnalysisFailed` wrote
+  /// to disk correctly but nothing ever told the UI to re-read it, so the
+  /// "View full summary" link never appeared until the app was relaunched —
+  /// a real bug found via on-device testing before this was ever pushed.
+  Future<void> _notifyRecordChanged(String clientRunId) async {
+    final records = await _runStore.listAll();
+    for (final record in records) {
+      if (record.clientRunId == clientRunId) {
+        _statusController.add((clientRunId, record.syncStatus));
+        return;
+      }
+    }
   }
 
   /// Runs one pass over the queue. If a pass is already running, this
@@ -230,24 +289,49 @@ class SyncService {
     return attempts;
   }
 
+  /// Fetches analysis right after a successful upload, retrying a short,
+  /// bounded number of times (issue #97/#101, Slice C) while it's still
+  /// `pending` — a slow server would otherwise leave the summary screen's
+  /// "View full summary" link stuck on "not available" past the single
+  /// attempt this used to make. Gives up (marking [RunStore.markAnalysisFailed])
+  /// only once every attempt is exhausted with no result — the upload itself
+  /// already succeeded either way and is never at risk here.
   Future<void> _fetchAnalysis(
     String clientRunId,
     String baseUrl,
     String token,
     String serverRunId,
   ) async {
-    try {
-      final analysis = await _apiClient.getAnalysis(
-        baseUrl: baseUrl,
-        token: token,
-        serverRunId: serverRunId,
-      );
-      if (analysis.isDone && analysis.result != null) {
-        await _runStore.updateAnalysisResult(clientRunId, analysis.result!);
+    for (var attempt = 0; attempt <= _analysisRetryDelays.length; attempt++) {
+      try {
+        final analysis = await _apiClient.getAnalysis(
+          baseUrl: baseUrl,
+          token: token,
+          serverRunId: serverRunId,
+        );
+        if (analysis.isDone && analysis.result != null) {
+          await _runStore.updateAnalysisResult(clientRunId, analysis.result!);
+          await _notifyRecordChanged(clientRunId);
+          return;
+        }
+        if (analysis.isFailed) {
+          await _runStore.markAnalysisFailed(clientRunId);
+          await _notifyRecordChanged(clientRunId);
+          return;
+        }
+        // Still pending — wait and try again, unless this was the last attempt.
+      } on ApiException {
+        // Best-effort — the upload itself already succeeded and is not at
+        // risk. Keep retrying on the same schedule rather than giving up on
+        // the first transient network hiccup.
       }
-      // pending: shown as "Analysis pending" in the UI, not retried — §6.3.
-    } on ApiException {
-      // Best-effort — the upload itself already succeeded and is not at risk.
+      if (attempt < _analysisRetryDelays.length) {
+        await _delay(_analysisRetryDelays[attempt]);
+      }
     }
+    // Exhausted every retry with no done/failed result — treat as failed so
+    // the UI can stop showing "not available yet" forever.
+    await _runStore.markAnalysisFailed(clientRunId);
+    await _notifyRecordChanged(clientRunId);
   }
 }
