@@ -46,7 +46,7 @@ dependencies:
   uuid: ^4.6.0
   package_info_plus: ^10.2.1
   crypto: ^3.0.7
-  meta: ^1.16.0
+  meta: ^1.19.0
 
 dev_dependencies:
   flutter_test:
