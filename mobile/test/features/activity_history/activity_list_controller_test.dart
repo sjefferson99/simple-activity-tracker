@@ -73,4 +73,47 @@ void main() {
 
     expect(callCount, 1);
   });
+
+  test(
+    'loadMore clears isLoadingMore and keeps the first page when the '
+    'second page fetch throws (regression: used to strand isLoadingMore at '
+    'true forever, permanently blocking every further scroll-triggered load)',
+    () async {
+      var shouldFailPage2 = true;
+      final fake = FakeApiClient()
+        ..listActivitiesHandler = ({required baseUrl, required token, cursor, limit = 50}) async {
+          if (cursor == null) {
+            return ActivityListResponseDto(activities: [_item('a1')], nextCursor: 'page-2');
+          }
+          if (shouldFailPage2) throw Exception('network blip');
+          return ActivityListResponseDto(activities: [_item('a2')], nextCursor: null);
+        };
+
+      final container = ProviderContainer(
+        overrides: [
+          apiClientProvider.overrideWithValue(fake),
+          authStateControllerProvider.overrideWith(_SignedInAuthController.new),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(activityListProvider.future);
+      await container.read(activityListProvider.notifier).loadMore();
+
+      final page = container.read(activityListProvider).value!;
+      expect(page.activities.map((a) => a.id), ['a1']);
+      expect(page.isLoadingMore, isFalse);
+      expect(page.hasMore, isTrue);
+
+      // A second loadMore() must be able to try again and actually succeed —
+      // proves the no-op guard (which checks isLoadingMore) isn't
+      // permanently tripped by the earlier failure.
+      shouldFailPage2 = false;
+      await container.read(activityListProvider.notifier).loadMore();
+
+      final recovered = container.read(activityListProvider).value!;
+      expect(recovered.activities.map((a) => a.id), ['a1', 'a2']);
+      expect(recovered.hasMore, isFalse);
+    },
+  );
 }

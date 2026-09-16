@@ -119,4 +119,36 @@ void main() {
     expect(find.text('Splits'), findsOneWidget);
     expect(find.text('#1'), findsOneWidget);
   });
+
+  testWidgets(
+    'shows best-effort times (regression: dropped when this screen '
+    'replaced the old inline Insights section)',
+    (tester) async {
+      final fake = FakeApiClient()
+        ..getActivityHandler = ({required baseUrl, required token, required serverRunId}) async =>
+            _run(
+              analysis: const AnalysisDto(
+                status: 'done',
+                result: {
+                  'distance_meters': 5000.0,
+                  'moving_seconds': 1500.0,
+                  'avg_moving_speed_mps': 3.33,
+                  'split_type': 'distance_km',
+                  'split_targets_as': null,
+                  'splits': <Map<String, dynamic>>[],
+                  'best_efforts': [
+                    {'distance_meters': 1000.0, 'duration_seconds': 298.0, 'avg_speed_mps': 3.36},
+                    {'distance_meters': 5000.0, 'duration_seconds': 1490.0, 'avg_speed_mps': 3.36},
+                  ],
+                },
+              ),
+            );
+
+      await tester.pumpWidget(_wrap(fake, activityId: 'run-1'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Best 1 km:'), findsOneWidget);
+      expect(find.textContaining('Best 5 km:'), findsOneWidget);
+    },
+  );
 }

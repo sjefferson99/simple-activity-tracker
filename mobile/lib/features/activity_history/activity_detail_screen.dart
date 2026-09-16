@@ -117,6 +117,9 @@ class _HeadlineStats extends StatelessWidget {
     final elevation = result['elevation'] as Map<String, dynamic>?;
     final gainM = (elevation?['gain_m'] as num?)?.toDouble();
     final lossM = (elevation?['loss_m'] as num?)?.toDouble();
+    final bestEfforts = (result['best_efforts'] as List<dynamic>?) ?? const [];
+    final best1km = _bestEffortFor(bestEfforts, 1000);
+    final best5km = _bestEffortFor(bestEfforts, 5000);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -127,7 +130,19 @@ class _HeadlineStats extends StatelessWidget {
         if (avgSpeedMps != null) Text('Avg speed: ${formatKmh(avgSpeedMps)} km/h'),
         if (gainM != null) Text('Elevation gain: ${gainM.toStringAsFixed(0)} m'),
         if (lossM != null) Text('Elevation loss: ${lossM.toStringAsFixed(0)} m'),
+        if (best1km != null) Text('Best 1 km: ${formatDuration(best1km)}'),
+        if (best5km != null) Text('Best 5 km: ${formatDuration(best5km)}'),
       ],
     );
+  }
+
+  Duration? _bestEffortFor(List<dynamic> bestEfforts, double targetDistanceMeters) {
+    for (final entry in bestEfforts) {
+      final map = entry as Map<String, dynamic>;
+      if ((map['distance_meters'] as num).toDouble() == targetDistanceMeters) {
+        return Duration(seconds: (map['duration_seconds'] as num).round());
+      }
+    }
+    return null;
   }
 }

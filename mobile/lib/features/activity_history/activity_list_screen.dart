@@ -71,24 +71,37 @@ class ActivityListController extends AsyncNotifier<ActivityListPage> {
     if (current == null || !current.hasMore || current.isLoadingMore) return;
 
     state = AsyncData(current.copyWith(isLoadingMore: true));
-    final auth = await ref.read(authStateControllerProvider.future);
-    final baseUrl = auth.serverUrl;
-    final token = auth.token;
-    if (baseUrl == null || token == null) return;
+    try {
+      final auth = await ref.read(authStateControllerProvider.future);
+      final baseUrl = auth.serverUrl;
+      final token = auth.token;
+      if (baseUrl == null || token == null) {
+        state = AsyncData(current.copyWith(isLoadingMore: false));
+        return;
+      }
 
-    final response = await ref.read(apiClientProvider).listActivities(
-          baseUrl: baseUrl,
-          token: token,
-          cursor: current.nextCursor,
-        );
-    state = AsyncData(
-      current.copyWith(
-        activities: [...current.activities, ...response.activities],
-        nextCursor: response.nextCursor,
-        clearNextCursor: response.nextCursor == null,
-        isLoadingMore: false,
-      ),
-    );
+      final response = await ref.read(apiClientProvider).listActivities(
+            baseUrl: baseUrl,
+            token: token,
+            cursor: current.nextCursor,
+          );
+      state = AsyncData(
+        current.copyWith(
+          activities: [...current.activities, ...response.activities],
+          nextCursor: response.nextCursor,
+          clearNextCursor: response.nextCursor == null,
+          isLoadingMore: false,
+        ),
+      );
+    } on Object {
+      // A failed page-2+ fetch must not strand isLoadingMore at true — that
+      // would permanently block every further scroll-triggered load (the
+      // no-op guard above checks exactly this flag) and spin the
+      // bottom-of-list indicator forever with no way to recover short of
+      // pull-to-refresh, which isn't discoverable from a stuck spinner.
+      // Falls back to the already-loaded first page rather than losing it.
+      state = AsyncData(current.copyWith(isLoadingMore: false));
+    }
   }
 
   Future<void> refresh() async {
