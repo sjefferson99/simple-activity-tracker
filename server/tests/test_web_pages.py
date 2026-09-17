@@ -1338,6 +1338,26 @@ def test_activities_list_page_shows_export_filtered_link_only_when_filtered(
     assert 'href="/export/filtered?q=anything"' in filtered.text
 
 
+def test_activities_list_htmx_fragment_shows_export_filtered_link_when_filtered(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """Issue: applying a filter via the search form (an htmx request that
+    swaps only #activity-list-region) must show "Export filtered" without a
+    full page reload. The server only renders activity_list_or_empty.html
+    for an HX-Request — the link has to live there, not in the surrounding
+    static page, or it never appears until the next full navigation."""
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    fragment = app_client.get("/", params={"min_km": "0"}, headers={"HX-Request": "true"})
+    assert 'href="/export/filtered?min_km=0"' in fragment.text
+
+    no_match_fragment = app_client.get(
+        "/", params={"min_km": "9999"}, headers={"HX-Request": "true"}
+    )
+    assert 'href="/export/filtered?min_km=9999"' in no_match_fragment.text
+
+
 def test_activities_list_page_has_export_and_import_controls(
     app_client, sample_gpx_bytes, auth_headers
 ):
