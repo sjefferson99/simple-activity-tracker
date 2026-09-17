@@ -18,6 +18,9 @@
     <span class="muted">Sort by:</span>
     {{ sort_link("Date", "date") }}
     {{ sort_link("Distance", "distance") }}
+    {% if filters_active %}
+    <a class="button secondary" href="{{ export_filtered_url(list_query) }}">Export filtered</a>
+    {% endif %}
   </div>
   <div class="per-page-control">
     <label for="per-page-select" class="muted">Rows per page:</label>
