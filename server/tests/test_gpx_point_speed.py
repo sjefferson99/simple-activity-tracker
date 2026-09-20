@@ -1,7 +1,8 @@
 """parse_gpx's per-trackpoint sat:speed/sat:has_speed extensions (issue #50)
-— written by mobile's RunGpxLog, read here so AnalyzerV1 can credit distance
-from the GPS chip's own Doppler speed instead of summing position deltas
-(see app/analysis/v1.py's _credited_distance and ANALYSIS_VERSION note)."""
+— written by mobile's RunGpxLog, read here so AnalyzerV1's stationary gate
+can use the GPS chip's own Doppler speed instead of a position-derived
+fallback (see app/analysis/v1.py's _StationaryDetector and ANALYSIS_VERSION
+note — credited distance itself is still the position delta, not Doppler)."""
 
 from app.analysis.gpx_parser import parse_gpx
 

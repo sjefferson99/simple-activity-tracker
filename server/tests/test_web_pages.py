@@ -779,6 +779,37 @@ def test_activity_detail_renders_with_map_and_analysis(app_client, sample_gpx_by
     assert "Splits" in response.text
 
 
+def test_activity_detail_renders_when_stored_result_lacks_elapsed_seconds(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """Regression: the "Time (server)" stat's template expression used plain
+    `result.elapsed_seconds` attribute access, which raises jinja2.UndefinedError
+    (a 500) for any stored analysis result missing that key — a real
+    possibility for a row this deployment's own reanalyze/auto-reanalyze
+    hasn't reached yet. Fixed with `result.get('elapsed_seconds')`, matching
+    the same defensive pattern already used for client_summary fields
+    above."""
+    from app.db import get_session_factory
+    from app.models.activity_analysis import ActivityAnalysis
+
+    upload = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    activity_id = upload.json()["id"]
+
+    with get_session_factory()() as session:
+        analysis = session.get(ActivityAnalysis, activity_id)
+        assert analysis is not None
+        assert analysis.result is not None
+        stale_result = dict(analysis.result)
+        del stale_result["elapsed_seconds"]
+        analysis.result = stale_result
+        session.commit()
+
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+    response = app_client.get(f"/activities/{activity_id}")
+    assert response.status_code == 200
+    assert "Time (server)" in response.text
+
+
 def test_activity_detail_404_for_missing_activity(app_client, auth_headers):
     _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
     response = app_client.get("/activities/does-not-exist")

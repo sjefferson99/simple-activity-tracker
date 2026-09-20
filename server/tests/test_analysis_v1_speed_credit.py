@@ -203,3 +203,47 @@ def test_elapsed_seconds_matches_first_to_last_with_a_single_segment() -> None:
     points = _moving_points(n_points=10, step_m=1.0, step_s=1.0, speed_mps=1.0)
     result = AnalyzerV1().analyze(_track(points))
     assert result["elapsed_seconds"] == pytest.approx(9.0, abs=0.01)
+
+
+def test_series_speed_recovers_quickly_after_a_long_stationary_stretch() -> None:
+    """Regression: _windowed_speeds used to window on cum_time_s, which is
+    now moving-gated (issue #50) and freezes during a non-moving stretch —
+    pinning the window's start to a stale pre-stop point and badly
+    understating speed for several samples once motion resumes, on exactly
+    the "standing still without pausing the app" scenario the stationary
+    gate exists to handle. Windowing on each point's own wall-clock
+    timestamp instead means the series recovers to the true speed within
+    the window's own ~3s, not indefinitely."""
+    moving_before = _moving_points(n_points=6, step_m=2.0, step_s=1.0, speed_mps=2.0)
+    stationary_start = moving_before[-1].time
+    stationary = [
+        Point(
+            lat=0.0,
+            lon=moving_before[-1].lon,
+            ele=100.0,
+            time=stationary_start + timedelta(seconds=i + 1),
+            speed_mps=0.0,
+        )
+        for i in range(60)
+    ]
+    resume_start_lon = moving_before[-1].lon
+    resume_start_time = stationary[-1].time
+    resumed = [
+        Point(
+            lat=0.0,
+            lon=resume_start_lon + i * 2.0 * _LON_PER_METER,
+            ele=100.0,
+            time=resume_start_time + timedelta(seconds=i),
+            speed_mps=2.0,
+        )
+        for i in range(1, 6)
+    ]
+    track = _track(moving_before + stationary + resumed)
+    result = AnalyzerV1().analyze(track)
+
+    # The last series sample (end of the resumed stretch) must reflect the
+    # true ~2 m/s pace, not a value diluted by a window still spanning the
+    # 60s stationary stretch.
+    last_speed = result["series"][-1]["speed_mps"]
+    assert last_speed is not None
+    assert last_speed == pytest.approx(2.0, rel=0.1)

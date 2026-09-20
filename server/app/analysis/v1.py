@@ -128,7 +128,8 @@ class _Step:
     dt_s: float
     speed_mps: float | None  # position-derived instant speed — plausibility/series only
     cum_distance_m: float  # cumulative credited distance including this step
-    cum_time_s: float  # cumulative wall-clock elapsed including this step
+    cum_time_s: float  # cumulative *moving* time including this step (issue #50: gated
+    # the same way as cum_distance_m — zero for a non-moving step, not wall-clock)
     is_moving: bool  # whether the stationary gate credits this step as motion
 
 
@@ -552,7 +553,11 @@ def _best_efforts(steps: list[_Step]) -> list[dict[str, object]]:
 def _windowed_speeds(steps: list[_Step], first_point: Point) -> list[float | None]:
     """Speed at each step, smoothed the same way mobile MetricsEngine smooths
     its live current-speed reading (see _SPEED_WINDOW_SECONDS): displacement
-    over the last ~3s of steps, not the single-step instant speed. Returns
+    over the last ~3s of *wall-clock* time, not the single-step instant
+    speed. Windowed on each point's own timestamp, not cum_time_s — that's
+    moving-gated (issue #50) and freezes during a non-moving stretch, which
+    would otherwise pin the window's start to a stale pre-stop point and
+    badly understate speed for several samples once motion resumes. Returns
     one value per step (same length/order as `steps`), None where fewer than
     2 points fall in the window (only possible for the very first step)."""
     if not steps:
@@ -562,7 +567,9 @@ def _windowed_speeds(steps: list[_Step], first_point: Point) -> list[float | Non
     start = 0  # index into steps of the oldest step still inside the window
     for end in range(len(steps)):
         while (
-            start < end and steps[end].cum_time_s - steps[start].cum_time_s > _SPEED_WINDOW_SECONDS
+            start < end
+            and (steps[end].point.time - steps[start].point.time).total_seconds()
+            > _SPEED_WINDOW_SECONDS
         ):
             start += 1
         window_start_point = first_point if start == 0 else steps[start - 1].point

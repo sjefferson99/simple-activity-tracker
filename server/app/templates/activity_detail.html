@@ -60,7 +60,7 @@
       <div class="label">Distance (server)</div>
     </div>
     <div class="stat">
-      <div class="value">{{ result.elapsed_seconds | duration }}</div>
+      <div class="value">{{ result.get('elapsed_seconds') | duration }}</div>
       <div class="label">Time (server)</div>
     </div>
     <div class="stat">
