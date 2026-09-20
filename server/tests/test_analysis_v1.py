@@ -14,7 +14,11 @@ _FIXTURE = Path(__file__).parent / "fixtures" / "sample_run.gpx"
 # gap, +20m elevation climb spread evenly over the distance.
 _EXPECTED_DISTANCE_M = 3000.0
 _EXPECTED_MOVING_S = 900.0  # 3km at 5:00/km
-_EXPECTED_ELAPSED_S = 900.0 + 90.0  # moving time + the inserted gap
+# elapsed_seconds sums each segment's own span, excluding the gap between
+# them — the same 90s a pause/resume on the phone would exclude from its
+# own "Time" tile (issue #50). Equal to moving time here since this
+# synthetic fixture has no within-segment stationary stretches.
+_EXPECTED_ELAPSED_S = 900.0
 _EXPECTED_AVG_SPEED_MPS = _EXPECTED_DISTANCE_M / _EXPECTED_MOVING_S
 
 
@@ -33,7 +37,7 @@ def test_moving_time_matches_expected() -> None:
     assert result["moving_seconds"] == pytest.approx(_EXPECTED_MOVING_S, abs=2.0)
 
 
-def test_elapsed_time_includes_the_segment_gap() -> None:
+def test_elapsed_time_excludes_the_segment_gap() -> None:
     result = _analyze()
     assert result["elapsed_seconds"] == pytest.approx(_EXPECTED_ELAPSED_S, abs=1.0)
 

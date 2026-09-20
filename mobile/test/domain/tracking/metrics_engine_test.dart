@@ -817,84 +817,50 @@ void main() {
     });
   });
 
-  group('credited distance integrates chip speed, not position deltas', () {
-    // Replaying three real S23 captures showed position-delta distance
-    // running 17-19% over Doppler-integrated distance across identical
-    // accepted points — the per-fix position jitter at 1 Hz is the same
-    // order as a walking stride, and summing |deltas| banks all of it. The
-    // chip speed readout (Doppler) had no such bias, so split averages built
-    // on position deltas read ~1 km/h hotter than the speed actually held.
-    DateTime start() => DateTime(2026, 1, 1, 0, 0, 0);
+  group('credited distance always uses the position delta', () {
+    // Issue #50: a Doppler-integrated (chip speed × time) formula was tried
+    // and reverted — replaying real Wahoo wheel-speed-sensor-verified rides
+    // showed plain position-summing was consistently closer to true distance
+    // (Doppler underread by 3-6 percentage points across three cycling rides
+    // with a genuine non-GPS ground truth). The stationary gate still reads
+    // chip speed (see the step 3a tests above); only what a moving segment
+    // *credits* as distance reverted. The live "current speed" tile is
+    // unaffected either way — it's driven by DisplaySpeedWindow
+    // (core/live_run), never this engine's distance math.
+    test(
+      'a moving segment with chip speed on both fixes still credits the '
+      'position delta, not speed × time',
+      () {
+        final engine = MetricsEngine();
+        final start = DateTime(2026, 1, 1, 0, 0, 0);
+        var t = 0;
+        void point(double meters, double speed) {
+          engine.addPoint(
+            _pointAtMeters(
+              meters,
+              start.add(Duration(seconds: t)),
+              speedMps: speed,
+              hasSpeed: true,
+            ),
+          );
+          t++;
+        }
 
-    /// Four fixes at a steady 1.2 m/s, 1.2 m apart: confirms "moving" as of
-    /// the fourth, with nothing credited yet (see the step 3a tests).
-    int walkOff(MetricsEngine engine) {
-      for (var t = 0; t < 4; t++) {
-        engine.addPoint(
-          _pointAtMeters(
-            1.2 * t,
-            start().add(Duration(seconds: t)),
-            speedMps: 1.2,
-            hasSpeed: true,
-          ),
-        );
-      }
-      return 4;
-    }
+        // Confirm moving: the first point has no previous fix to form a
+        // segment from, so 3 more (>= 0.6 m/s) are needed to complete the
+        // enter-confirm streak before a segment is credited.
+        point(0, 1.2);
+        point(1.2, 1.2);
+        point(2.4, 1.2);
+        point(3.6, 1.2); // confirms moving as of this fix; not yet credited
+        // Now moving: this segment is credited. Position delta is 1.2m even
+        // though the reported chip speed here is 5.0 m/s (would integrate to
+        // (1.2 + 5.0) / 2 * 1 = 3.1m under the old Doppler formula).
+        point(4.8, 5.0);
 
-    test('jittered positions at a steady chip speed credit speed × time, not '
-        'the inflated point-to-point path', () {
-      final engine = MetricsEngine();
-      var t = walkOff(engine);
-      // Positions lurch +2.5 m, -0.5 m, +2.5 m, -0.5 m (a 6.0 m point-to-point
-      // path for 4.0 m of net progress) while the chip reports a steady
-      // 1.0 m/s throughout.
-      for (final meters in [6.1, 5.6, 8.1, 7.6]) {
-        engine.addPoint(
-          _pointAtMeters(
-            meters,
-            start().add(Duration(seconds: t++)),
-            speedMps: 1.0,
-            hasSpeed: true,
-          ),
-        );
-      }
-
-      // First segment blends the 1.2 m/s walk-off endpoint with 1.0 m/s
-      // (1.1 m), the other three are 1.0 m each.
-      expect(engine.metrics.distanceMeters, closeTo(4.1, 0.01));
-      expect(engine.metrics.distanceMeters, lessThan(6.0));
-    });
-
-    test('falls back to the position delta when either fix has no chip speed',
-        () {
-      final engine = MetricsEngine();
-      final t = walkOff(engine);
-      // No speed on this fix: the stationary gate falls back to its position
-      // floor (2.5 m clears it) and so must the credited distance.
-      engine.addPoint(_pointAtMeters(6.1, start().add(Duration(seconds: t))));
-
-      expect(engine.metrics.distanceMeters, closeTo(2.5, 0.01));
-    });
-
-    test('falls back to the position delta across a long gap between fixes',
-        () {
-      final engine = MetricsEngine();
-      final t = walkOff(engine);
-      // 30 m in 10 s (plausible), but 10 s is past the integration gap —
-      // two endpoint speeds can't describe the path between them, so the
-      // position delta is credited rather than (1.2 + 1.2) / 2 × 10 = 12 m.
-      engine.addPoint(
-        _pointAtMeters(
-          3.6 + 30,
-          start().add(Duration(seconds: t + 9)),
-          speedMps: 1.2,
-          hasSpeed: true,
-        ),
-      );
-
-      expect(engine.metrics.distanceMeters, closeTo(30, 0.1));
-    });
+        expect(engine.metrics.distanceMeters, closeTo(1.2, 0.01));
+      },
+    );
   });
 
   group('#49: a real out-and-back route is never mistaken for GPS drift', () {

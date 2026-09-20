@@ -19,7 +19,6 @@ import '../../core/sync/sync_service.dart';
 import '../../core/tracking/activity_mode_controller.dart';
 import '../../core/tracking/split_plan_controller.dart';
 import '../../core/units/units.dart' show DistanceUnit;
-import '../../domain/geo_math.dart';
 import '../../domain/models/live_metrics.dart';
 import '../../domain/models/run_record.dart';
 import '../../domain/models/run_summary.dart';
@@ -27,9 +26,9 @@ import '../../domain/models/sync_status.dart';
 import '../../domain/models/track_point.dart';
 import '../../domain/tracking/activity_mode.dart';
 import '../../domain/tracking/metrics_engine.dart';
+import '../../domain/tracking/display_speed_window.dart';
 import '../../domain/tracking/run_clock.dart';
 import '../../domain/tracking/run_phase.dart';
-import '../../domain/tracking/speed_smoother.dart';
 import '../../domain/tracking/split_plan.dart';
 import 'live_run_state.dart';
 
@@ -65,8 +64,7 @@ class LiveRunController extends Notifier<LiveRunState> {
   Duration tickInterval = const Duration(seconds: 1);
 
   StreamSubscription<LocationSample>? _subscription;
-  TrackPoint? _previousPoint;
-  final SpeedSmoother _speedSmoother = SpeedSmoother();
+  final DisplaySpeedWindow _displaySpeedWindow = DisplaySpeedWindow();
   MetricsEngine? _metricsEngine;
   RunClock? _runClock;
   RunGpxLog? _gpxLog;
@@ -141,8 +139,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     _startedAt = DateTime.now().toUtc();
     _runClock = RunClock(startedAt: _startedAt!);
 
-    _previousPoint = null;
-    _speedSmoother.reset();
+    _displaySpeedWindow.reset();
     // Fixed for the run's duration — read once here, not from a live
     // `ref.watch`, so switching the home screen toggle mid-run (which the UI
     // already disables, but this is the actual guarantee) can't change which
@@ -197,16 +194,14 @@ class LiveRunController extends Notifier<LiveRunState> {
 
   void pause() {
     if (_phase != RunPhase.tracking) return;
-    _previousPoint = null;
-    _speedSmoother.reset();
+    _displaySpeedWindow.reset();
     _runClock?.pause(DateTime.now().toUtc());
     _emitActive(RunPhase.paused, speedMps: null, accuracyMeters: null);
   }
 
   void resume() {
     if (_phase != RunPhase.paused) return;
-    _previousPoint = null;
-    _speedSmoother.reset();
+    _displaySpeedWindow.reset();
     _runClock?.resume(DateTime.now().toUtc());
     _metricsEngine?.resetSegmentAnchor();
     _gpxLog?.startNewSegment();
@@ -336,8 +331,6 @@ class LiveRunController extends Notifier<LiveRunState> {
     _acquiringTimeoutTimer = null;
 
     final point = TrackPoint.fromSample(sample);
-    final speed = sample.speedMps ?? _fallbackSpeed(point);
-    _previousPoint = point;
 
     // The engine discards low-accuracy fixes so they can't inflate distance,
     // but the GPX deliberately keeps every fix — the file is the raw track,
@@ -345,18 +338,18 @@ class LiveRunController extends Notifier<LiveRunState> {
     _metricsEngine?.addPoint(point);
     _gpxLog?.addPoint(point);
 
-    // Display-only smoothing (issue #99 follow-up): the raw per-fix chip
-    // speed is too volatile at ~1Hz to actually aim at when trying to hit a
-    // split target — smoothing only the number shown here, not the engine's
-    // own distance/average/split math, which still reads the unsmoothed
-    // `speed` above via addPoint().
-    final smoothedSpeed = speed == null
-        ? null
-        : _speedSmoother.addSpeed(speed, DateTime.now().toUtc());
+    // Display-only, position-derived speed (issue #50 follow-up): a
+    // measured test found the GPS chip's own speed field reading ~13% low
+    // throughout, while position-derived distance/pace matched a stopwatch
+    // almost exactly — see DisplaySpeedWindow's doc. Windowed over the last
+    // ~3s so it's steady enough to aim a split at, without depending on the
+    // chip's speed field at all. The engine's own distance/average/split
+    // math is unaffected — it never used chip speed for its own numbers.
+    final windowedSpeed = _displaySpeedWindow.addPoint(point);
 
     _emitActive(
       RunPhase.tracking,
-      speedMps: smoothedSpeed,
+      speedMps: windowedSpeed,
       accuracyMeters: sample.accuracyMeters,
     );
   }
@@ -371,12 +364,6 @@ class LiveRunController extends Notifier<LiveRunState> {
     final version = '${info.version}+${info.buildNumber}';
     _cachedAppVersion = version;
     return version;
-  }
-
-  double? _fallbackSpeed(TrackPoint point) {
-    final previous = _previousPoint;
-    if (previous == null) return null;
-    return speedMpsBetween(previous, point);
   }
 
   /// The engine's point-driven metrics with the wall-clock Time stamped in.
