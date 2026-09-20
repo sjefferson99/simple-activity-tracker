@@ -271,28 +271,30 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Can't verify this server's identity"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(e.message),
-            const SizedBox(height: 16),
-            const Text(
-              'Certificate fingerprint (SHA-256):',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            SelectableText(
-              e.fingerprint,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'Compare this to the fingerprint shown when the certificate was generated, '
-              'or in a browser\'s certificate viewer for this server. Only trust it if it matches.',
-              style: TextStyle(fontSize: 12),
-            ),
-          ],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(e.message),
+              const SizedBox(height: 16),
+              const Text(
+                'Certificate fingerprint (SHA-256):',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              SelectableText(
+                e.fingerprint,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Compare this to the fingerprint shown when the certificate was generated, '
+                'or in a browser\'s certificate viewer for this server. Only trust it if it matches.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(

@@ -12,6 +12,14 @@ class Point:
     # only, see gpx_parser.parse_gpx) — None when absent/unmeasured, distinct
     # from a genuinely good accuracy value.
     accuracy_m: float | None = None
+    # From the optional sat:speed/sat:has_speed GPX extensions (mobile only,
+    # see gpx_parser.parse_gpx) — the GNSS chip's own Doppler-derived speed
+    # for this fix, None when absent/unmeasured. Same "missing is not the
+    # same as a measured zero" treatment as accuracy_m: a platform can report
+    # a bare 0.0 for "no speed available" rather than omitting the field, so
+    # has_speed is what actually distinguishes the two (see mobile's
+    # LocationSample.hasSpeed doc for why).
+    speed_mps: float | None = None
 
 
 @dataclass(frozen=True)

@@ -23,6 +23,8 @@ class GpxNoTrackPointsError(GpxParseError):
 _EXTENSIONS_NS = "https://simple-activity-tracker.local/gpx-extensions"
 _ACCURACY_TAG = f"{{{_EXTENSIONS_NS}}}accuracy"
 _HAS_ACCURACY_TAG = f"{{{_EXTENSIONS_NS}}}has_accuracy"
+_SPEED_TAG = f"{{{_EXTENSIONS_NS}}}speed"
+_HAS_SPEED_TAG = f"{{{_EXTENSIONS_NS}}}has_speed"
 
 
 def _point_accuracy_m(gpx_point: gpxpy.gpx.GPXTrackPoint) -> float | None:
@@ -42,6 +44,30 @@ def _point_accuracy_m(gpx_point: gpxpy.gpx.GPXTrackPoint) -> float | None:
         return None
     try:
         return float(accuracy_text)
+    except ValueError:
+        return None
+
+
+def _point_speed_mps(gpx_point: gpxpy.gpx.GPXTrackPoint) -> float | None:
+    """The point's sat:speed extension value (GNSS chip Doppler speed), or
+    None if absent/unmeasured (sat:has_speed is "false") or unparseable —
+    same "missing is not the same as a measured zero" treatment as
+    _point_accuracy_m, trusted only when sat:has_speed is true (see
+    mobile's LocationSample.hasSpeed doc: a platform can report a bare 0.0
+    for "no speed available" rather than omitting the field)."""
+    speed_text: str | None = None
+    has_speed = True
+    for element in gpx_point.extensions:
+        tag = getattr(element, "tag", None)
+        if tag == _SPEED_TAG:
+            speed_text = element.text
+        elif tag == _HAS_SPEED_TAG:
+            has_speed = (element.text or "").strip().lower() == "true"
+
+    if not has_speed or speed_text is None:
+        return None
+    try:
+        return float(speed_text)
     except ValueError:
         return None
 
@@ -81,6 +107,7 @@ def parse_gpx(data: bytes) -> Track:
                     ele=p.elevation,
                     time=_as_utc(p.time),
                     accuracy_m=_point_accuracy_m(p),
+                    speed_mps=_point_speed_mps(p),
                 )
                 for p in gpx_segment.points
                 if p.time is not None

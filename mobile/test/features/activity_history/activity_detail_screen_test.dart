@@ -121,6 +121,35 @@ void main() {
   });
 
   testWidgets(
+    'shows a Time row alongside Moving time when elapsed_seconds is present '
+    '(issue #50: elapsed_seconds now excludes paused segment gaps)',
+    (tester) async {
+      final fake = FakeApiClient()
+        ..getActivityHandler = ({required baseUrl, required token, required serverRunId}) async =>
+            _run(
+              analysis: const AnalysisDto(
+                status: 'done',
+                result: {
+                  'distance_meters': 5000.0,
+                  'elapsed_seconds': 1620.0,
+                  'moving_seconds': 1500.0,
+                  'avg_moving_speed_mps': 3.33,
+                  'split_type': 'distance_km',
+                  'split_targets_as': null,
+                  'splits': [],
+                },
+              ),
+            );
+
+      await tester.pumpWidget(_wrap(fake, activityId: 'run-1'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Time: 27:00'), findsOneWidget);
+      expect(find.textContaining('Moving time: 25:00'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     'shows best-effort times (regression: dropped when this screen '
     'replaced the old inline Insights section)',
     (tester) async {

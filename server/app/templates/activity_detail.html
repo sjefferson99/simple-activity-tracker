@@ -60,6 +60,10 @@
       <div class="label">Distance (server)</div>
     </div>
     <div class="stat">
+      <div class="value">{{ result.elapsed_seconds | duration }}</div>
+      <div class="label">Time (server)</div>
+    </div>
+    <div class="stat">
       <div class="value">{{ result.moving_seconds | duration }}</div>
       <div class="label">Moving time (server)</div>
     </div>
@@ -80,6 +84,13 @@
       <div class="label">Elevation loss</div>
     </div>
   </div>
+  <p class="muted">"Time" is wall-clock, computed from the uploaded GPX's own track segments —
+    each pause/resume on the phone starts a new segment, so the gap between segments is excluded
+    the same way the phone's own "Time" excludes a pause. It can still differ slightly from the
+    phone: a pause shorter than one GPS update, or a segment boundary caused by a GPS dropout
+    rather than a real pause, isn't distinguishable from the file alone. "Moving time" is
+    separate and always smaller — see the tile above — it also excludes any GPS-detected
+    stationary stretch inside a segment (standing still without pausing the app).</p>
 
   {% if result.best_efforts %}
   <h2 style="margin-top:1.5rem;">Best efforts</h2>

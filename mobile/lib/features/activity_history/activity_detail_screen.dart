@@ -112,6 +112,7 @@ class _HeadlineStats extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final distanceM = (result['distance_meters'] as num?)?.toDouble();
+    final elapsedS = (result['elapsed_seconds'] as num?)?.toDouble();
     final movingS = (result['moving_seconds'] as num?)?.toDouble();
     final avgSpeedMps = (result['avg_moving_speed_mps'] as num?)?.toDouble();
     final elevation = result['elevation'] as Map<String, dynamic>?;
@@ -125,6 +126,8 @@ class _HeadlineStats extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (distanceM != null) Text('Distance: ${formatDistanceKm(distanceM)} km'),
+        if (elapsedS != null)
+          Text('Time: ${formatDuration(Duration(seconds: elapsedS.round()))}'),
         if (movingS != null)
           Text('Moving time: ${formatDuration(Duration(seconds: movingS.round()))}'),
         if (avgSpeedMps != null) Text('Avg speed: ${formatKmh(avgSpeedMps)} km/h'),

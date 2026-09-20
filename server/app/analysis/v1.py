@@ -6,17 +6,32 @@ from app.analysis.geo_math import haversine_distance_meters, speed_mps_between
 from app.analysis.gpx_parser import SplitPlanData
 from app.analysis.track import Point, Track, drop_inaccurate_points
 
-# 7: splits now honour a phone-supplied SplitPlanData (issue #100) — a
-# custom plan's variable per-split sizes, and/or a target speed per split —
-# instead of always using a constant boundary derived from split_type/
-# split_value alone. Each split dict gains target_speed_mps/verdict, and the
-# result gains split_targets_as. A GPX/activity with no plan (the common
-# case, and every activity analyzed before this version) is unaffected: same
-# splits, target_speed_mps/verdict null, split_targets_as null. Bump this
-# whenever the result shape or algorithm changes, then run
+# 10: moving-time now uses the phone's tuned hysteresis instead of being
+# independently (and, it turns out, inconsistently) derived — issue #50.
+# _StationaryDetector mirrors mobile's own (metrics_engine.dart): entering
+# "moving" needs 3 consecutive fixes at/above 0.6 m/s, exiting needs one
+# fix below 0.4 m/s — replacing a single-step >=0.5 m/s threshold with no
+# confirmation. The same gate now decides *both* total_distance_m and
+# moving_s, closing a prior inconsistency where a segment could count
+# toward the numerator (no gate at all) but not the denominator (the old
+# 0.5 m/s gate), or vice versa. A step's credited distance is still the
+# position delta (haversine) — sat:speed is read and used only to drive
+# this gate, not to compute distance: a Doppler chip-speed-integration
+# formula was tried and reverted after replaying real Wahoo wheel-speed-
+# sensor-verified rides showed it consistently *less* accurate than plain
+# position-summing (3-6 percentage points worse across three cycling rides
+# against genuine non-GPS ground truth) — see the "Wheel Sensor vs Doppler"
+# writeup for the evidence. Best-effort windows are also now trimmed to the
+# exact target distance via interpolation instead of reporting the raw
+# overshot window's time (see _best_efforts). elapsed_seconds now sums each
+# GPX track segment's own span rather than the whole track's first-to-last,
+# excluding the gap a pause/resume leaves between segments — closes most of
+# the drift against the phone's own pause-excluding "Time" tile, without
+# a new upload field (see _elapsed_seconds_excluding_pauses).
+# Bump this whenever the result shape or algorithm changes, then run
 # `simple-activity-tracker-server reanalyze --all` on each deployment so
 # stored analyses catch up — the web UI reads stored results as-is.
-ANALYSIS_VERSION = 7
+ANALYSIS_VERSION = 10
 
 # Green within ±5% of target speed, red outside in either direction — same
 # rule and tolerance as mobile's splitTargetTolerance
@@ -38,11 +53,25 @@ _MAX_IMPLIED_SPEED_MPS_BY_ACTIVITY_TYPE: dict[str, float] = {
 }
 _DEFAULT_MAX_IMPLIED_SPEED_MPS = 12.0
 
-_MOVING_SPEED_THRESHOLD_MPS = 0.5
 _SERIES_MAX_SAMPLES = 300
 _BEST_EFFORT_DISTANCES_METERS = (1000.0, 5000.0, 10000.0)
 
 _METERS_PER_MILE = 1609.344
+
+# Mirrors mobile's _StationaryDetector exactly (same values, same reasoning
+# — see its doc in mobile/lib/domain/tracking/metrics_engine.dart): entering
+# "moving" needs 3 consecutive fixes at/above 0.6 m/s (a single stationary
+# noise blip was observed to ring for two consecutive fixes on real
+# hardware, so a 2-fix confirmation still let noise through); leaving
+# "moving" needs just one fix below 0.4 m/s, so pace jitter right at walking
+# speed doesn't flicker distance on/off mid-stride once already moving.
+_ENTER_MOVING_MPS = 0.6
+_EXIT_MOVING_MPS = 0.4
+_ENTER_CONFIRM_FIXES = 3
+
+# Mirrors mobile's _noiseFloorMeters: the position-delta fallback used when
+# a step has no usable chip speed at all (an old GPX, a non-mobile import).
+_NOISE_FLOOR_METERS = 1.2
 
 
 def distance_and_duration_from_result(result: dict[str, object] | None) -> tuple[float, float]:
@@ -95,11 +124,12 @@ class _Step:
     prev_point: Point  # start of this step, needed to interpolate a split
     # boundary's crossing position (see _interpolate_latlon)
     point: Point
-    distance_m: float  # this step's own distance
+    distance_m: float  # this step's own *credited* distance (see _credited_distance)
     dt_s: float
-    speed_mps: float | None
-    cum_distance_m: float  # cumulative distance including this step
+    speed_mps: float | None  # position-derived instant speed — plausibility/series only
+    cum_distance_m: float  # cumulative credited distance including this step
     cum_time_s: float  # cumulative wall-clock elapsed including this step
+    is_moving: bool  # whether the stationary gate credits this step as motion
 
 
 @dataclass
@@ -123,13 +153,46 @@ def _smoothed_elevations(points: list[Point]) -> list[float | None]:
     return result
 
 
+class _StationaryDetector:
+    """Ports mobile's _StationaryDetector verbatim (same thresholds, same
+    hysteresis, same "verdict is whatever was true before this fix" rule —
+    see the class doc in mobile/lib/domain/tracking/metrics_engine.dart).
+    Stateful across an entire activity's steps, in fix order — the same
+    instance must be fed every step of one activity in order, never reused
+    across activities."""
+
+    def __init__(self) -> None:
+        self._is_moving = False
+        self._above_enter_streak = 0
+
+    def accepts(
+        self, *, has_speed: bool, speed_mps: float | None, segment_distance_m: float
+    ) -> bool:
+        if not has_speed or speed_mps is None:
+            return segment_distance_m >= _NOISE_FLOOR_METERS
+
+        was_moving = self._is_moving
+        if was_moving:
+            if speed_mps < _EXIT_MOVING_MPS:
+                self._is_moving = False
+                self._above_enter_streak = 0
+        else:
+            self._above_enter_streak = (
+                self._above_enter_streak + 1 if speed_mps >= _ENTER_MOVING_MPS else 0
+            )
+            if self._above_enter_streak >= _ENTER_CONFIRM_FIXES:
+                self._is_moving = True
+        return was_moving
+
+
 def _build_steps(segments: list[list[Point]], max_implied_speed_mps: float) -> list[_Step]:
     steps: list[_Step] = []
     cum_distance = 0.0
     cum_time = 0.0
+    detector = _StationaryDetector()
     for points in segments:
         for prev, curr in itertools.pairwise(points):
-            distance = haversine_distance_meters(prev, curr)
+            position_distance = haversine_distance_meters(prev, curr)
             speed = speed_mps_between(prev, curr)
             dt = (curr.time - prev.time).total_seconds()
             if speed is not None and speed > max_implied_speed_mps:
@@ -138,17 +201,34 @@ def _build_steps(segments: list[list[Point]], max_implied_speed_mps: float) -> l
                 # keep tracking through a jump) — a finished GPX is analysed
                 # once, so simply excluding the bad step is enough.
                 continue
-            cum_distance += distance
-            cum_time += max(dt, 0.0)
+
+            is_moving = detector.accepts(
+                has_speed=curr.speed_mps is not None,
+                speed_mps=curr.speed_mps,
+                segment_distance_m=position_distance,
+            )
+            # Credited distance is the position delta, not a chip-speed
+            # integration — issue #50: replaying real Wahoo wheel-speed-
+            # sensor-verified rides showed plain position-summing was
+            # consistently closer to true distance than Doppler trapezoid
+            # integration (which underread by 3-6 percentage points across
+            # three cycling rides against genuine non-GPS ground truth).
+            # sat:speed is still read above, for the stationary gate only.
+            credited_distance = position_distance if is_moving else 0.0
+            credited_dt = max(dt, 0.0) if is_moving else 0.0
+
+            cum_distance += credited_distance
+            cum_time += credited_dt
             steps.append(
                 _Step(
                     prev_point=prev,
                     point=curr,
-                    distance_m=distance,
+                    distance_m=credited_distance,
                     dt_s=dt,
                     speed_mps=speed,
                     cum_distance_m=cum_distance,
                     cum_time_s=cum_time,
+                    is_moving=is_moving,
                 )
             )
     return steps
@@ -402,7 +482,16 @@ def _elevation_stats(smoothed: list[float | None]) -> dict[str, float | None]:
 
 def _best_efforts(steps: list[_Step]) -> list[dict[str, object]]:
     """Fastest window for each target distance, via a two-pointer sweep over
-    cumulative distance/time (steps are monotonically increasing in both)."""
+    cumulative distance/time (steps are monotonically increasing in both).
+
+    A window is accepted the moment its distance reaches or passes `target`
+    at a step boundary — steps[start] is then trimmed back to the exact
+    fractional point where the window's distance equals `target` exactly,
+    the same interpolation approach _compute_distance_splits already uses
+    for split boundaries (issue #50: previously this used the window's raw
+    overshot time, which both overstated duration_seconds and — since
+    avg_speed_mps divided the clean nominal target by that overshot time —
+    understated pace)."""
     if not steps:
         return []
 
@@ -428,7 +517,21 @@ def _best_efforts(steps: list[_Step]) -> list[dict[str, object]]:
             window_distance = steps[end].cum_distance_m - prev_cum_distance[start]
             if window_distance < target:
                 continue
-            window_time = steps[end].cum_time_s - prev_cum_time[start]
+
+            # steps[start] is the earliest step the window still needs — its
+            # own distance/time are trimmed to the fraction that brings the
+            # window down to exactly `target`, mirroring
+            # _compute_distance_splits's overshoot/fraction interpolation.
+            leading_step = steps[start]
+            overshoot = window_distance - target
+            if leading_step.distance_m > 0:
+                fraction_excluded = overshoot / leading_step.distance_m
+                trimmed_time = leading_step.dt_s * fraction_excluded
+            else:
+                # A zero-distance (non-moving) leading step contributes no
+                # overshoot to trim — the boundary falls exactly at its end.
+                trimmed_time = 0.0
+            window_time = (steps[end].cum_time_s - prev_cum_time[start]) - trimmed_time
             if window_time <= 0:
                 continue
             if best_duration is None or window_time < best_duration:
@@ -532,6 +635,26 @@ def _bounds(segments: list[list[Point]]) -> dict[str, float] | None:
     }
 
 
+def _elapsed_seconds_excluding_pauses(segments: list[list[Point]]) -> float:
+    """Sum of each GPX <trkseg>'s own span (its last point's time minus its
+    first), rather than the whole track's first-to-last — issue #50. Mobile
+    starts a new track segment on every pause/resume (RunGpxLog), so the gap
+    *between* segments is paused wall-clock time, the same information
+    RunClock excludes on the phone. This can't be an exact match for the
+    phone's own "Time" tile (a pause shorter than one GPS fix interval, or a
+    segment boundary from a genuine GPS dropout rather than a real pause,
+    isn't distinguishable from here), but it removes the single biggest
+    source of drift — a real pause used to be silently counted as elapsed
+    time. A track with only one segment (no pauses) is unaffected: this
+    equals the old first-to-last calculation exactly."""
+    total = 0.0
+    for points in segments:
+        if len(points) < 2:
+            continue
+        total += (points[-1].time - points[0].time).total_seconds()
+    return total
+
+
 @dataclass
 class AnalyzerV1:
     version: int = field(default=ANALYSIS_VERSION, init=False)
@@ -567,12 +690,13 @@ class AnalyzerV1:
         windowed_speeds = _windowed_speeds(steps, all_points[0])
 
         total_distance_m = steps[-1].cum_distance_m if steps else 0.0
-        elapsed_s = (all_points[-1].time - all_points[0].time).total_seconds()
-        moving_s = sum(
-            s.dt_s
-            for s in steps
-            if s.speed_mps is not None and s.speed_mps >= _MOVING_SPEED_THRESHOLD_MPS
-        )
+        elapsed_s = _elapsed_seconds_excluding_pauses(filtered_segments)
+        # cum_time_s is already moving-gated (_build_steps zeroes a
+        # non-moving step's own contribution), so the running total on the
+        # last step *is* moving_s — same gate now decides both this and
+        # total_distance_m above, closing the old numerator/denominator
+        # mismatch (issue #50).
+        moving_s = steps[-1].cum_time_s if steps else 0.0
         avg_moving_speed_mps = total_distance_m / moving_s if moving_s > 0 else None
 
         return {
