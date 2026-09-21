@@ -376,6 +376,31 @@ String speakSpeedDelta(double avgMps, double targetMps, SpeedUnit unit) {
   }
 }
 
+/// Speaks a split's size for text-to-speech (issue #125 follow-up) — e.g.
+/// "1 kilometre", "500 metres", "0.5 miles", "1 minute 30 seconds". Mirrors
+/// [formatSplitSizeMeters]/[formatSplitSizeSeconds]'s own unit/threshold
+/// choices, phrased for speech (a spelled-out unit name, no abbreviation,
+/// and [speakDuration] instead of "m:ss" for a time-kind split).
+String speakSplitSize(double sizeMeters, DistanceUnit distanceUnit) {
+  if (distanceUnit == DistanceUnit.mi) {
+    final miles = milesFromMeters(sizeMeters);
+    if (miles < 0.1) {
+      final feet = feetFromMeters(sizeMeters).round();
+      return feet == 1 ? '1 foot' : '$feet feet';
+    }
+    return '${_trimDecimal(miles)} miles';
+  }
+  if (sizeMeters < 1000) {
+    final metres = sizeMeters.round();
+    return metres == 1 ? '1 metre' : '$metres metres';
+  }
+  final km = _trimDecimal(sizeMeters / 1000);
+  return km == '1' ? '1 kilometre' : '$km kilometres';
+}
+
+String speakSplitSizeSeconds(double sizeSeconds) =>
+    speakDuration(Duration(milliseconds: (sizeSeconds * 1000).round()));
+
 /// Formats a target speed ([targetMps]) for display in an editor field —
 /// pace as "m:ss", speed as a plain one-decimal number (no unit suffix,
 /// since the field's own label/segmented control already shows the unit).

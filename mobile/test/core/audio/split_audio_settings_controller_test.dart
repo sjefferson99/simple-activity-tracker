@@ -39,7 +39,7 @@ void main() {
     const settings = SplitAudioSettings(
       beepOnSplitChange: true,
       beepOnVerdictChange: false,
-      announceSplitStats: true,
+      announceSplitTarget: true,
       announceVerdictCorrection: true,
     );
     final container = _container({
@@ -56,7 +56,7 @@ void main() {
     const settings = SplitAudioSettings(
       beepOnSplitChange: true,
       beepOnVerdictChange: false,
-      announceSplitStats: false,
+      announceSplitTarget: false,
       announceVerdictCorrection: false,
     );
     await container
@@ -80,7 +80,7 @@ void main() {
       const persisted = SplitAudioSettings(
         beepOnSplitChange: true,
         beepOnVerdictChange: true,
-        announceSplitStats: false,
+        announceSplitTarget: false,
         announceVerdictCorrection: false,
       );
       final container = _container({
@@ -109,7 +109,7 @@ void main() {
         const persisted = SplitAudioSettings(
           beepOnSplitChange: true,
           beepOnVerdictChange: true,
-          announceSplitStats: true,
+          announceSplitTarget: true,
           announceVerdictCorrection: true,
         );
         final container = _container({

@@ -33,9 +33,9 @@ abstract interface class SplitAudioService {
 
   Future<void> playSplitChanged();
 
-  /// [SplitVerdict.tooFast] → two short beeps, [SplitVerdict.tooSlow] →
-  /// three short beeps, [SplitVerdict.onTarget] → one long beep ("split
-  /// time OK again" per issue #125).
+  /// [SplitVerdict.tooFast] → two beeps, [SplitVerdict.tooSlow] → three
+  /// beeps, [SplitVerdict.onTarget] → one long beep ("split time OK again"
+  /// per issue #125).
   Future<void> playVerdict(SplitVerdict verdict);
 
   Future<void> speak(String text);
@@ -43,22 +43,30 @@ abstract interface class SplitAudioService {
   Future<void> dispose();
 }
 
-const _shortBeepAsset = 'audio/beep_short.wav';
+/// One self-contained WAV per cue — the double/triple-beep patterns are
+/// baked into the file at generation time (`docs/generate_split_beeps.py`),
+/// not produced by chaining repeated `play()` calls at runtime. This is a
+/// deliberate design change (2026-09-21, issue #125 follow-up): both an
+/// earlier "repeat one short beep on the same player" and a later "repeat
+/// it on a fresh player each time" approach silently dropped the second and
+/// third beeps of a pattern on a real device (Samsung S23) — every
+/// individual `play()` call completed with no error, but only the first
+/// beep was ever audible. Baking the whole pattern into one file means
+/// exactly one `play()` call per cue, so there's nothing left for the
+/// platform layer to drop mid-pattern. See mobile/assets/audio/README.md.
+const _singleBeepAsset = 'audio/beep_single.wav';
+const _doubleBeepAsset = 'audio/beep_double.wav';
+const _tripleBeepAsset = 'audio/beep_triple.wav';
 const _longBeepAsset = 'audio/beep_long.wav';
 
-/// Gap between repeated short beeps within the 2-beep/3-beep verdict
-/// patterns — long enough to be heard as separate beeps, short enough that
-/// the whole pattern stays quick.
-const _beepGap = Duration(milliseconds: 180);
-
-/// Gap after the last beep of a cue before any spoken phrase for that same
-/// cue starts — on a real device (S23) the beep and "Starting activity" TTS
-/// were audibly overlapping despite going through the same serialized
-/// queue, because `AudioPlayer.play()` resolves once playback *starts*, not
-/// once it *finishes* (see `_playBeep`'s own fix). This half-second pause is
-/// on top of that fix, not instead of it — belt and braces, and it's also
-/// just a clearer listening experience to have a beat between "beep" and
-/// the words that follow it.
+/// Gap after a beep before any spoken phrase for that same cue starts — on
+/// a real device (S23) the beep and TTS were audibly overlapping despite
+/// going through the same serialized queue, because `AudioPlayer.play()`
+/// resolves once playback *starts*, not once it *finishes* (see
+/// `_playBeep`'s own fix, which waits for real completion). This half-second
+/// pause is on top of that fix, not instead of it — belt and braces, and
+/// it's also just a clearer listening experience to have a beat between the
+/// beep and the words that follow it.
 const _beepToSpeechGap = Duration(milliseconds: 500);
 
 /// Cap on any single setup platform call in [AudioPlayersSplitAudioService._initialize]
@@ -68,11 +76,12 @@ const _beepToSpeechGap = Duration(milliseconds: 500);
 /// silently block every cue for the rest of the app session.
 const _initStepTimeout = Duration(seconds: 3);
 
-/// Temporary diagnostic logging for the "no audio on a cold app process"
-/// bug — visible via `adb logcat` under the `SplitAudio` tag. Worth keeping
-/// past the immediate diagnosis (cheap, and this is exactly the kind of
+/// Temporary diagnostic logging for a real class of on-device audio bugs
+/// (a cold-process race, and a dropped-beeps-in-a-pattern bug — see git log)
+/// — visible via `adb logcat -s SplitAudio:V`. Worth keeping past the
+/// immediate diagnosis (cheap, and this is exactly the kind of
 /// silent-failure-prone plugin-glue code where a future regression would
-/// otherwise be just as hard to diagnose as this one was).
+/// otherwise be just as hard to diagnose as these were).
 void _log(String message) =>
     developer.log(message, name: 'SplitAudio');
 
@@ -85,9 +94,9 @@ class AudioPlayersSplitAudioService implements SplitAudioService {
     // waits for setup to finish rather than racing it. Found on a real
     // device (S23): the very first activity's start-cue after a fresh app
     // launch played with default/uninitialized audio routing (technically
-    // audible but on the wrong stream — same symptom as the earlier
-    // sonification-routing bug), while every subsequent run that session
-    // worked fine. Root cause was this constructor firing setAudioContext/
+    // audible but on the wrong stream — same symptom as the sonification-
+    // routing bug below), while every subsequent run that session worked
+    // fine. Root cause was this constructor firing setAudioContext/
     // awaitSpeakCompletion/setIosAudioCategory with `unawaited(...)` — those
     // are real async platform-channel calls, and `splitAudioServiceProvider`
     // is lazily constructed on the very first `ref.read`, which happens
@@ -178,12 +187,11 @@ class AudioPlayersSplitAudioService implements SplitAudioService {
   final ap.AudioPlayer _beepPlayer;
   final tts.FlutterTts _tts;
 
-  /// Serializes every beep/speech call through this service — a verdict
-  /// pattern is 2-3 sequential beep plays, and TTS must never start mid
-  /// pattern (docs/SPLIT-AUDIO-PLAN.md §4: never overlapped). Seeded with
-  /// _initialize() itself (see the constructor's comment) so the first real
-  /// call also waits for setup, not just later ones. A later call waits for
-  /// the one ahead of it rather than interrupting it.
+  /// Serializes every beep/speech call through this service, so a beep and
+  /// the TTS for the same cue never overlap. Seeded with _initialize()
+  /// itself (see the constructor's comment) so the first real call also
+  /// waits for setup, not just later ones. A later call waits for the one
+  /// ahead of it rather than interrupting it.
   late Future<void> _queue;
 
   Future<void> _enqueue(Future<void> Function() action) {
@@ -199,13 +207,13 @@ class AudioPlayersSplitAudioService implements SplitAudioService {
 
   /// Plays [asset] and waits for it to actually finish sounding — not just
   /// for playback to *start*, which is all `AudioPlayer.play()` itself
-  /// resolves on. Awaiting only `play()` was the real cause of a beep and a
-  /// following TTS phrase audibly overlapping on a real device (S23) despite
-  /// both going through the same serialized `_queue`: the "next" queued
-  /// action started while the beep was still sounding. `onPlayerComplete`
-  /// fires once the clip genuinely finishes; the timeout is a defensive
-  /// fallback only, well past either asset's real duration, so a missed
-  /// platform completion event can never wedge the queue indefinitely.
+  /// resolves on. `onPlayerComplete` fires once the clip genuinely
+  /// finishes; the timeout is a defensive fallback only, well past any
+  /// asset's real duration, so a missed platform completion event can never
+  /// wedge the queue indefinitely. Every cue is now exactly one call to
+  /// this — see the module doc above for why multi-beep patterns are now
+  /// baked into their own asset rather than produced by calling this
+  /// repeatedly.
   Future<void> _playBeep(String asset) async {
     _log('playBeep: $asset start');
     final completed = _beepPlayer.onPlayerComplete.first;
@@ -218,28 +226,21 @@ class AudioPlayersSplitAudioService implements SplitAudioService {
   @override
   Future<void> playActivityStarted() {
     _log('playActivityStarted: called');
-    return _enqueue(() => _playBeep(_shortBeepAsset));
+    return _enqueue(() => _playBeep(_singleBeepAsset));
   }
 
   @override
-  Future<void> playSplitChanged() => _enqueue(() => _playBeep(_shortBeepAsset));
+  Future<void> playSplitChanged() => _enqueue(() => _playBeep(_singleBeepAsset));
 
   @override
-  Future<void> playVerdict(SplitVerdict verdict) => _enqueue(() async {
-    switch (verdict) {
-      case SplitVerdict.tooFast:
-        await _playBeep(_shortBeepAsset);
-        await Future<void>.delayed(_beepGap);
-        await _playBeep(_shortBeepAsset);
-      case SplitVerdict.tooSlow:
-        await _playBeep(_shortBeepAsset);
-        await Future<void>.delayed(_beepGap);
-        await _playBeep(_shortBeepAsset);
-        await Future<void>.delayed(_beepGap);
-        await _playBeep(_shortBeepAsset);
-      case SplitVerdict.onTarget:
-        await _playBeep(_longBeepAsset);
-    }
+  Future<void> playVerdict(SplitVerdict verdict) => _enqueue(() {
+    _log('playVerdict: ${verdict.name}');
+    final asset = switch (verdict) {
+      SplitVerdict.tooFast => _doubleBeepAsset,
+      SplitVerdict.tooSlow => _tripleBeepAsset,
+      SplitVerdict.onTarget => _longBeepAsset,
+    };
+    return _playBeep(asset);
   });
 
   @override

@@ -171,8 +171,8 @@ void main() {
       // indoor/no-signal case this was added for).
       expect(audio.calls, contains('playActivityStarted'));
       expect(
-        audio.calls,
-        isNot(contains('speak:Starting activity.')),
+        audio.calls.where((c) => c.startsWith('speak:')),
+        isEmpty,
         reason: 'no speech toggle is on, so no TTS should fire',
       );
 
@@ -195,7 +195,12 @@ void main() {
         isNot(contains('playActivityStarted')),
         reason: 'no beep toggle is on, so no beep should fire',
       );
-      expect(audio.calls, contains('speak:Starting activity.'));
+      // testPlan's split 1 has a target of 5.0 m/s (= 3:20/km); the plan's
+      // targetsAsPace defaults to true, and _announcementUnit follows it.
+      expect(
+        audio.calls,
+        contains('speak:Target 3 minutes 20 per kilometre.'),
+      );
 
       await c.read(liveRunControllerProvider.notifier).stop();
     },
@@ -303,6 +308,42 @@ void main() {
         audio.calls,
         contains('playSplitChanged'),
         reason: 'expected a split-change beep once split 1 was crossed',
+      );
+
+      await c.read(liveRunControllerProvider.notifier).stop();
+    },
+  );
+
+  test(
+    'rolling onto the base plan after a custom plan is exhausted announces it',
+    () async {
+      final (c, audio) = await setUp(
+        audioSettings: SplitAudioSettings.defaultSettings.copyWith(
+          beepOnSplitChange: true,
+          announceSplitTarget: true,
+        ),
+      );
+      final service = c.read(locationServiceProvider) as _ScriptedLocationService;
+      final start = DateTime.now();
+
+      // testPlan has exactly two 5m custom splits — walk well past both
+      // boundaries at 5 m/s: split 1 -> 2 (still custom), then 2 -> 3 (the
+      // roll-on tick onto the 1km base plan, per testPlan's own doc).
+      for (var i = 0; i <= 30; i++) {
+        service.emit(
+          _sampleAtMeters(i * 2.0, start.add(Duration(seconds: i))),
+        );
+        await pumpEventQueue();
+      }
+
+      expect(
+        audio.calls,
+        contains(
+          'speak:Now on rolling splits of 1 kilometre. No target.',
+        ),
+        reason:
+            'testPlan\'s base plan (1km, no rolling target) has no target, '
+            'unlike its two custom splits',
       );
 
       await c.read(liveRunControllerProvider.notifier).stop();

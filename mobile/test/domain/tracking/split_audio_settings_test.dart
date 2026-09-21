@@ -7,7 +7,7 @@ void main() {
       const defaults = SplitAudioSettings.defaultSettings;
       expect(defaults.beepOnSplitChange, isFalse);
       expect(defaults.beepOnVerdictChange, isFalse);
-      expect(defaults.announceSplitStats, isFalse);
+      expect(defaults.announceSplitTarget, isFalse);
       expect(defaults.announceVerdictCorrection, isFalse);
       expect(defaults.anyEnabled, isFalse);
     });
@@ -16,7 +16,7 @@ void main() {
       const settings = SplitAudioSettings(
         beepOnSplitChange: false,
         beepOnVerdictChange: true,
-        announceSplitStats: true,
+        announceSplitTarget: true,
         announceVerdictCorrection: false,
       );
       final roundTripped = SplitAudioSettings.fromJson(settings.toJson());
@@ -24,13 +24,14 @@ void main() {
     });
 
     test(
-      'fromJson still parses a pre-removal stored value (extra "enabled" key ignored)',
+      'fromJson still parses a pre-master-toggle-removal stored value '
+      '(extra "enabled" key ignored)',
       () {
         final legacyJson = {
           'enabled': true,
           'beepOnSplitChange': true,
           'beepOnVerdictChange': false,
-          'announceSplitStats': false,
+          'announceSplitTarget': false,
           'announceVerdictCorrection': true,
         };
         final parsed = SplitAudioSettings.fromJson(legacyJson);
@@ -39,7 +40,30 @@ void main() {
           const SplitAudioSettings(
             beepOnSplitChange: true,
             beepOnVerdictChange: false,
-            announceSplitStats: false,
+            announceSplitTarget: false,
+            announceVerdictCorrection: true,
+          ),
+        );
+      },
+    );
+
+    test(
+      'fromJson still parses a pre-rename stored value '
+      '(old announceSplitStats key simply ignored, field reads as false)',
+      () {
+        final preRenameJson = {
+          'beepOnSplitChange': true,
+          'beepOnVerdictChange': false,
+          'announceSplitStats': true, // the field's old name
+          'announceVerdictCorrection': true,
+        };
+        final parsed = SplitAudioSettings.fromJson(preRenameJson);
+        expect(
+          parsed,
+          const SplitAudioSettings(
+            beepOnSplitChange: true,
+            beepOnVerdictChange: false,
+            announceSplitTarget: false,
             announceVerdictCorrection: true,
           ),
         );
@@ -59,7 +83,7 @@ void main() {
       final updated = settings.copyWith(beepOnSplitChange: true);
       expect(updated.beepOnSplitChange, isTrue);
       expect(updated.beepOnVerdictChange, settings.beepOnVerdictChange);
-      expect(updated.announceSplitStats, settings.announceSplitStats);
+      expect(updated.announceSplitTarget, settings.announceSplitTarget);
       expect(
         updated.announceVerdictCorrection,
         settings.announceVerdictCorrection,
@@ -72,7 +96,7 @@ void main() {
       expect(a, b);
       expect(a.hashCode, b.hashCode);
 
-      final c = a.copyWith(announceSplitStats: true);
+      final c = a.copyWith(announceSplitTarget: true);
       expect(a == c, isFalse);
     });
 
@@ -94,7 +118,7 @@ void main() {
       test('anySpeechEnabled is true with either speech toggle alone', () {
         const settings = SplitAudioSettings.defaultSettings;
         expect(
-          settings.copyWith(announceSplitStats: true).anySpeechEnabled,
+          settings.copyWith(announceSplitTarget: true).anySpeechEnabled,
           isTrue,
         );
         expect(
@@ -102,7 +126,7 @@ void main() {
           isTrue,
         );
         expect(
-          settings.copyWith(announceSplitStats: true).anyBeepEnabled,
+          settings.copyWith(announceSplitTarget: true).anyBeepEnabled,
           isFalse,
         );
       });
@@ -111,7 +135,7 @@ void main() {
         const settings = SplitAudioSettings.defaultSettings;
         expect(settings.copyWith(beepOnSplitChange: true).anyEnabled, isTrue);
         expect(settings.copyWith(beepOnVerdictChange: true).anyEnabled, isTrue);
-        expect(settings.copyWith(announceSplitStats: true).anyEnabled, isTrue);
+        expect(settings.copyWith(announceSplitTarget: true).anyEnabled, isTrue);
         expect(
           settings.copyWith(announceVerdictCorrection: true).anyEnabled,
           isTrue,

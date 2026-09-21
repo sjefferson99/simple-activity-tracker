@@ -58,20 +58,99 @@ void main() {
       );
     });
 
-    test('split index incrementing produces splitChanged', () {
-      final previous = _metrics(currentSplit: _split(index: 1));
-      final current = _metrics(
-        currentSplit: _split(index: 2),
-        completedSplits: [
-          const Split(index: 1, duration: pastGrace, avgSpeedMps: 3.2, distanceMeters: 1000),
-        ],
+    test(
+      'split index incrementing produces splitChanged, carrying the new '
+      'split (not the just-finished one\'s average, which the cue no '
+      'longer needs — issue #125 follow-up removed the end-of-split '
+      'summary in favour of announcing the new split\'s target)',
+      () {
+        final previous = _metrics(currentSplit: _split(index: 1));
+        final current = _metrics(
+          currentSplit: _split(index: 2, targetSpeedMps: target),
+          completedSplits: [
+            const Split(index: 1, duration: pastGrace, avgSpeedMps: 3.2, distanceMeters: 1000),
+          ],
+        );
+
+        final cue = detectSplitAudioCue(previous: previous, current: current);
+        expect(cue, isNotNull);
+        expect(cue!.kind, SplitAudioCueKind.splitChanged);
+        expect(cue.split.index, 2);
+        expect(cue.split.targetSpeedMps, target);
+        expect(cue.avgSpeedMps, isNull);
+        expect(cue.rolledOntoRollingSplits, isFalse);
+      },
+    );
+
+    group('rolledOntoRollingSplits', () {
+      test(
+        'true on the exact tick a custom plan\'s splits are exhausted',
+        () {
+          // A 2-split custom plan (plannedCount: 2): index 2 -> 3 is the
+          // roll-on tick (3 == plannedCount + 1).
+          final previous = _metrics(
+            currentSplit: _split(index: 2, plannedCount: 2),
+          );
+          final current = _metrics(
+            currentSplit: _split(index: 3, plannedCount: 2),
+            completedSplits: [
+              const Split(index: 1, duration: pastGrace, avgSpeedMps: 3.0, distanceMeters: 1000),
+              const Split(index: 2, duration: pastGrace, avgSpeedMps: 3.0, distanceMeters: 1000),
+            ],
+          );
+
+          final cue = detectSplitAudioCue(previous: previous, current: current);
+          expect(cue!.rolledOntoRollingSplits, isTrue);
+        },
       );
 
-      final cue = detectSplitAudioCue(previous: previous, current: current);
-      expect(cue, isNotNull);
-      expect(cue!.kind, SplitAudioCueKind.splitChanged);
-      expect(cue.split.index, 2);
-      expect(cue.avgSpeedMps, 3.2);
+      test('false for an ordinary split boundary within a custom plan', () {
+        final previous = _metrics(
+          currentSplit: _split(index: 1, plannedCount: 3),
+        );
+        final current = _metrics(
+          currentSplit: _split(index: 2, plannedCount: 3),
+          completedSplits: [
+            const Split(index: 1, duration: pastGrace, avgSpeedMps: 3.0, distanceMeters: 1000),
+          ],
+        );
+
+        final cue = detectSplitAudioCue(previous: previous, current: current);
+        expect(cue!.rolledOntoRollingSplits, isFalse);
+      });
+
+      test('false for a rolling plan (no plannedCount at all)', () {
+        final previous = _metrics(currentSplit: _split(index: 1));
+        final current = _metrics(
+          currentSplit: _split(index: 2),
+          completedSplits: [
+            const Split(index: 1, duration: pastGrace, avgSpeedMps: 3.0, distanceMeters: 1000),
+          ],
+        );
+
+        final cue = detectSplitAudioCue(previous: previous, current: current);
+        expect(cue!.rolledOntoRollingSplits, isFalse);
+      });
+
+      test(
+        'false for a later boundary after already rolling on (only the exact tick counts)',
+        () {
+          final previous = _metrics(
+            currentSplit: _split(index: 3, plannedCount: 2),
+          );
+          final current = _metrics(
+            currentSplit: _split(index: 4, plannedCount: 2),
+            completedSplits: [
+              const Split(index: 1, duration: pastGrace, avgSpeedMps: 3.0, distanceMeters: 1000),
+              const Split(index: 2, duration: pastGrace, avgSpeedMps: 3.0, distanceMeters: 1000),
+              const Split(index: 3, duration: pastGrace, avgSpeedMps: 3.0, distanceMeters: 1000),
+            ],
+          );
+
+          final cue = detectSplitAudioCue(previous: previous, current: current);
+          expect(cue!.rolledOntoRollingSplits, isFalse);
+        },
+      );
     });
 
     test(

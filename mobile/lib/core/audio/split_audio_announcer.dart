@@ -1,34 +1,63 @@
+import '../../domain/models/current_split_info.dart';
 import '../../domain/tracking/split_audio_cue.dart';
 import '../units/units.dart';
 
-/// Builds the spoken phrase for a [SplitAudioCue], per issue #125 §4 — kept
-/// separate from [SplitAudioCue] itself (which is pure `domain/` and knows
-/// nothing about [SpeedUnit]/formatting) and separate from
-/// `SplitAudioService` (which just plays whatever text it's given). Returns
-/// null when there's nothing sensible to say (e.g. a just-completed split
-/// with no moving time yet, so no pace to report).
-String? splitStatsAnnouncement(SplitAudioCue cue, SpeedUnit unit) {
-  if (cue.kind != SplitAudioCueKind.splitChanged) return null;
-  // cue.split is the *new* split at this point (see detectSplitAudioCue) —
-  // the just-finished split is one index back.
-  final finishedIndex = cue.split.index - 1;
-  if (finishedIndex < 1) return null;
-  final speech = speakSpeedOrPace(cue.avgSpeedMps, unit);
-  if (speech == null) return null;
-  return 'Split $finishedIndex complete. Average $speech.';
+/// Builds the spoken phrase announcing a split's target, e.g. "Target 5
+/// kilometres per hour" or "No target" — used both for
+/// [splitStartAnnouncement] (a split boundary mid-run) and directly by
+/// `LiveRunController`'s immediate start-of-activity cue (issue #125
+/// follow-up, 2026-09-21), which announces split 1's target the same way
+/// before any GPS tick has even arrived. Kept separate from [SplitAudioCue]
+/// (pure `domain/`, no [SpeedUnit]/formatting) and from `SplitAudioService`
+/// (just plays whatever text it's given).
+String targetAnnouncement(CurrentSplitInfo split, SpeedUnit unit) {
+  final target = split.targetSpeedMps;
+  if (target == null) return 'No target.';
+  final speech = speakSpeedOrPace(target, unit);
+  return speech == null ? 'No target.' : 'Target $speech.';
 }
 
-/// Builds the spoken correction phrase for a [SplitAudioCue], per issue #125
-/// §4 — "2 minutes per kilometre too slow" / "back on target". Returns null
-/// when the cue isn't a verdict cue, or there's no target/speed to compare
-/// (shouldn't happen in practice, since [detectSplitAudioCue] only emits a
-/// verdict cue when `splitVerdict` itself returned non-null, which already
-/// requires both).
+/// Speaks a split's size for the "now on rolling splits" announcement, e.g.
+/// "1 kilometre" or "1 minute 30 seconds".
+String _speakSplitSize(CurrentSplitInfo split, SpeedUnit unit) =>
+    switch (split.sizeKind) {
+      SplitSizeKind.distanceMeters =>
+        speakSplitSize(split.size, unit.distanceUnit),
+      SplitSizeKind.durationSeconds => speakSplitSizeSeconds(split.size),
+    };
+
+/// Builds the spoken phrase for a [SplitAudioCueKind.splitChanged] cue
+/// (issue #125 follow-up, 2026-09-21 — replaces the old "Splt N complete,
+/// average X" end-of-split summary): the new split's target, prefixed with
+/// a short "now on rolling splits of Y" when [SplitAudioCue.rolledOntoRollingSplits]
+/// is true (a custom plan's splits have just been exhausted). Returns null
+/// when [cue] isn't a splitChanged cue.
+String? splitStartAnnouncement(SplitAudioCue cue, SpeedUnit unit) {
+  if (cue.kind != SplitAudioCueKind.splitChanged) return null;
+  final target = targetAnnouncement(cue.split, unit);
+  if (!cue.rolledOntoRollingSplits) return target;
+  final sizeSpeech = _speakSplitSize(cue.split, unit);
+  return 'Now on rolling splits of $sizeSpeech. $target';
+}
+
+/// Builds the spoken correction phrase for a [SplitAudioCueKind.verdict]
+/// cue, per issue #125's follow-up spec — "Pace is 2 minutes per kilometre
+/// too slow, target pace is 5 minutes per kilometre" / "Back on target."
+/// (no target restated on returning to target — "fine" is the whole point).
+/// Returns null when [cue] isn't a verdict cue, or there's no target/speed
+/// to compare (shouldn't happen in practice, since [detectSplitAudioCue]
+/// only emits a verdict cue when `splitVerdict` itself returned non-null,
+/// which already requires both).
 String? splitVerdictAnnouncement(SplitAudioCue cue, SpeedUnit unit) {
   if (cue.kind != SplitAudioCueKind.verdict) return null;
   final target = cue.split.targetSpeedMps;
   final avg = cue.avgSpeedMps;
   if (target == null || avg == null) return null;
-  final phrase = speakSpeedDelta(avg, target, unit);
-  return phrase[0].toUpperCase() + phrase.substring(1);
+
+  final delta = speakSpeedDelta(avg, target, unit);
+  if (delta == 'back on target') return 'Back on target.';
+
+  final noun = unit.isPace ? 'Pace' : 'Speed';
+  final targetSpeech = speakSpeedOrPace(target, unit);
+  return '$noun is $delta, target ${unit.isPace ? 'pace' : 'speed'} is $targetSpeech.';
 }

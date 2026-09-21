@@ -9,7 +9,8 @@
 /// a fifth switch that only gated the other four added a step with no real
 /// choice behind it (issue #125 follow-up, 2026-09-21).
 class SplitAudioSettings {
-  /// Beep once when a new split starts.
+  /// Beep once when a new split starts (including the very first, on Start
+  /// — see `LiveRunController`'s start-of-activity cue).
   final bool beepOnSplitChange;
 
   /// Beep pattern (2/3/1-long) on a target-verdict transition — too fast,
@@ -18,17 +19,25 @@ class SplitAudioSettings {
   /// [splitVerdict] itself returns null with no target.
   final bool beepOnVerdictChange;
 
-  /// Speak the just-completed split's duration and average pace/speed.
-  final bool announceSplitStats;
+  /// Speak the current split's target pace/speed whenever a split starts
+  /// (including the very first, on Start) — e.g. "Target 5 kilometres per
+  /// hour", or "No target." with none configured. Renamed from
+  /// announceSplitStats (issue #125 follow-up, 2026-09-21): the original
+  /// end-of-split "average pace so far" summary was replaced with an
+  /// announcement of what's coming up, not what just happened — this
+  /// toggle's name follows that behaviour change.
+  final bool announceSplitTarget;
 
-  /// Speak the too-fast/too-slow verdict and by how much, or "back on
-  /// target".
+  /// Speak the too-fast/too-slow verdict, by how much, and the target being
+  /// judged against (e.g. "Pace is 2 minutes per kilometre too slow, target
+  /// pace is 5 minutes per kilometre."), or "Back on target." with no target
+  /// restated.
   final bool announceVerdictCorrection;
 
   const SplitAudioSettings({
     required this.beepOnSplitChange,
     required this.beepOnVerdictChange,
-    required this.announceSplitStats,
+    required this.announceSplitTarget,
     required this.announceVerdictCorrection,
   });
 
@@ -38,7 +47,7 @@ class SplitAudioSettings {
   static const defaultSettings = SplitAudioSettings(
     beepOnSplitChange: false,
     beepOnVerdictChange: false,
-    announceSplitStats: false,
+    announceSplitTarget: false,
     announceVerdictCorrection: false,
   );
 
@@ -49,8 +58,8 @@ class SplitAudioSettings {
   bool get anyBeepEnabled => beepOnSplitChange || beepOnVerdictChange;
 
   /// Whether either speech toggle is on — same reasoning as [anyBeepEnabled],
-  /// for the start-of-activity "Starting activity" TTS.
-  bool get anySpeechEnabled => announceSplitStats || announceVerdictCorrection;
+  /// for the start-of-activity target announcement.
+  bool get anySpeechEnabled => announceSplitTarget || announceVerdictCorrection;
 
   /// Whether any cue at all would ever fire this run — the single gate
   /// [LiveRunController] checks before doing any audio work, replacing the
@@ -60,12 +69,12 @@ class SplitAudioSettings {
   SplitAudioSettings copyWith({
     bool? beepOnSplitChange,
     bool? beepOnVerdictChange,
-    bool? announceSplitStats,
+    bool? announceSplitTarget,
     bool? announceVerdictCorrection,
   }) => SplitAudioSettings(
     beepOnSplitChange: beepOnSplitChange ?? this.beepOnSplitChange,
     beepOnVerdictChange: beepOnVerdictChange ?? this.beepOnVerdictChange,
-    announceSplitStats: announceSplitStats ?? this.announceSplitStats,
+    announceSplitTarget: announceSplitTarget ?? this.announceSplitTarget,
     announceVerdictCorrection:
         announceVerdictCorrection ?? this.announceVerdictCorrection,
   );
@@ -73,22 +82,23 @@ class SplitAudioSettings {
   Map<String, Object?> toJson() => {
     'beepOnSplitChange': beepOnSplitChange,
     'beepOnVerdictChange': beepOnVerdictChange,
-    'announceSplitStats': announceSplitStats,
+    'announceSplitTarget': announceSplitTarget,
     'announceVerdictCorrection': announceVerdictCorrection,
   };
 
   /// Parses a previously-persisted value, or null if malformed — callers
   /// fall back to [defaultSettings] on null, same convention as
   /// `SplitPlan.fromJson`. A pre-existing stored value from before this
-  /// toggle's removal still parses fine — its extra `enabled` key is simply
-  /// ignored, since every field read here is looked up by name, not
-  /// position.
+  /// field's rename (`announceSplitStats` — issue #125 follow-up,
+  /// 2026-09-21) parses as if that toggle had been off, same as any other
+  /// unrecognized/missing key — everything else round-trips unaffected,
+  /// since every field here is looked up by name, not position.
   static SplitAudioSettings? fromJson(Map<String, Object?> json) {
     try {
       return SplitAudioSettings(
         beepOnSplitChange: json['beepOnSplitChange']! as bool,
         beepOnVerdictChange: json['beepOnVerdictChange']! as bool,
-        announceSplitStats: json['announceSplitStats']! as bool,
+        announceSplitTarget: json['announceSplitTarget'] as bool? ?? false,
         announceVerdictCorrection: json['announceVerdictCorrection']! as bool,
       );
     } catch (_) {
@@ -101,14 +111,14 @@ class SplitAudioSettings {
       other is SplitAudioSettings &&
       other.beepOnSplitChange == beepOnSplitChange &&
       other.beepOnVerdictChange == beepOnVerdictChange &&
-      other.announceSplitStats == announceSplitStats &&
+      other.announceSplitTarget == announceSplitTarget &&
       other.announceVerdictCorrection == announceVerdictCorrection;
 
   @override
   int get hashCode => Object.hash(
     beepOnSplitChange,
     beepOnVerdictChange,
-    announceSplitStats,
+    announceSplitTarget,
     announceVerdictCorrection,
   );
 }

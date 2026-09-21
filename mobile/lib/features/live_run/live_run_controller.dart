@@ -22,6 +22,7 @@ import '../../core/sync/sync_service.dart';
 import '../../core/tracking/activity_mode_controller.dart';
 import '../../core/tracking/split_plan_controller.dart';
 import '../../core/units/units.dart' show DistanceUnit, SpeedUnit;
+import '../../domain/models/current_split_info.dart';
 import '../../domain/models/live_metrics.dart';
 import '../../domain/models/run_record.dart';
 import '../../domain/models/run_summary.dart';
@@ -35,6 +36,7 @@ import '../../domain/tracking/run_phase.dart';
 import '../../domain/tracking/split_audio_cue.dart';
 import '../../domain/tracking/split_audio_settings.dart';
 import '../../domain/tracking/split_plan.dart';
+import '../../domain/tracking/split_preference.dart' show SplitKind;
 import 'live_run_state.dart';
 
 const _gpxFlushInterval = Duration(seconds: 5);
@@ -172,11 +174,13 @@ class LiveRunController extends Notifier<LiveRunState> {
     await ref.read(splitAudioSettingsControllerProvider.notifier).ensureLoaded();
     _audioSettings = ref.read(splitAudioSettingsControllerProvider);
     _previousMetricsForAudio = null;
-    _playActivityStartedCue();
     _metricsEngine = MetricsEngine(
       mode: _activityMode!,
       splitPlan: _splitPlan!,
     );
+    // After _metricsEngine so the cue can read its freshly-constructed
+    // initial split-1 state — see _playActivityStartedCue's own doc.
+    _playActivityStartedCue();
     _currentGpxFile = await newRunGpxFile(DateTime.now());
     _gpxLog = RunGpxLog(_currentGpxFile!, _splitPlan!, _activityMode!);
     // A periodic flush that fails is not fatal: every flush rewrites the
@@ -437,18 +441,23 @@ class LiveRunController extends Notifier<LiveRunState> {
     _previousMetricsForAudio = metrics;
   }
 
-  /// A beep and/or "Starting activity" TTS the moment Start is tapped (issue
+  /// A beep and/or target announcement the moment Start is tapped (issue
   /// #125 follow-up) — fires immediately, independent of GPS/acquiring
   /// state, so the user can confirm their audio/volume/routing works
-  /// *before* relying on it during the run. Split-changed/verdict cues may
-  /// not fire for a while (or at all indoors with no GPS — see the real bug
-  /// this was added after), so waiting for any of that would defeat the
-  /// point. There is no separate master toggle (removed 2026-09-21) — the
-  /// beep plays if either beep sub-toggle is on ([SplitAudioSettings.anyBeepEnabled]),
-  /// the TTS speaks if either speech sub-toggle is on
-  /// ([SplitAudioSettings.anySpeechEnabled]), independently, so the start
-  /// cue previews exactly whichever pieces are actually going to fire
-  /// during the run. Only for a mode that supports splits (cycling has no
+  /// *before* relying on it during the run, and so split 1's target is
+  /// announced the same way every later split's is. Replaces an earlier
+  /// "Starting activity" phrase (2026-09-21): the same content
+  /// [detectSplitAudioCue] would build for a mid-run split boundary, built
+  /// here from [_splitPlan] directly rather than [_metricsEngine.metrics] —
+  /// that starts at [LiveMetrics.zero], whose `currentSplit` is a fixed
+  /// placeholder (no target) until the first GPS point is actually added,
+  /// which may not happen for a while, or at all indoors with no GPS (see
+  /// the real bug this was added after) — reading it here would announce
+  /// "no target" even when split 1 genuinely has one. There is no separate
+  /// master toggle (removed 2026-09-21) — the beep plays if either beep
+  /// sub-toggle is on ([SplitAudioSettings.anyBeepEnabled]), the TTS speaks
+  /// if either speech sub-toggle is on ([SplitAudioSettings.anySpeechEnabled]),
+  /// independently. Only for a mode that supports splits (cycling has no
   /// split concept — D3).
   void _playActivityStartedCue() {
     final settings = _audioSettings;
@@ -457,8 +466,25 @@ class LiveRunController extends Notifier<LiveRunState> {
 
     final audio = ref.read(splitAudioServiceProvider);
     if (settings.anyBeepEnabled) unawaited(audio.playActivityStarted());
-    if (settings.anySpeechEnabled) unawaited(audio.speak('Starting activity.'));
+    if (settings.anySpeechEnabled) {
+      final split = _firstSplitInfo(_splitPlan!);
+      unawaited(audio.speak(targetAnnouncement(split, _announcementUnit)));
+    }
   }
+
+  /// Split 1's [CurrentSplitInfo] as [plan] defines it — the same shape
+  /// [MetricsEngine] would eventually stamp into [LiveMetrics.currentSplit]
+  /// once a GPS point arrives, computed directly from the plan instead for
+  /// the immediate start-of-activity cue (see [_playActivityStartedCue]).
+  static CurrentSplitInfo _firstSplitInfo(SplitPlan plan) => CurrentSplitInfo(
+    index: 1,
+    plannedCount: plan.plannedCount,
+    sizeKind: plan.base.kind == SplitKind.timeMin
+        ? SplitSizeKind.durationSeconds
+        : SplitSizeKind.distanceMeters,
+    size: plan.sizeOf(0),
+    targetSpeedMps: plan.targetOf(0),
+  );
 
   /// Detects and plays a split audio cue (issue #125) for this tick, if any
   /// — see domain/tracking/split_audio_cue.dart for the transition logic
@@ -480,8 +506,8 @@ class LiveRunController extends Notifier<LiveRunState> {
     switch (cue.kind) {
       case SplitAudioCueKind.splitChanged:
         if (settings.beepOnSplitChange) unawaited(audio.playSplitChanged());
-        if (settings.announceSplitStats) {
-          final phrase = splitStatsAnnouncement(cue, _announcementUnit);
+        if (settings.announceSplitTarget) {
+          final phrase = splitStartAnnouncement(cue, _announcementUnit);
           if (phrase != null) unawaited(audio.speak(phrase));
         }
       case SplitAudioCueKind.verdict:

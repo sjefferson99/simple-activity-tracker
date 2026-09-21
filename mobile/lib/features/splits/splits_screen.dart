@@ -108,21 +108,21 @@ class _AudioCuesSection extends ConsumerWidget {
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          title: const Text('Announce split stats'),
+          title: const Text('Announce current split target'),
           subtitle: const Text(
-            'Speak each split\'s duration and average pace/speed once it '
-            'completes.',
+            'Speak the target pace/speed whenever a split starts, including '
+            'the first on Start — "No target" with none set.',
           ),
-          value: settings.announceSplitStats,
+          value: settings.announceSplitTarget,
           onChanged: (value) =>
-              notifier.update(settings.copyWith(announceSplitStats: value)),
+              notifier.update(settings.copyWith(announceSplitTarget: value)),
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('Announce pace correction'),
           subtitle: const Text(
-            'Speak too-fast/too-slow and by how much, or "back on target" '
-            '— only fires for a split with a target set.',
+            'Speak too-fast/too-slow, by how much, and the target — or '
+            '"back on target" — only fires for a split with a target set.',
           ),
           value: settings.announceVerdictCorrection,
           onChanged: (value) => notifier.update(

@@ -80,7 +80,9 @@ flutter:
   # Split audio cue tones (issue #125) — see assets/audio/README.md for how
   # they were generated.
   assets:
-    - assets/audio/beep_short.wav
+    - assets/audio/beep_single.wav
+    - assets/audio/beep_double.wav
+    - assets/audio/beep_triple.wav
     - assets/audio/beep_long.wav
 
   # An image asset can refer to one or more resolution-specific "variants", see
