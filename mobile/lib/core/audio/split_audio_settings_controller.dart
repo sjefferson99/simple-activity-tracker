@@ -33,7 +33,7 @@ class SplitAudioSettingsController extends Notifier<SplitAudioSettings> {
   // Real on-device bug (2026-09-21): a cold app launch's very first Start
   // tap could beat _load()'s async flutter_secure_storage read, so
   // LiveRunController.start()'s ref.read(...) captured the stale
-  // SplitAudioSettings.defaultSettings (enabled: false) and — per its own
+  // SplitAudioSettings.defaultSettings (every toggle off) and — per its own
   // "fixed for the run's duration" contract, same as _activityMode/
   // _splitPlan — stayed silently off for that entire run regardless of what
   // was actually persisted. Invisible on a warm app (plenty of time passes

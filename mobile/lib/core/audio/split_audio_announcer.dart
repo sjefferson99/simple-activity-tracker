@@ -1,5 +1,6 @@
 import '../../domain/models/current_split_info.dart';
 import '../../domain/tracking/split_audio_cue.dart';
+import '../../domain/tracking/split_target.dart';
 import '../units/units.dart';
 
 /// Builds the spoken phrase announcing a split's target, e.g. "Target 5
@@ -54,9 +55,14 @@ String? splitVerdictAnnouncement(SplitAudioCue cue, SpeedUnit unit) {
   final avg = cue.avgSpeedMps;
   if (target == null || avg == null) return null;
 
-  final delta = speakSpeedDelta(avg, target, unit);
-  if (delta == 'back on target') return 'Back on target.';
+  // Checked against cue.verdict directly, not by string-matching
+  // speakSpeedDelta's "back on target" return value — that string is meant
+  // for concatenating into the too-fast/too-slow phrase below, not as an
+  // API contract callers pattern-match on; cue.verdict is the actual typed
+  // source of truth for which case this is.
+  if (cue.verdict == SplitVerdict.onTarget) return 'Back on target.';
 
+  final delta = speakSpeedDelta(avg, target, unit);
   final noun = unit.isPace ? 'Pace' : 'Speed';
   final targetSpeech = speakSpeedOrPace(target, unit);
   return '$noun is $delta, target ${unit.isPace ? 'pace' : 'speed'} is $targetSpeech.';
