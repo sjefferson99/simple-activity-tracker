@@ -7,6 +7,9 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:uuid/uuid.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../../core/audio/split_audio_announcer.dart';
+import '../../core/audio/split_audio_service.dart';
+import '../../core/audio/split_audio_settings_controller.dart';
 import '../../core/files/run_export_service.dart';
 import '../../core/files/run_file_paths.dart';
 import '../../core/files/run_gpx_log.dart';
@@ -18,7 +21,7 @@ import '../../core/sync/file_run_store.dart';
 import '../../core/sync/sync_service.dart';
 import '../../core/tracking/activity_mode_controller.dart';
 import '../../core/tracking/split_plan_controller.dart';
-import '../../core/units/units.dart' show DistanceUnit;
+import '../../core/units/units.dart' show DistanceUnit, SpeedUnit;
 import '../../domain/models/live_metrics.dart';
 import '../../domain/models/run_record.dart';
 import '../../domain/models/run_summary.dart';
@@ -29,6 +32,8 @@ import '../../domain/tracking/metrics_engine.dart';
 import '../../domain/tracking/display_speed_window.dart';
 import '../../domain/tracking/run_clock.dart';
 import '../../domain/tracking/run_phase.dart';
+import '../../domain/tracking/split_audio_cue.dart';
+import '../../domain/tracking/split_audio_settings.dart';
 import '../../domain/tracking/split_plan.dart';
 import 'live_run_state.dart';
 
@@ -79,6 +84,13 @@ class LiveRunController extends Notifier<LiveRunState> {
   ActivityMode? _activityMode;
   SplitPlan? _splitPlan;
   String? _cachedAppVersion;
+
+  // Split audio cues (issue #125): the previous tick's metrics, diffed
+  // against the current tick's inside _emitActive to detect a split-change
+  // or verdict-change transition. Reset to null at the start of every run so
+  // a cue can never fire comparing across two different runs.
+  LiveMetrics? _previousMetricsForAudio;
+  SplitAudioSettings? _audioSettings;
 
   // Bumped every time a run starts. stop() closes over the token for the
   // run it's finishing, so a slow export that resolves after the user has
@@ -148,6 +160,19 @@ class LiveRunController extends Notifier<LiveRunState> {
     // the toggle may have moved on by then.
     _activityMode = ref.read(activityModeControllerProvider);
     _splitPlan = ref.read(splitPlanControllerProvider);
+    // Fixed for the run's duration, same rationale as _activityMode/
+    // _splitPlan above — a mid-run settings change on the Splits screen
+    // (already possible while paused) can't retroactively change what an
+    // in-progress run announces. Unlike _activityMode/_splitPlan, this
+    // specifically awaits the controller's load first (ensureLoaded) rather
+    // than a bare ref.read — a stale-default race here means "silently no
+    // audio for the whole run" rather than a merely-outdated-but-reasonable
+    // fallback, and was a real on-device bug on a cold app launch's first
+    // Start tap (see SplitAudioSettingsController's own doc).
+    await ref.read(splitAudioSettingsControllerProvider.notifier).ensureLoaded();
+    _audioSettings = ref.read(splitAudioSettingsControllerProvider);
+    _previousMetricsForAudio = null;
+    _playActivityStartedCue();
     _metricsEngine = MetricsEngine(
       mode: _activityMode!,
       splitPlan: _splitPlan!,
@@ -253,6 +278,8 @@ class LiveRunController extends Notifier<LiveRunState> {
     _runClock = null;
     _activityMode = null;
     _splitPlan = null;
+    _audioSettings = null;
+    _previousMetricsForAudio = null;
 
     state = LiveRunFinished(
       metrics: metrics,
@@ -385,11 +412,12 @@ class LiveRunController extends Notifier<LiveRunState> {
         ? (state as LiveRunActive).accuracyMeters
         : 0.0;
 
+    final metrics = _currentMetrics();
     state = LiveRunActive(
       phase: phase,
       speedMps: speedMps,
       accuracyMeters: accuracyMeters ?? previousAccuracy,
-      metrics: _currentMetrics(),
+      metrics: metrics,
       // Fixed for the run's whole duration (see start()); _activityMode is
       // only ever null before a run has started, at which point nothing
       // reaches LiveRunActive.
@@ -397,5 +425,87 @@ class LiveRunController extends Notifier<LiveRunState> {
       distanceUnit: _splitPlan?.base.effectiveDistanceUnit ?? DistanceUnit.km,
       prefersPace: _splitPlan?.targetsAsPace ?? true,
     );
+
+    // Only while genuinely tracking (not paused/acquiring) — matches the
+    // fact that _onSample already returns early on pause and _onTick only
+    // fires during RunPhase.tracking, but stated explicitly here too since
+    // this method is the shared path for both and a future third caller
+    // must not accidentally start firing cues during a pause.
+    if (phase == RunPhase.tracking) {
+      _processAudioCue(metrics);
+    }
+    _previousMetricsForAudio = metrics;
+  }
+
+  /// A beep and/or "Starting activity" TTS the moment Start is tapped (issue
+  /// #125 follow-up) — fires immediately, independent of GPS/acquiring
+  /// state, so the user can confirm their audio/volume/routing works
+  /// *before* relying on it during the run. Split-changed/verdict cues may
+  /// not fire for a while (or at all indoors with no GPS — see the real bug
+  /// this was added after), so waiting for any of that would defeat the
+  /// point. There is no separate master toggle (removed 2026-09-21) — the
+  /// beep plays if either beep sub-toggle is on ([SplitAudioSettings.anyBeepEnabled]),
+  /// the TTS speaks if either speech sub-toggle is on
+  /// ([SplitAudioSettings.anySpeechEnabled]), independently, so the start
+  /// cue previews exactly whichever pieces are actually going to fire
+  /// during the run. Only for a mode that supports splits (cycling has no
+  /// split concept — D3).
+  void _playActivityStartedCue() {
+    final settings = _audioSettings;
+    if (settings == null || !settings.anyEnabled) return;
+    if (_activityMode?.supportsSplits != true) return;
+
+    final audio = ref.read(splitAudioServiceProvider);
+    if (settings.anyBeepEnabled) unawaited(audio.playActivityStarted());
+    if (settings.anySpeechEnabled) unawaited(audio.speak('Starting activity.'));
+  }
+
+  /// Detects and plays a split audio cue (issue #125) for this tick, if any
+  /// — see domain/tracking/split_audio_cue.dart for the transition logic
+  /// this is built on. No-ops entirely for cycling (no split concept there,
+  /// same visibility boundary as the split tiles — see
+  /// ActivityMode.supportsSplits) or with every audio toggle off.
+  void _processAudioCue(LiveMetrics metrics) {
+    final settings = _audioSettings;
+    if (settings == null || !settings.anyEnabled) return;
+    if (_activityMode?.supportsSplits != true) return;
+
+    final cue = detectSplitAudioCue(
+      previous: _previousMetricsForAudio,
+      current: metrics,
+    );
+    if (cue == null) return;
+
+    final audio = ref.read(splitAudioServiceProvider);
+    switch (cue.kind) {
+      case SplitAudioCueKind.splitChanged:
+        if (settings.beepOnSplitChange) unawaited(audio.playSplitChanged());
+        if (settings.announceSplitStats) {
+          final phrase = splitStatsAnnouncement(cue, _announcementUnit);
+          if (phrase != null) unawaited(audio.speak(phrase));
+        }
+      case SplitAudioCueKind.verdict:
+        if (settings.beepOnVerdictChange) {
+          unawaited(audio.playVerdict(cue.verdict!));
+        }
+        if (settings.announceVerdictCorrection) {
+          final phrase = splitVerdictAnnouncement(cue, _announcementUnit);
+          if (phrase != null) unawaited(audio.speak(phrase));
+        }
+    }
+  }
+
+  /// The unit spoken announcements use pace vs speed in — the run's
+  /// pace-or-speed preference (same source as the split tiles' target
+  /// display), not whatever the live screen's speed/pace toggle happens to
+  /// be showing at this instant. That toggle is purely local UI state the
+  /// controller doesn't know about (see `_SpeedUnitNotifier` in
+  /// live_run_screen.dart) — using it here would make spoken audio follow a
+  /// tap on an unrelated tile, which reads as arbitrary rather than a
+  /// deliberate setting.
+  SpeedUnit get _announcementUnit {
+    final distanceUnit = _splitPlan?.base.effectiveDistanceUnit ?? DistanceUnit.km;
+    final speedFirst = SpeedUnit.initialFor(distanceUnit);
+    return (_splitPlan?.targetsAsPace ?? true) ? speedFirst.toggled : speedFirst;
   }
 }

@@ -276,6 +276,98 @@ void main() {
     });
   });
 
+  group('speakDuration', () {
+    test('under a minute speaks seconds only', () {
+      expect(speakDuration(const Duration(seconds: 12)), '12 seconds');
+    });
+
+    test('exactly a whole number of minutes omits "0 seconds"', () {
+      expect(speakDuration(const Duration(minutes: 4)), '4 minutes');
+    });
+
+    test('singular "1 minute" for exactly one minute', () {
+      expect(speakDuration(const Duration(minutes: 1)), '1 minute');
+    });
+
+    test('minutes and seconds together', () {
+      expect(
+        speakDuration(const Duration(minutes: 4, seconds: 12)),
+        '4 minutes 12 seconds',
+      );
+    });
+  });
+
+  group('speakSpeedOrPace', () {
+    test('returns null for null input', () {
+      expect(speakSpeedOrPace(null, SpeedUnit.minKm), isNull);
+    });
+
+    test('pace km speaks minutes/seconds per kilometre', () {
+      // 5:30/km.
+      final mps = 1000 / 330;
+      expect(
+        speakSpeedOrPace(mps, SpeedUnit.minKm),
+        '5 minutes 30 per kilometre',
+      );
+    });
+
+    test('pace mi speaks minutes/seconds per mile', () {
+      final mps = 1609.344 / 330;
+      expect(
+        speakSpeedOrPace(mps, SpeedUnit.minMi),
+        '5 minutes 30 per mile',
+      );
+    });
+
+    test('speed km/h speaks kilometres per hour with "point"', () {
+      expect(
+        speakSpeedOrPace(5.0, SpeedUnit.kmh),
+        '18 point 0 kilometres per hour',
+      );
+    });
+
+    test('speed mph speaks miles per hour with "point"', () {
+      final mps = 10 * 1609.344 / 3600; // 10 mph
+      expect(speakSpeedOrPace(mps, SpeedUnit.mph), '10 point 0 miles per hour');
+    });
+  });
+
+  group('speakSpeedDelta', () {
+    final targetMps = 1000 / 300; // 5:00/km
+
+    test('reports "back on target" within tolerance', () {
+      expect(speakSpeedDelta(targetMps, targetMps, SpeedUnit.minKm), 'back on target');
+    });
+
+    test('pace: too fast', () {
+      final fasterMps = targetMps * 1.10;
+      final phrase = speakSpeedDelta(fasterMps, targetMps, SpeedUnit.minKm);
+      expect(phrase, contains('too fast'));
+      expect(phrase, contains('per kilometre'));
+    });
+
+    test('pace: too slow', () {
+      final slowerMps = targetMps * 0.90;
+      final phrase = speakSpeedDelta(slowerMps, targetMps, SpeedUnit.minKm);
+      expect(phrase, contains('too slow'));
+    });
+
+    test('speed: too fast speaks kilometres per hour', () {
+      final fasterMps = targetMps * 1.10;
+      final phrase = speakSpeedDelta(fasterMps, targetMps, SpeedUnit.kmh);
+      expect(phrase, contains('too fast'));
+      expect(phrase, contains('kilometres per hour'));
+    });
+
+    test('speed: too slow speaks miles per hour for mph unit', () {
+      final targetMi = 1609.344 / 300;
+      final slowerMps = targetMi * 0.90;
+      final phrase = speakSpeedDelta(slowerMps, targetMi, SpeedUnit.mph);
+      expect(phrase, contains('too slow'));
+      expect(phrase, contains('miles per hour'));
+    });
+  });
+
   group('formatSplitSizeMeters', () {
     test('shows whole meters under 1km for a km-kind split', () {
       expect(formatSplitSizeMeters(400, DistanceUnit.km), '400 m');
