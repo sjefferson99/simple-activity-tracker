@@ -250,6 +250,78 @@ def test_geo_filter_never_matches_null_coordinates(app_client, auth_headers, sam
     assert result.total == 0
 
 
+def test_activity_type_filter_restricts_to_the_given_type(
+    app_client, auth_headers, sample_gpx_bytes
+):
+    """Issue #129: activity_type is an exact-match filter, distinct from the
+    other filters above which all use ranges/proximity/substrings."""
+    upload_sample_activity(
+        app_client,
+        auth_headers,
+        sample_gpx_bytes,
+        client_activity_id="66666666-6666-6666-6666-000000000000",
+        activity_type="running",
+    )
+    upload_sample_activity(
+        app_client,
+        auth_headers,
+        sample_gpx_bytes,
+        client_activity_id="66666666-6666-6666-6666-000000000001",
+        activity_type="walking",
+    )
+    upload_sample_activity(
+        app_client,
+        auth_headers,
+        sample_gpx_bytes,
+        client_activity_id="66666666-6666-6666-6666-000000000002",
+        activity_type="cycling",
+    )
+
+    with get_session_factory()() as session:
+        repo = SqlAlchemyActivityRepository(session)
+        result = repo.list_for_user_page(
+            _user_id(session),
+            page=1,
+            per_page=20,
+            sort="date",
+            direction="desc",
+            filters=ActivityListFilters(activity_type="walking"),
+        )
+
+    assert result.total == 1
+    assert result.activities[0][0].activity_type == "walking"
+
+
+def test_no_activity_type_filter_matches_every_type(app_client, auth_headers, sample_gpx_bytes):
+    upload_sample_activity(
+        app_client,
+        auth_headers,
+        sample_gpx_bytes,
+        client_activity_id="77777777-7777-7777-7777-000000000000",
+        activity_type="running",
+    )
+    upload_sample_activity(
+        app_client,
+        auth_headers,
+        sample_gpx_bytes,
+        client_activity_id="77777777-7777-7777-7777-000000000001",
+        activity_type="cycling",
+    )
+
+    with get_session_factory()() as session:
+        repo = SqlAlchemyActivityRepository(session)
+        result = repo.list_for_user_page(
+            _user_id(session),
+            page=1,
+            per_page=20,
+            sort="date",
+            direction="desc",
+            filters=ActivityListFilters(),
+        )
+
+    assert result.total == 2
+
+
 def _user_id(session) -> str:
     from app.models.user import User
 

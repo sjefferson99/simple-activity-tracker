@@ -672,6 +672,47 @@ def test_activity_distance_filter_non_numeric_shows_notice(
     assert "activity-list-item" in response.text
 
 
+def test_activity_type_filter_shows_only_the_selected_type(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """Issue #129: the Type filter restricts the list to exactly one of
+    running/cycling/walking."""
+    upload_sample_activity(
+        app_client,
+        auth_headers,
+        sample_gpx_bytes,
+        client_activity_id="88888888-8888-8888-8888-000000000000",
+        activity_type="running",
+    )
+    upload_sample_activity(
+        app_client,
+        auth_headers,
+        sample_gpx_bytes,
+        client_activity_id="88888888-8888-8888-8888-000000000001",
+        activity_type="walking",
+    )
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"activity_type": "walking"})
+    assert response.status_code == 200
+    assert response.text.count("activity-list-item") == 1
+    assert "Walk" in response.text
+
+
+def test_activity_type_filter_unrecognized_value_is_ignored(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    """A tampered/stale activity_type in the URL is treated as "no filter",
+    same as an unrecognized geo mode — never a 422 for something a human
+    never typed."""
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes)
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"activity_type": "swimming"})
+    assert response.status_code == 200
+    assert "activity-list-item" in response.text
+
+
 def test_activity_geo_filter_out_of_range_latitude_shows_notice(
     app_client, sample_gpx_bytes, auth_headers
 ):
@@ -732,6 +773,17 @@ def test_activity_geo_filter_params_are_preserved_in_sort_and_page_links(
     assert "lon=-0.1" in response.text
     assert "radius_km=2" in response.text
     assert "geo=start" in response.text
+
+
+def test_activity_type_filter_is_preserved_in_sort_and_page_links(
+    app_client, sample_gpx_bytes, auth_headers
+):
+    upload_sample_activity(app_client, auth_headers, sample_gpx_bytes, activity_type="walking")
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/", params={"activity_type": "walking"})
+    assert response.status_code == 200
+    assert "activity_type=walking" in response.text
 
 
 def test_activity_geo_filter_finds_activity_by_start_point(
@@ -1325,6 +1377,33 @@ def test_web_export_filtered_by_distance(app_client, sample_gpx_bytes, auth_head
     archive = zipfile.ZipFile(BytesIO(response.content))
     manifest = json.loads(archive.read("manifest.json"))
     assert len(manifest["activities"]) == 0
+
+
+def test_web_export_filtered_by_activity_type(app_client, sample_gpx_bytes, auth_headers):
+    """Issue #129: exporting with a Type filter set exports only that type,
+    matching what the list page shows."""
+    walk = upload_sample_activity(
+        app_client,
+        auth_headers,
+        sample_gpx_bytes,
+        client_activity_id="99999999-9999-9999-9999-000000000000",
+        activity_type="walking",
+    ).json()
+    upload_sample_activity(
+        app_client,
+        auth_headers,
+        sample_gpx_bytes,
+        client_activity_id="99999999-9999-9999-9999-000000000001",
+        activity_type="running",
+    )
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+
+    response = app_client.get("/export/filtered", params={"activity_type": "walking"})
+    assert response.status_code == 200
+    archive = zipfile.ZipFile(BytesIO(response.content))
+    manifest = json.loads(archive.read("manifest.json"))
+    assert len(manifest["activities"]) == 1
+    assert manifest["activities"][0]["client_activity_id"] == walk["client_activity_id"]
 
 
 def test_web_export_filtered_no_filter_exports_everything(

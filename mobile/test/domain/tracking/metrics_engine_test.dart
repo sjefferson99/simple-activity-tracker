@@ -993,6 +993,41 @@ void main() {
     });
   });
 
+  group('ActivityMode.walking shares running\'s plausibility thresholds', () {
+    test('accepts and rejects segments identically to running mode', () {
+      // Issue #129: walking is a distinct tag from running, but deliberately
+      // has no behavioral difference — same plausibility limits.
+      final runningEngine = MetricsEngine();
+      final walkingEngine = MetricsEngine(mode: ActivityMode.walking);
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      for (final engine in [runningEngine, walkingEngine]) {
+        engine.addPoint(_pointAtMeters(0, start));
+        // 5 m/s (18 km/h) is plausible for both.
+        engine.addPoint(
+          _pointAtMeters(50, start.add(const Duration(seconds: 10))),
+        );
+      }
+
+      expect(walkingEngine.metrics.distanceMeters, closeTo(50, 1));
+      expect(
+        walkingEngine.metrics.distanceMeters,
+        runningEngine.metrics.distanceMeters,
+      );
+    });
+
+    test('rejects a segment too fast for running mode, same as running', () {
+      // 20 m/s exceeds running/walking's 12 m/s cap.
+      final walkingEngine = MetricsEngine(mode: ActivityMode.walking);
+      final start = DateTime(2026, 1, 1, 0, 0, 0);
+      walkingEngine.addPoint(_pointAtMeters(0, start));
+      walkingEngine.addPoint(
+        _pointAtMeters(200, start.add(const Duration(seconds: 10))),
+      );
+
+      expect(walkingEngine.metrics.distanceMeters, 0);
+    });
+  });
+
   group('resetSegmentAnchor', () {
     test('prevents a pause gap from being counted as movement', () {
       final engine = MetricsEngine();

@@ -44,7 +44,7 @@ class ActivitySummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     client_activity_id: str
-    activity_type: Literal["running", "cycling"]
+    activity_type: Literal["running", "cycling", "walking"]
     started_at: datetime
     ended_at: datetime
     moving_seconds: float = Field(ge=0, allow_inf_nan=False)
@@ -134,7 +134,7 @@ class AddTagRequest(BaseModel):
 
 class ActivityListItem(BaseModel):
     id: str
-    activity_type: Literal["running", "cycling"]
+    activity_type: Literal["running", "cycling", "walking"]
     started_at: datetime
     ended_at: datetime
     title: str | None
@@ -170,7 +170,7 @@ class SplitPlanOut(BaseModel):
 class ActivityOut(BaseModel):
     id: str
     client_activity_id: str
-    activity_type: Literal["running", "cycling"]
+    activity_type: Literal["running", "cycling", "walking"]
     started_at: datetime
     ended_at: datetime
     title: str | None
@@ -218,7 +218,7 @@ class ExportManifestEntry(BaseModel):
     created_at/updated_at) since import re-derives all of those."""
 
     client_activity_id: str
-    activity_type: Literal["running", "cycling"]
+    activity_type: Literal["running", "cycling", "walking"]
     started_at: datetime
     ended_at: datetime
     title: str | None

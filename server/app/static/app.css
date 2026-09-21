@@ -242,8 +242,9 @@ button.secondary:hover, .button.secondary:hover { background: var(--bg); }
 }
 .badge.admin { background: rgba(15, 118, 110, 0.15); color: var(--accent-hover); }
 .badge.disabled { background: rgba(194, 65, 12, 0.15); color: var(--danger); }
-.badge.type-running { background: rgba(15, 118, 110, 0.15); color: var(--accent-hover); }
+.badge.type-running { background: rgba(29, 78, 216, 0.15); color: #1d4ed8; }
 .badge.type-cycling { background: rgba(21, 128, 61, 0.15); color: var(--ok); }
+.badge.type-walking { background: rgba(180, 83, 9, 0.15); color: #b45309; }
 
 .tag-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
 .tag-remove {
@@ -304,7 +305,8 @@ button.secondary:hover, .button.secondary:hover { background: var(--bg); }
   font-size: 0.85rem;
   white-space: nowrap;
 }
-.activity-search-row input {
+.activity-search-row input,
+.activity-search-row select {
   margin-bottom: 0;
   padding: 0.35rem 0.6rem;
   font-size: 0.85rem;
@@ -313,6 +315,7 @@ button.secondary:hover, .button.secondary:hover { background: var(--bg); }
 #activity-search-min-km, #activity-search-max-km { width: 7rem; }
 #activity-search-lat, #activity-search-lon { width: 7rem; }
 #activity-search-radius-km { width: 5rem; }
+#activity-search-type { width: 7rem; }
 .activity-search-actions {
   display: flex;
   gap: 0.75rem;

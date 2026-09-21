@@ -46,6 +46,7 @@ from app.repositories.activities import (
     ActivityListFilters,
     ActivityListGeoMode,
     ActivityListSort,
+    ActivityListType,
     SqlAlchemyActivityRepository,
 )
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
@@ -121,6 +122,7 @@ _MIN_RADIUS_KM = 0.05
 _MAX_RADIUS_KM = 100.0
 _DEFAULT_RADIUS_KM = 1.0
 _GEO_MODES = ("start", "finish", "either", "both")
+_ACTIVITY_TYPES = ("running", "cycling", "walking")
 
 
 def _parse_per_page(raw: str) -> int | None:
@@ -229,11 +231,12 @@ def _parse_activity_filters(
     lon: str,
     radius_km: str,
     geo: str,
+    activity_type: str,
 ) -> tuple[str, ActivityListFilters, list[str]]:
     """Shared by `activity_list` and `export_filtered` (issue #111) — both
-    need to turn the same six raw query params into an `ActivityListFilters`
-    the repository understands, so the export button reuses exactly the
-    list page's own filter semantics rather than a second, divergent copy."""
+    need to turn the same raw query params into an `ActivityListFilters` the
+    repository understands, so the export button reuses exactly the list
+    page's own filter semantics rather than a second, divergent copy."""
     q = q.strip()[:_MAX_QUERY_CHARS]
     filter_errors: list[str] = []
     min_m = _parse_km(min_km, field_label="Minimum distance", errors=filter_errors)
@@ -246,6 +249,14 @@ def _parse_activity_filters(
         lat=lat, lon=lon, radius_km=radius_km, geo=geo, errors=filter_errors
     )
 
+    # A fixed set of <select> values, same treatment as `geo` above — an
+    # unrecognized value can only come from a tampered URL, so it's treated
+    # as "no filter" rather than surfacing an error for something a human
+    # never typed.
+    activity_type_value: ActivityListType | None = (
+        activity_type if activity_type in _ACTIVITY_TYPES else None  # type: ignore[assignment]
+    )
+
     filters = ActivityListFilters(
         text=q or None,
         min_m=min_m,
@@ -254,6 +265,7 @@ def _parse_activity_filters(
         lon=lon_value,
         radius_m=radius_m,
         geo=geo_mode,
+        activity_type=activity_type_value,
     )
     return q, filters, filter_errors
 
@@ -274,6 +286,7 @@ def activity_list(
     lon: str = "",
     radius_km: str = "",
     geo: str = "",
+    activity_type: str = "",
 ) -> Response:
     # Every param is read as a plain str and validated/defaulted here rather
     # than via FastAPI's own type/Literal coercion, so a tampered or stale
@@ -289,7 +302,14 @@ def activity_list(
     dir_value: ActivityListDirection = "asc" if dir == "asc" else "desc"
 
     q, filters, filter_errors = _parse_activity_filters(
-        q=q, min_km=min_km, max_km=max_km, lat=lat, lon=lon, radius_km=radius_km, geo=geo
+        q=q,
+        min_km=min_km,
+        max_km=max_km,
+        lat=lat,
+        lon=lon,
+        radius_km=radius_km,
+        geo=geo,
+        activity_type=activity_type,
     )
     geo_mode = filters.geo
 
@@ -319,6 +339,7 @@ def activity_list(
         lon=lon.strip(),
         radius_km=radius_km.strip(),
         geo=geo_mode,
+        activity_type=filters.activity_type or "",
     )
     context = {
         "user": user,
@@ -365,7 +386,7 @@ def upload_gpx(
     `.get(...)` fallback (see docs/SERVER-PRODUCTION-PLAN.md R6/R7). device_name
     is best-effort guessed from the GPX file's own creator/author metadata and
     is editable afterward like title/notes."""
-    if activity_type not in ("running", "cycling"):
+    if activity_type not in ("running", "cycling", "walking"):
         return templates.TemplateResponse(
             request,
             "partials/upload_result.html",
@@ -780,18 +801,27 @@ def export_filtered(
     lon: str = "",
     radius_km: str = "",
     geo: str = "",
+    activity_type: str = "",
 ) -> Response:
     """Export every activity matching the activity list's current search/
-    distance/location filter (issue #111) — a plain GET for the same reason
-    as `export_activities` above (real browser download, no CSRF header).
-    Reuses `_parse_activity_filters`, the exact parsing `activity_list` uses
-    to build the filter shown on screen, so this always exports what the
-    list page is currently showing. Sort/page/per_page are irrelevant here:
-    every matching activity is included regardless of which page it would
-    land on, so `list_for_user_page` is called with `per_page=None` to get
-    them all in one query rather than exporting just the visible page."""
+    distance/location/type filter (issue #111, extended for #129). A plain
+    GET for the same reason as `export_activities` above (real browser
+    download, no CSRF header). Reuses `_parse_activity_filters`, the exact
+    parsing `activity_list` uses to build the filter shown on screen, so
+    this always exports what the list page is currently showing. Sort/page/
+    per_page are irrelevant here: every matching activity is included
+    regardless of which page it would land on, so `list_for_user_page` is
+    called with `per_page=None` to get them all in one query rather than
+    exporting just the visible page."""
     _q, filters, _filter_errors = _parse_activity_filters(
-        q=q, min_km=min_km, max_km=max_km, lat=lat, lon=lon, radius_km=radius_km, geo=geo
+        q=q,
+        min_km=min_km,
+        max_km=max_km,
+        lat=lat,
+        lon=lon,
+        radius_km=radius_km,
+        geo=geo,
+        activity_type=activity_type,
     )
     activities_repo = SqlAlchemyActivityRepository(session)
     result = activities_repo.list_for_user_page(

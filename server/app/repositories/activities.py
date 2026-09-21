@@ -17,6 +17,7 @@ from app.models.tag import Tag, activity_tags
 ActivityListSort = Literal["date", "distance"]
 ActivityListDirection = Literal["asc", "desc"]
 ActivityListGeoMode = Literal["start", "finish", "either", "both"]
+ActivityListType = Literal["running", "cycling", "walking"]
 
 # LIKE needs its wildcard/escape characters escaped in user-supplied text, or
 # a search for a literal "%" or "_" would behave as a wildcard instead —
@@ -44,7 +45,9 @@ class ActivityListFilters:
     denormalized distance the list already sorts and displays (issue #75).
     `lat`/`lon`/`radius_m`/`geo` filter by proximity to an activity's start
     and/or finish coordinates (see ActivityAnalysis.start_lat etc., added in
-    a companion PR) — only applied when both `lat` and `lon` are set."""
+    a companion PR) — only applied when both `lat` and `lon` are set.
+    `activity_type` restricts to exactly one of running/cycling/walking
+    (issue #129) — None means "any type", not "none"."""
 
     text: str | None = None
     min_m: float | None = None
@@ -53,6 +56,7 @@ class ActivityListFilters:
     lon: float | None = None
     radius_m: float | None = None
     geo: ActivityListGeoMode = "either"
+    activity_type: ActivityListType | None = None
 
     def is_active(self) -> bool:
         return (
@@ -60,6 +64,7 @@ class ActivityListFilters:
             or self.min_m is not None
             or self.max_m is not None
             or (self.lat is not None and self.lon is not None)
+            or self.activity_type is not None
         )
 
 
@@ -271,6 +276,9 @@ class SqlAlchemyActivityRepository:
             stmt = stmt.where(distance >= filters.min_m)
         if filters.max_m is not None:
             stmt = stmt.where(distance <= filters.max_m)
+
+        if filters.activity_type is not None:
+            stmt = stmt.where(Activity.activity_type == filters.activity_type)
 
         if filters.lat is not None and filters.lon is not None and filters.radius_m is not None:
             stmt = stmt.where(self._near_clause(filters))

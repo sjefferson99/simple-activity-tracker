@@ -78,6 +78,7 @@ class _ActivityModeToggle extends ConsumerWidget {
     return SegmentedButton<ActivityMode>(
       segments: const [
         ButtonSegment(value: ActivityMode.running, label: Text('Run')),
+        ButtonSegment(value: ActivityMode.walking, label: Text('Walk')),
         ButtonSegment(value: ActivityMode.cycling, label: Text('Cycle')),
       ],
       selected: {mode},
@@ -889,9 +890,11 @@ class _Controls extends StatelessWidget {
                     minimumSize: const Size(120, 56),
                   ),
                   child: Text(
-                    activityMode == ActivityMode.cycling
-                        ? 'New ride'
-                        : 'New run',
+                    switch (activityMode) {
+                      ActivityMode.cycling => 'New ride',
+                      ActivityMode.walking => 'New walk',
+                      ActivityMode.running => 'New run',
+                    },
                   ),
                 ),
               ],

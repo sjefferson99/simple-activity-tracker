@@ -7,7 +7,7 @@
 {% block content %}
 
 <div class="card">
-  <h1>{{ activity.title or "Activity" }} <span class="badge type-{{ activity.activity_type }}">{{ "Cycle" if activity.activity_type == "cycling" else "Run" }}</span></h1>
+  <h1>{{ activity.title or "Activity" }} <span class="badge type-{{ activity.activity_type }}">{{ {"cycling": "Cycle", "walking": "Walk"}.get(activity.activity_type, "Run") }}</span></h1>
   <p class="muted"><time datetime="{{ activity.started_at.isoformat() }}" class="local-time" data-format="date-time">{{ activity.started_at.isoformat() }}</time>{% if activity.device_name %} · {{ activity.device_name }}{% endif %}</p>
 
   {% if activity.source_platform != "manual" %}

@@ -40,6 +40,7 @@ class ActivityListQuery:
     lon: str = ""
     radius_km: str = ""
     geo: str = _DEFAULT_GEO
+    activity_type: str = ""
 
     def params(self, **overrides: Any) -> dict[str, str]:
         merged = replace(self, **overrides)
@@ -66,6 +67,8 @@ class ActivityListQuery:
             params["radius_km"] = merged.radius_km
         if merged.geo != _DEFAULT_GEO:
             params["geo"] = merged.geo
+        if merged.activity_type:
+            params["activity_type"] = merged.activity_type
         return params
 
 
