@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/audio/split_audio_settings_controller.dart';
 import '../../core/tracking/split_plan_controller.dart';
 import '../../core/units/units.dart';
 import '../../domain/tracking/split_plan.dart';
@@ -46,9 +47,89 @@ class SplitsScreen extends ConsumerWidget {
               _CustomPlanSection(plan: plan, notifier: notifier)
             else
               _RollingPlanSection(plan: plan, notifier: notifier),
+            const SizedBox(height: 24),
+            const Divider(),
+            const SizedBox(height: 16),
+            const _AudioCuesSection(),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Audio cue toggles (issue #125): a beep on split change, a beep pattern on
+/// a target-verdict change, and optional spoken announcements. Lives here
+/// rather than in a separate screen since it's one more piece of "how a run
+/// is captured/experienced" configuration, same reasoning as every other
+/// section on this screen (see the class doc above).
+///
+/// No separate master on/off (removed 2026-09-21, issue #125 follow-up) —
+/// each toggle below is independently visible and effective; "audio cues
+/// enabled at all" is just whether any of the four is on
+/// ([SplitAudioSettings.anyEnabled]), so a fifth switch that only gated the
+/// other four would have been a step with no real choice behind it.
+class _AudioCuesSection extends ConsumerWidget {
+  const _AudioCuesSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(splitAudioSettingsControllerProvider);
+    final notifier = ref.read(splitAudioSettingsControllerProvider.notifier);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Audio cues', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Text(
+          'Beeps and optional spoken announcements as splits change during a '
+          'run. Not available for cycling, which has no split targets.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Beep on split change'),
+          value: settings.beepOnSplitChange,
+          onChanged: (value) =>
+              notifier.update(settings.copyWith(beepOnSplitChange: value)),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Beep on target correction'),
+          subtitle: const Text(
+            'Two beeps too fast, three too slow, one long beep back on '
+            'target — only fires for a split with a target set.',
+          ),
+          value: settings.beepOnVerdictChange,
+          onChanged: (value) =>
+              notifier.update(settings.copyWith(beepOnVerdictChange: value)),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Announce current split target'),
+          subtitle: const Text(
+            'Speak the target pace/speed whenever a split starts, including '
+            'the first on Start — "No target" with none set.',
+          ),
+          value: settings.announceSplitTarget,
+          onChanged: (value) =>
+              notifier.update(settings.copyWith(announceSplitTarget: value)),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Announce pace correction'),
+          subtitle: const Text(
+            'Speak too-fast/too-slow, by how much, and the target — or '
+            '"back on target" — only fires for a split with a target set.',
+          ),
+          value: settings.announceVerdictCorrection,
+          onChanged: (value) => notifier.update(
+            settings.copyWith(announceVerdictCorrection: value),
+          ),
+        ),
+      ],
     );
   }
 }

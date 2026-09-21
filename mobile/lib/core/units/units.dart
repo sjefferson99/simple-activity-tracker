@@ -301,6 +301,106 @@ String formatActivityDate(DateTime dateTime) {
   return '${dateTime.day} ${_monthNames[dateTime.month - 1]} ${dateTime.year}, $hour:$minute';
 }
 
+/// Speaks a duration as "m:ss" would be spelled out — "4 minutes 12
+/// seconds" (or just "12 seconds" under a minute) — for text-to-speech
+/// (issue #125), which reads a colon-formatted string as nonsense.
+String speakDuration(Duration duration) {
+  final minutes = duration.inMinutes;
+  final seconds = duration.inSeconds.remainder(60);
+  if (minutes <= 0) return '$seconds seconds';
+  final minutePart = minutes == 1 ? '1 minute' : '$minutes minutes';
+  if (seconds == 0) return minutePart;
+  return '$minutePart $seconds seconds';
+}
+
+/// Speaks a pace/speed value for text-to-speech (issue #125) — e.g. "5
+/// minutes 30 per kilometre" or "18 point 0 kilometres per hour". Returns
+/// null when [mps] is null (nothing to say — the caller skips the phrase
+/// entirely rather than speaking "unknown").
+String? speakSpeedOrPace(double? mps, SpeedUnit unit) {
+  if (mps == null) return null;
+  if (unit.isPace) {
+    final paceSec = unit == SpeedUnit.minMi
+        ? paceSecPerMileFromMps(mps)
+        : paceSecPerKmFromMps(mps);
+    if (paceSec == null || !paceSec.isFinite) return null;
+    final totalSeconds = paceSec.round();
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
+    final unitName = unit == SpeedUnit.minMi ? 'mile' : 'kilometre';
+    final minutePart = minutes == 1 ? '1 minute' : '$minutes minutes';
+    return seconds == 0
+        ? '$minutePart per $unitName'
+        : '$minutePart $seconds per $unitName';
+  }
+  final display = unit == SpeedUnit.mph ? mphFromMps(mps) : kmhFromMps(mps);
+  final unitName = unit == SpeedUnit.mph
+      ? 'miles per hour'
+      : 'kilometres per hour';
+  return '${display.toStringAsFixed(1).replaceFirst('.', ' point ')} $unitName';
+}
+
+/// Speaks how far off target [avgMps] is from [targetMps] (issue #125) —
+/// e.g. "2 minutes 10 seconds per kilometre too slow" or "1 point 5 miles
+/// per hour too fast", or "back on target" within tolerance. Mirrors
+/// [formatSpeedDelta]'s direction/tolerance logic exactly, phrased for
+/// speech instead of a compact tile string.
+String speakSpeedDelta(double avgMps, double targetMps, SpeedUnit unit) {
+  const tolerance = 0.05; // mirrors splitTargetTolerance — see formatSpeedDelta.
+  final ratio = avgMps / targetMps;
+  if (ratio >= 1 - tolerance && ratio <= 1 + tolerance) return 'back on target';
+
+  final tooFast = ratio > 1;
+  final direction = tooFast ? 'too fast' : 'too slow';
+  if (unit.isPace) {
+    final avgPaceSec = unit == SpeedUnit.minMi
+        ? paceSecPerMileFromMps(avgMps)
+        : paceSecPerKmFromMps(avgMps);
+    final targetPaceSec = unit == SpeedUnit.minMi
+        ? paceSecPerMileFromMps(targetMps)
+        : paceSecPerKmFromMps(targetMps);
+    if (avgPaceSec == null || targetPaceSec == null) return direction;
+    final deltaSeconds = (avgPaceSec - targetPaceSec).abs().round();
+    final unitName = unit == SpeedUnit.minMi ? 'mile' : 'kilometre';
+    return '${speakDuration(Duration(seconds: deltaSeconds))} per $unitName $direction';
+  } else {
+    final avgDisplay = unit == SpeedUnit.mph ? mphFromMps(avgMps) : kmhFromMps(avgMps);
+    final targetDisplay = unit == SpeedUnit.mph
+        ? mphFromMps(targetMps)
+        : kmhFromMps(targetMps);
+    final delta = (avgDisplay - targetDisplay).abs();
+    final unitName = unit == SpeedUnit.mph
+        ? 'miles per hour'
+        : 'kilometres per hour';
+    return '${delta.toStringAsFixed(1).replaceFirst('.', ' point ')} $unitName $direction';
+  }
+}
+
+/// Speaks a split's size for text-to-speech (issue #125 follow-up) — e.g.
+/// "1 kilometre", "500 metres", "0.5 miles", "1 minute 30 seconds". Mirrors
+/// [formatSplitSizeMeters]/[formatSplitSizeSeconds]'s own unit/threshold
+/// choices, phrased for speech (a spelled-out unit name, no abbreviation,
+/// and [speakDuration] instead of "m:ss" for a time-kind split).
+String speakSplitSize(double sizeMeters, DistanceUnit distanceUnit) {
+  if (distanceUnit == DistanceUnit.mi) {
+    final miles = milesFromMeters(sizeMeters);
+    if (miles < 0.1) {
+      final feet = feetFromMeters(sizeMeters).round();
+      return feet == 1 ? '1 foot' : '$feet feet';
+    }
+    return '${_trimDecimal(miles)} miles';
+  }
+  if (sizeMeters < 1000) {
+    final metres = sizeMeters.round();
+    return metres == 1 ? '1 metre' : '$metres metres';
+  }
+  final km = _trimDecimal(sizeMeters / 1000);
+  return km == '1' ? '1 kilometre' : '$km kilometres';
+}
+
+String speakSplitSizeSeconds(double sizeSeconds) =>
+    speakDuration(Duration(milliseconds: (sizeSeconds * 1000).round()));
+
 /// Formats a target speed ([targetMps]) for display in an editor field —
 /// pace as "m:ss", speed as a plain one-decimal number (no unit suffix,
 /// since the field's own label/segmented control already shows the unit).
