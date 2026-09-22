@@ -8,6 +8,7 @@ import 'dto/activity_list_item_dto.dart';
 import 'dto/analysis_dto.dart';
 import 'dto/login_response_dto.dart';
 import 'dto/run_dto.dart';
+import 'dto/split_config_dto.dart';
 import 'dto/user_dto.dart';
 import 'http_api_client.dart';
 
@@ -70,5 +71,29 @@ abstract class ApiClient {
     required String token,
     String? cursor,
     int limit = 50,
+  });
+
+  /// The signed-in user's saved split configs (issue #126), sorted by name —
+  /// fetched fresh on every call, never cached locally (docs/
+  /// SPLIT-CONFIGS-PLAN.md O3).
+  Future<List<SplitConfigDto>> listSplitConfigs({
+    required String baseUrl,
+    required String token,
+  });
+
+  /// Creates a new saved split config, or — with `overwrite: true` on
+  /// [request] — replaces an existing same-named one in place. Throws
+  /// [ApiRejectedException] with `statusCode == 409` on a name collision
+  /// when not overwriting, so the caller can offer to retry with overwrite.
+  Future<SplitConfigDto> saveSplitConfig({
+    required String baseUrl,
+    required String token,
+    required SplitConfigSaveRequestDto request,
+  });
+
+  Future<void> deleteSplitConfig({
+    required String baseUrl,
+    required String token,
+    required String configId,
   });
 }

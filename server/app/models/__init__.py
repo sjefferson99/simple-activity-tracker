@@ -2,6 +2,7 @@ from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
 from app.models.base import Base
 from app.models.device_token import DeviceToken
+from app.models.split_config import SplitConfig
 from app.models.tag import Tag, activity_tags
 from app.models.user import User
 from app.models.web_session import WebSession
@@ -12,6 +13,7 @@ __all__ = [
     "AnalysisStatus",
     "Base",
     "DeviceToken",
+    "SplitConfig",
     "Tag",
     "User",
     "WebSession",

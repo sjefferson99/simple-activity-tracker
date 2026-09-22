@@ -5,9 +5,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:simple_activity_tracker/core/api/api_exception.dart';
+import 'package:simple_activity_tracker/core/api/dto/split_config_dto.dart';
 import 'package:simple_activity_tracker/core/api/http_api_client.dart';
 import 'package:simple_activity_tracker/domain/models/run_summary.dart';
 import 'package:simple_activity_tracker/domain/tracking/activity_mode.dart';
+import 'package:simple_activity_tracker/domain/tracking/split_plan.dart';
+import 'package:simple_activity_tracker/domain/tracking/split_preference.dart';
 
 const _baseUrl = 'https://runner.example.com';
 
@@ -337,5 +340,193 @@ void main() {
     expect(capturedUrl.queryParameters['cursor'], 'page-2');
     expect(capturedUrl.queryParameters['limit'], '20');
     expect(result.nextCursor, 'next-page');
+  });
+
+  test('listSplitConfigs parses a list of SplitConfigDto', () async {
+    late Uri capturedUrl;
+    final client = HttpApiClient(
+      client: MockClient((request) async {
+        capturedUrl = request.url;
+        return http.Response(
+          jsonEncode({
+            'configs': [
+              {
+                'id': 'c1',
+                'name': '5k tempo',
+                'plan': {
+                  'split_type': 'distance_km',
+                  'split_value': 1,
+                  'rolling_target_mps': 2.5,
+                  'custom_splits': <dynamic>[],
+                  'targets_as': 'pace',
+                },
+                'created_at': '2026-01-01T00:00:00Z',
+                'updated_at': '2026-01-01T00:00:00Z',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+
+    final result = await client.listSplitConfigs(baseUrl: _baseUrl, token: 't');
+
+    expect(capturedUrl.path, '/api/v1/split-configs');
+    expect(result, hasLength(1));
+    expect(result.single.name, '5k tempo');
+    expect(result.single.plan.rollingTargetSpeedMps, 2.5);
+    expect(result.single.plan.base.kind, SplitKind.distanceKm);
+  });
+
+  test('listSplitConfigs parses a custom plan correctly', () async {
+    final client = HttpApiClient(
+      client: MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'configs': [
+              {
+                'id': 'c1',
+                'name': 'Intervals',
+                'plan': {
+                  'split_type': 'time_min',
+                  'split_value': 1,
+                  'rolling_target_mps': null,
+                  'custom_splits': [
+                    [90.0, 4.0],
+                    [60.0, null],
+                  ],
+                  'targets_as': 'speed',
+                },
+                'created_at': '2026-01-01T00:00:00Z',
+                'updated_at': '2026-01-01T00:00:00Z',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+
+    final result = await client.listSplitConfigs(baseUrl: _baseUrl, token: 't');
+    final plan = result.single.plan;
+    expect(plan.isCustom, isTrue);
+    expect(plan.customSplits, hasLength(2));
+    expect(plan.customSplits[0].size, 90.0);
+    expect(plan.customSplits[0].targetSpeedMps, 4.0);
+    expect(plan.customSplits[1].targetSpeedMps, isNull);
+    expect(plan.targetsAsPace, isFalse);
+  });
+
+  test('saveSplitConfig posts the plan JSON and parses the response', () async {
+    late Map<String, dynamic> capturedBody;
+    final client = HttpApiClient(
+      client: MockClient((request) async {
+        capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode({
+            'id': 'c1',
+            'name': 'New config',
+            'plan': capturedBody['plan'],
+            'created_at': '2026-01-01T00:00:00Z',
+            'updated_at': '2026-01-01T00:00:00Z',
+          }),
+          200,
+        );
+      }),
+    );
+
+    final plan = SplitPlan(
+      base: const SplitPreference(kind: SplitKind.distanceKm, value: 1),
+      rollingTargetSpeedMps: 3.0,
+    );
+    final result = await client.saveSplitConfig(
+      baseUrl: _baseUrl,
+      token: 't',
+      request: SplitConfigSaveRequestDto(name: 'New config', plan: plan),
+    );
+
+    expect(capturedBody['name'], 'New config');
+    expect(capturedBody['plan']['split_type'], 'distance_km');
+    expect(capturedBody['plan']['rolling_target_mps'], 3.0);
+    expect(capturedBody.containsKey('overwrite'), isFalse);
+    expect(result.name, 'New config');
+  });
+
+  test('saveSplitConfig sends overwrite:true when requested', () async {
+    late Map<String, dynamic> capturedBody;
+    final client = HttpApiClient(
+      client: MockClient((request) async {
+        capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode({
+            'id': 'c1',
+            'name': 'Existing',
+            'plan': capturedBody['plan'],
+            'created_at': '2026-01-01T00:00:00Z',
+            'updated_at': '2026-01-01T00:00:00Z',
+          }),
+          200,
+        );
+      }),
+    );
+
+    await client.saveSplitConfig(
+      baseUrl: _baseUrl,
+      token: 't',
+      request: SplitConfigSaveRequestDto(
+        name: 'Existing',
+        plan: const SplitPlan(base: SplitPreference(kind: SplitKind.distanceKm, value: 1)),
+        overwrite: true,
+      ),
+    );
+
+    expect(capturedBody['overwrite'], isTrue);
+  });
+
+  test('saveSplitConfig throws ApiRejectedException with statusCode 409 on name conflict', () async {
+    final client = HttpApiClient(
+      client: MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'error': {'code': 'name_conflict', 'message': "A split config named 'x' already exists."},
+          }),
+          409,
+        );
+      }),
+    );
+
+    await expectLater(
+      client.saveSplitConfig(
+        baseUrl: _baseUrl,
+        token: 't',
+        request: SplitConfigSaveRequestDto(
+          name: 'x',
+          plan: const SplitPlan(base: SplitPreference(kind: SplitKind.distanceKm, value: 1)),
+        ),
+      ),
+      throwsA(
+        isA<ApiRejectedException>()
+            .having((e) => e.statusCode, 'statusCode', 409)
+            .having((e) => e.message, 'message', contains('already exists')),
+      ),
+    );
+  });
+
+  test('deleteSplitConfig sends a DELETE to the right path', () async {
+    late Uri capturedUrl;
+    late String capturedMethod;
+    final client = HttpApiClient(
+      client: MockClient((request) async {
+        capturedUrl = request.url;
+        capturedMethod = request.method;
+        return http.Response('', 204);
+      }),
+    );
+
+    await client.deleteSplitConfig(baseUrl: _baseUrl, token: 't', configId: 'c1');
+
+    expect(capturedMethod, 'DELETE');
+    expect(capturedUrl.path, '/api/v1/split-configs/c1');
   });
 }

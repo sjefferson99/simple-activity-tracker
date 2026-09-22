@@ -21,6 +21,10 @@ NOTES_MAX_LENGTH = 4000
 SPLITS_MAX_COUNT = 2000
 SUMMARY_MAX_BYTES = 256 * 1024
 TAG_NAME_MAX_LENGTH = 50
+# Mirrors mobile's domain/tracking/split_plan.dart maxCustomSplits — keep in
+# sync if that ever changes (see docs/SPLIT-CONFIGS-PLAN.md §2.2).
+SPLIT_CONFIG_MAX_CUSTOM_SPLITS = 50
+SPLIT_CONFIG_NAME_MAX_LENGTH = NAME_MAX_LENGTH
 
 
 class ValidationFailedError(ValueError):

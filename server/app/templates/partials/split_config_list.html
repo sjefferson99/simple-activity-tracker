@@ -1,0 +1,24 @@
+{% if configs %}
+<table>
+  <thead><tr><th>Name</th><th>Plan</th><th></th></tr></thead>
+  <tbody>
+    {% for config in configs %}
+    <tr>
+      <td>{{ config.name }}</td>
+      <td>{{ config.plan | split_plan_summary }}</td>
+      <td class="text-right">
+        <a class="secondary button" href="/split-configs/{{ config.id }}/edit">Edit</a>
+        <button class="danger"
+                hx-delete="/split-configs/{{ config.id }}"
+                hx-target="#split-config-list"
+                hx-confirm="Delete split config &quot;{{ config.name }}&quot;? This can't be undone.">
+          Delete
+        </button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No saved split configs yet. Create one to reuse it on the phone.</p>
+{% endif %}

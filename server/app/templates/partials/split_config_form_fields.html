@@ -1,0 +1,110 @@
+{#
+  Shared by split_config_form.html (full page) and the two htmx endpoints
+  that re-render just this fragment: add/remove a custom row
+  (POST /split-configs/custom-rows) and a save that failed validation
+  (POST /split-configs). Every field's current value is threaded through on
+  every round trip so re-rendering never loses what the user typed — same
+  pattern as partials/activity_search_form.html's hidden filter fields.
+#}
+{% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
+<form id="split-config-form"
+      hx-post="/split-configs"
+      hx-target="#split-config-form-area"
+      hx-swap="innerHTML">
+  <input type="hidden" name="config_id" value="{{ config_id or '' }}">
+
+  <label for="name">Name</label>
+  <input type="text" id="name" name="name" value="{{ name }}" maxlength="200" required>
+
+  {% if name_conflict %}
+  <div class="error-banner">
+    A split config named "{{ name_conflict }}" already exists.
+    <button type="submit" name="overwrite" value="true" class="secondary">Replace it</button>
+  </div>
+  {% endif %}
+
+  <div class="toolbar">
+    <div>
+      <label for="split_value">Every</label>
+      <input type="number" id="split_value" name="split_value" min="1" max="1000"
+             value="{{ split_value }}"
+             hx-post="/split-configs/custom-rows" hx-target="#split-config-form-area"
+             hx-include="#split-config-form" hx-trigger="change">
+    </div>
+    <div>
+      <label for="split_type">Unit</label>
+      <select id="split_type" name="split_type"
+              hx-post="/split-configs/custom-rows" hx-target="#split-config-form-area"
+              hx-include="#split-config-form" hx-trigger="change">
+        <option value="distance_km" {% if split_type == "distance_km" %}selected{% endif %}>Kilometers</option>
+        <option value="distance_mi" {% if split_type == "distance_mi" %}selected{% endif %}>Miles</option>
+        <option value="time_min" {% if split_type == "time_min" %}selected{% endif %}>Minutes</option>
+      </select>
+    </div>
+    <div>
+      <label for="targets_as">Targets as</label>
+      <select id="targets_as" name="targets_as"
+              hx-post="/split-configs/custom-rows" hx-target="#split-config-form-area"
+              hx-include="#split-config-form" hx-trigger="change">
+        <option value="pace" {% if targets_as == "pace" %}selected{% endif %}>Pace (mm:ss)</option>
+        <option value="speed" {% if targets_as == "speed" %}selected{% endif %}>Speed (km/h)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="toolbar" role="radiogroup" aria-label="Plan type">
+    <label class="radio-label">
+      <input type="radio" name="plan_kind" value="rolling" {% if plan_kind == "rolling" %}checked{% endif %}
+             hx-post="/split-configs/custom-rows" hx-target="#split-config-form-area"
+             hx-include="#split-config-form" hx-trigger="change">
+      Rolling
+    </label>
+    <label class="radio-label">
+      <input type="radio" name="plan_kind" value="custom" {% if plan_kind == "custom" %}checked{% endif %}
+             hx-post="/split-configs/custom-rows" hx-target="#split-config-form-area"
+             hx-include="#split-config-form" hx-trigger="change">
+      Custom
+    </label>
+  </div>
+
+  {% if plan_kind == "rolling" %}
+  <div>
+    <label for="rolling_target">
+      Target {{ "pace (mm:ss per %s)" % ("mi" if split_type == "distance_mi" else "km") if targets_as == "pace" else "speed (km/h)" }}
+      <span class="muted">(optional)</span>
+    </label>
+    <input type="text" id="rolling_target" name="rolling_target" value="{{ rolling_target }}"
+           placeholder="{{ '5:00' if targets_as == 'pace' else '12.0' }}">
+  </div>
+  {% else %}
+  <fieldset>
+    <legend>
+      Custom splits
+      ({{ "size as mm:ss" if split_type == "time_min" else "size in " + ("mi" if split_type == "distance_mi" else "km") }},
+      target {{ "as mm:ss pace, optional" if targets_as == "pace" else "in km/h, optional" }})
+    </legend>
+    {% for row in custom_rows %}
+    <div class="toolbar custom-split-row">
+      <span class="muted">#{{ loop.index }}</span>
+      <input type="text" name="split_size" value="{{ row.size }}"
+             placeholder="{{ '1:30' if split_type == 'time_min' else '1.0' }}" aria-label="Split {{ loop.index }} size">
+      <input type="text" name="split_target" value="{{ row.target }}"
+             placeholder="{{ '5:00' if targets_as == 'pace' else '12.0' }}" aria-label="Split {{ loop.index }} target">
+      <button type="submit" name="remove_row" value="{{ loop.index0 }}" formnovalidate
+              formaction="/split-configs/custom-rows" formmethod="post" class="secondary">
+        Remove
+      </button>
+    </div>
+    {% endfor %}
+    <button type="submit" formnovalidate
+            formaction="/split-configs/custom-rows" formmethod="post" class="secondary">
+      Add split
+    </button>
+  </fieldset>
+  {% endif %}
+
+  <div class="toolbar">
+    <button type="submit">Save</button>
+    <a href="/split-configs">Cancel</a>
+  </div>
+</form>
