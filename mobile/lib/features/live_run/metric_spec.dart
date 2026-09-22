@@ -286,6 +286,9 @@ final List<MetricSpec> _cyclingMetricSpecs = [
 final List<MetricSpec> defaultMetricSpecs = _runningMetricSpecs;
 
 List<MetricSpec> metricSpecsFor(ActivityMode mode) => switch (mode) {
-  ActivityMode.running => _runningMetricSpecs,
+  // Walking is tagged separately from running (issue #129) but shares its
+  // tile layout — pace is just as relevant on foot whether walking or
+  // running.
+  ActivityMode.running || ActivityMode.walking => _runningMetricSpecs,
   ActivityMode.cycling => _cyclingMetricSpecs,
 };

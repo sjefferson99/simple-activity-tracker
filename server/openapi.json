@@ -6,7 +6,8 @@
           "activity_type": {
             "enum": [
               "running",
-              "cycling"
+              "cycling",
+              "walking"
             ],
             "title": "Activity Type",
             "type": "string"
@@ -98,7 +99,8 @@
           "activity_type": {
             "enum": [
               "running",
-              "cycling"
+              "cycling",
+              "walking"
             ],
             "title": "Activity Type",
             "type": "string"

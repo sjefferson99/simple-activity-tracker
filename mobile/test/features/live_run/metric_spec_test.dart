@@ -19,6 +19,17 @@ const _defaultCurrentSplit = CurrentSplitInfo(
 );
 
 void main() {
+  test(
+    'metricSpecsFor(walking) is identical to metricSpecsFor(running) '
+    '(issue #129: walking is a distinct tag, not a distinct layout)',
+    () {
+      expect(
+        metricSpecsFor(ActivityMode.walking),
+        metricSpecsFor(ActivityMode.running),
+      );
+    },
+  );
+
   group('current_split label', () {
     test(
       'reads "Split speed" in km/h mode and "Split pace" in min/km mode',

@@ -519,6 +519,17 @@ def test_cycling_activity_type_raises_the_implied_speed_cap() -> None:
     assert cycling_result["distance_meters"] == pytest.approx(9 * 20.0, rel=0.01)
 
 
+def test_walking_activity_type_uses_the_same_cap_as_running() -> None:
+    """Issue #129: walking is a distinct activity_type tag from running, but
+    deliberately shares its implied-speed cap — same physiological limits."""
+    track = _straight_line_track(n_points=10, step_m=20.0, step_s=1.0)  # 20 m/s throughout
+
+    running_result = AnalyzerV1().analyze(track, activity_type="running")
+    walking_result = AnalyzerV1().analyze(track, activity_type="walking")
+
+    assert walking_result["distance_meters"] == pytest.approx(running_result["distance_meters"])
+
+
 def test_unknown_activity_type_falls_back_to_the_running_cap() -> None:
     """A future/unrecognised activity_type string must not silently disable
     jump rejection — falls back to the conservative running threshold."""

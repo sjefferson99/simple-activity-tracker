@@ -269,6 +269,22 @@ void main() {
     },
   );
 
+  test(
+    'walking includes split extensions, same as running (issue #129)',
+    () async {
+      final file = File('${tempDir.path}/run.gpx');
+      final log = RunGpxLog(file, _defaultSplitPlan, ActivityMode.walking);
+      final start = DateTime(2026, 1, 1, 9, 0, 0);
+
+      log.addPoint(_point(51.5, -0.1, start));
+      await log.flush();
+
+      final gpx = GpxReader().fromString(await file.readAsString());
+      expect(gpx.extensions.containsKey('sat:split_type'), isTrue);
+      expect(gpx.extensions.containsKey('sat:split_value'), isTrue);
+    },
+  );
+
   test('flush is crash-safe: an interrupted temp write leaves the prior file intact', () async {
     final file = File('${tempDir.path}/run.gpx');
     final log = RunGpxLog(file, _defaultSplitPlan, ActivityMode.running);

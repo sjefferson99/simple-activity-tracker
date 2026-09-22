@@ -57,6 +57,19 @@ def test_upload_with_cycling_type_is_stored_and_returned(
     assert response.json()["activity_type"] == "cycling"
 
 
+def test_upload_with_walking_type_is_stored_and_returned(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    """Issue #129: walking is a distinct activity_type from running, tagged
+    separately for future filtering/analysis, but otherwise accepted and
+    round-tripped exactly like running."""
+    response = upload_sample_activity(
+        app_client, auth_headers, sample_gpx_bytes, activity_type="walking"
+    )
+    assert response.status_code == 201
+    assert response.json()["activity_type"] == "walking"
+
+
 def test_upload_with_invalid_activity_type_is_rejected(
     app_client, auth_headers, sample_gpx_bytes
 ) -> None:

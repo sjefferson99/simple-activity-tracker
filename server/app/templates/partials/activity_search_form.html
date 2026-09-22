@@ -23,6 +23,15 @@
              placeholder="max km" min="0" max="10000" step="0.01"
              hx-trigger="change, input changed delay:400ms">
     </div>
+    <div>
+      <label for="activity-search-type">Type</label>
+      <select id="activity-search-type" name="activity_type" hx-trigger="change">
+        <option value="" {% if not list_query.activity_type %}selected{% endif %}>Any</option>
+        <option value="running" {% if list_query.activity_type == "running" %}selected{% endif %}>Run</option>
+        <option value="walking" {% if list_query.activity_type == "walking" %}selected{% endif %}>Walk</option>
+        <option value="cycling" {% if list_query.activity_type == "cycling" %}selected{% endif %}>Cycle</option>
+      </select>
+    </div>
     <div class="activity-search-actions">
       <button type="submit">Search</button>
       <a href="/" id="activity-search-clear"

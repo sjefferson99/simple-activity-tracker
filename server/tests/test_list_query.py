@@ -36,6 +36,12 @@ def test_q_with_unicode_is_escaped_in_the_url() -> None:
     assert "q=caf%C3%A9+run" in url
 
 
+def test_activity_type_appears_in_the_url_only_when_set() -> None:
+    """Issue #129."""
+    assert list_url(ActivityListQuery(activity_type="walking")) == "/?activity_type=walking"
+    assert "activity_type" not in list_url(ActivityListQuery())
+
+
 def test_list_vals_returns_the_same_non_default_params_as_a_plain_dict() -> None:
     query = ActivityListQuery(sort="distance", dir="asc", q="hills")
     # page=1 is the default (see the previous test) and stays omitted here too.

@@ -33,6 +33,22 @@ def test_upload_creates_activity_and_redirects(app_client, auth_headers, sample_
     assert "Cycle" in detail.text
 
 
+def test_upload_accepts_walking_type(app_client, auth_headers, sample_gpx_bytes):
+    """Issue #129: walking is a distinct, accepted activity_type."""
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+    response = app_client.post(
+        "/upload",
+        headers=HTMX_HEADERS,
+        data={"activity_type": "walking"},
+        files={"gpx": ("activity.gpx", sample_gpx_bytes, "application/gpx+xml")},
+    )
+    assert response.status_code == 200
+    redirect = response.headers["hx-redirect"]
+    detail = app_client.get(redirect)
+    assert detail.status_code == 200
+    assert "Walk" in detail.text
+
+
 def test_upload_defaults_to_running(app_client, auth_headers, sample_gpx_bytes):
     _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
     response = app_client.post(

@@ -34,7 +34,10 @@ class _PlausibilityLimits {
   });
 
   factory _PlausibilityLimits.forMode(ActivityMode mode) => switch (mode) {
-    ActivityMode.running => const _PlausibilityLimits(
+    // Walking is tagged separately from running (issue #129) but shares its
+    // GPS plausibility thresholds — a walker is well within a runner's cap,
+    // so there's no reason to tighten or loosen this for walking specifically.
+    ActivityMode.running || ActivityMode.walking => const _PlausibilityLimits(
       maxPlausibleSpeedMps: 12, // ~43 km/h
       maxPlausibleSegmentMeters: 20000,
     ),

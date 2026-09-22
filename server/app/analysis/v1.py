@@ -50,6 +50,9 @@ _SPLIT_TARGET_TOLERANCE = 0.05
 _MAX_IMPLIED_SPEED_MPS_BY_ACTIVITY_TYPE: dict[str, float] = {
     "running": 12.0,
     "cycling": 25.0,  # 90 km/h
+    # Walking is tagged separately from running (issue #129) but shares its
+    # cap — same physiological limits, no reason to treat it differently.
+    "walking": 12.0,
 }
 _DEFAULT_MAX_IMPLIED_SPEED_MPS = 12.0
 
