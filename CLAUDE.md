@@ -240,9 +240,10 @@ more than trivial size. One plan item (or tightly related group, e.g. "S5 + D1 t
    (per the global "always ask" rule above — this is that ask, answered by the sign-off
    just given in step 4). `git push -u origin <branch>`, then `gh pr create` with a
    summary + test plan (both the automated checks and what was manually verified in the
-   container). **Then stop and wait — do not merge.** Merging is a separate action from
-   opening the PR and needs its own explicit instruction in the current request, not an
-   assumption drawn from how a previous PR in this session was handled.
+   container) — see the Conventions section below for the issue-closing-keyword rule.
+   **Then stop and wait — do not merge.** Merging is a separate action from opening the
+   PR and needs its own explicit instruction in the current request, not an assumption
+   drawn from how a previous PR in this session was handled.
 6. **The user merges the PR themselves, by default.** Only merge it yourself if the
    request that led to this PR explicitly said so in words (e.g. "merge it", "and merge",
    not just "let's ship this" or momentum from an earlier merge). When in doubt, ask
@@ -329,4 +330,11 @@ one at a time. Merging them in order surfaced three real problems, each avoidabl
 - Speeds are stored internally in m/s (as GPS provides); convert only at display time.
 - **Always ask before `git commit`, `git push`, opening a PR, or merging a PR** — each of these four is its own approval, every time, not a package deal. Summarize what would happen and wait for an explicit go-ahead before each one — even at a meaningful milestone, even if the exact same action was already approved earlier in this session, even immediately after finishing a fix the user themselves asked you to make. **A go-ahead covers only the specific unit of work it was given for** (e.g. "commit this" said about the feature being reviewed does not extend to a bugfix made afterward in the same conversation, and "commit, PR, and merge it" said once does not carry forward to the *next* PR raised later in the session) — a new piece of work, including a follow-up fix to something just merged, needs its own explicit ask before each of these four actions, asked separately if the user's message didn't already name all four for that specific work. If a request is ambiguous about scope (e.g. it's unclear whether "do the same for this one" extends prior authorization), ask rather than assume the broader reading. Merging in particular defaults to **the user does it**, per the server workflow below — only merge yourself when the current request says so in words, not by inference from an earlier merge this session.
 - Stay on `main` unless told otherwise.
+- **Any PR for work driven by a GitHub issue must tie the PR to that issue with a closing
+  keyword** (`Closes #<n>` / `Fixes #<n>` / `Resolves #<n>`) in the PR body, on its own
+  line near the top — not buried in prose, since GitHub only recognizes the keyword that
+  way. This makes merging the PR auto-close the issue, rather than needing a separate
+  manual close. Applies to server and mobile PRs alike, whenever the triggering request
+  references an issue number or the branch name encodes one (e.g. `server-126-...`,
+  `mobile-99-...`).
 - **NO SUB AGENTS EVER, unless specifically asked for in that request.** This includes the `code-review` skill's default multi-agent mode — a plain "run a code review" is NOT a request for sub agents; do the review directly instead. Spawning sub agents burns disproportionate usage credits. Only use the Agent tool / multi-agent code review when the user explicitly asks for it (e.g. "ultrareview", "use sub agents").
