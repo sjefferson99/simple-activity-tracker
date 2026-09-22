@@ -397,3 +397,50 @@ class TestValidation:
             json={"name": "Bad", "plan": _rolling_plan(), "unexpected": True},
         )
         assert response.status_code == 422
+
+
+class TestRateLimiting:
+    """A code-review finding (2026-09-22): delete_split_config never called
+    _require_rate_limit, unlike create/patch on the same router, despite
+    docs/SPLIT-CONFIGS-PLAN.md §3 explicitly saying POST/PATCH/DELETE should
+    all be covered. Fixed — this locks the fix in specifically for DELETE
+    (create/patch's own rate limiting was already covered before this
+    finding, by _require_rate_limit being called from both)."""
+
+    def test_delete_itself_is_rate_limited_after_repeated_deletes(self, app_client, auth_headers):
+        # Inserted directly rather than via POST, since POST shares
+        # account_action_rate_limiter's budget with DELETE and would trip
+        # it itself before this test ever exercises DELETE's own limit.
+        from app.auth.rate_limit import account_action_rate_limiter
+        from app.db import get_session_factory
+        from app.models.split_config import SplitConfig
+        from app.repositories.split_configs import SqlAlchemySplitConfigRepository
+        from app.repositories.users import SqlAlchemyUserRepository
+
+        with get_session_factory()() as session:
+            user = SqlAlchemyUserRepository(session).get_by_email("admin@example.com")
+            assert user is not None
+            repo = SqlAlchemySplitConfigRepository(session)
+            now = datetime.now(UTC)
+            config_ids = []
+            for i in range(6):
+                config = SplitConfig(
+                    user_id=user.id,
+                    name=f"Config {i}",
+                    plan=_rolling_plan(),
+                    created_at=now,
+                    updated_at=now,
+                )
+                repo.add(config)
+                session.flush()
+                config_ids.append(config.id)
+            session.commit()
+
+        account_action_rate_limiter.reset()
+
+        for config_id in config_ids[:5]:
+            response = app_client.delete(f"/api/v1/split-configs/{config_id}", headers=auth_headers)
+            assert response.status_code == 204
+
+        response = app_client.delete(f"/api/v1/split-configs/{config_ids[5]}", headers=auth_headers)
+        assert response.status_code == 429

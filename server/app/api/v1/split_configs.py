@@ -159,8 +159,12 @@ def patch_split_config(
 
 @router.delete("/{config_id}", status_code=204)
 def delete_split_config(
-    config_id: str, user: CurrentUser, session: Annotated[Session, Depends(db_session)]
+    config_id: str,
+    request: Request,
+    user: CurrentUser,
+    session: Annotated[Session, Depends(db_session)],
 ) -> None:
+    _require_rate_limit(request)
     repo = SqlAlchemySplitConfigRepository(session)
     config = repo.get_for_user(user.id, config_id)
     if config is None:

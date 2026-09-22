@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.auth.rate_limit import account_action_rate_limiter
 from app.deps import db_session
 from app.models.split_config import SplitConfig
 from app.repositories.split_configs import SqlAlchemySplitConfigRepository
@@ -296,6 +297,10 @@ def create_or_update_split_config(
             request, "split_config_form.html", context, status_code=status_code
         )
 
+    client_ip = request.client.host if request.client else "unknown"
+    if not account_action_rate_limiter.allow(f"ip:{client_ip}"):
+        return _rerender("Too many attempts, try again shortly", status_code=429)
+
     try:
         clean_name = validate_name(name, field="Name")
         if len(clean_name) > SPLIT_CONFIG_NAME_MAX_LENGTH:
@@ -387,6 +392,10 @@ def delete_split_config(
     user: WebUser,
     session: Annotated[Session, Depends(db_session)],
 ) -> Response:
+    client_ip = request.client.host if request.client else "unknown"
+    if not account_action_rate_limiter.allow(f"ip:{client_ip}"):
+        return Response(status_code=429)
+
     repo = SqlAlchemySplitConfigRepository(session)
     config = repo.get_for_user(user.id, config_id)
     if config is not None:

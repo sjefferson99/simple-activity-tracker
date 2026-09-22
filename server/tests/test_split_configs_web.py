@@ -322,3 +322,68 @@ class TestPerUserIsolation:
         listed = other_client.get("/split-configs")
         assert "5k tempo" not in listed.text
         assert "No saved split configs yet" in listed.text
+
+
+class TestRateLimiting:
+    """A code-review finding (2026-09-22): the whole web split_configs.py
+    module had no rate limiting on any mutating route at all, despite
+    docs/SPLIT-CONFIGS-PLAN.md §3 saying POST/PATCH/DELETE should all be
+    covered (mirrored from the API router, which did have it on create/
+    patch). Fixed — these lock the fix in for both create and delete."""
+
+    def test_create_rate_limited_after_repeated_attempts(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        for i in range(5):
+            response = _create(client, name=f"Config {i}")
+            assert response.status_code == 200
+
+        response = _create(client, name="One more")
+        assert response.status_code == 429
+
+    def test_delete_rate_limited_after_repeated_attempts(self, app_client, auth_headers):
+        from datetime import UTC, datetime
+
+        from app.auth.rate_limit import account_action_rate_limiter
+        from app.db import get_session_factory
+        from app.models.split_config import SplitConfig
+        from app.repositories.split_configs import SqlAlchemySplitConfigRepository
+        from app.repositories.users import SqlAlchemyUserRepository
+
+        client = _login_cookie_client(app_client)
+
+        # Inserted directly rather than via the create route, since create
+        # shares account_action_rate_limiter's budget with delete and would
+        # trip it itself before this test ever exercises delete's own limit.
+        with get_session_factory()() as session:
+            user = SqlAlchemyUserRepository(session).get_by_email("admin@example.com")
+            assert user is not None
+            repo = SqlAlchemySplitConfigRepository(session)
+            now = datetime.now(UTC)
+            config_ids = []
+            for i in range(6):
+                config = SplitConfig(
+                    user_id=user.id,
+                    name=f"Config {i}",
+                    plan={
+                        "split_type": "distance_km",
+                        "split_value": 1,
+                        "rolling_target_mps": None,
+                        "custom_splits": [],
+                        "targets_as": "pace",
+                    },
+                    created_at=now,
+                    updated_at=now,
+                )
+                repo.add(config)
+                session.flush()
+                config_ids.append(config.id)
+            session.commit()
+
+        account_action_rate_limiter.reset()
+
+        for config_id in config_ids[:5]:
+            response = client.delete(f"/split-configs/{config_id}", headers=HTMX_HEADERS)
+            assert response.status_code == 200
+
+        response = client.delete(f"/split-configs/{config_ids[5]}", headers=HTMX_HEADERS)
+        assert response.status_code == 429
