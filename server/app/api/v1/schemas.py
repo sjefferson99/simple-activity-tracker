@@ -31,6 +31,10 @@ class SplitSummary(BaseModel):
     # sent this. Constant across every split for a distance-based
     # preference, but varies per split for a time-based one.
     distance_m: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    # Optional: older app versions (before #106) never sent this. Null when
+    # the split had no target (no split-targets feature in use, or a custom
+    # plan's rolled-on split beyond the last planned one).
+    target_speed_mps: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
 class ActivitySource(BaseModel):
@@ -53,6 +57,9 @@ class ActivitySummary(BaseModel):
     moving_seconds: float = Field(ge=0, allow_inf_nan=False)
     distance_meters: float = Field(ge=0, allow_inf_nan=False)
     avg_speed_mps: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    # Optional: older app versions (before #106) never sent these.
+    max_speed_mps: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    elevation_gain_meters: float = Field(default=0, ge=0, allow_inf_nan=False)
     splits: list[SplitSummary] = Field(default_factory=list, max_length=SPLITS_MAX_COUNT)
     source: ActivitySource
 
