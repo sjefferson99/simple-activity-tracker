@@ -6,6 +6,7 @@ import '../../core/tracking/split_plan_controller.dart';
 import '../../core/units/units.dart';
 import '../../domain/tracking/split_plan.dart';
 import '../../domain/tracking/split_preference.dart';
+import 'saved_split_configs_section.dart';
 
 /// Configuration screen for the run's split plan (issue #99): split
 /// type/size, a pace-or-speed preference for targets, and either a rolling
@@ -26,32 +27,49 @@ class SplitsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Splits')),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _SplitTypeSection(plan: plan, notifier: notifier),
-            if (plan.base.kind == SplitKind.timeMin) ...[
+        child: RefreshIndicator(
+          // Pull-to-refresh reloads the saved-configs list from the server
+          // (issue #126 follow-up) — the rest of the screen has nothing to
+          // "refresh" (it's all local, immediately-persisted state), so this
+          // only ever needs to touch the saved-configs provider.
+          onRefresh: () => refreshSavedSplitConfigs(ref),
+          child: ListView(
+            // Content on this screen is usually shorter than the viewport,
+            // and a plain ListView's default physics only allow the
+            // overscroll RefreshIndicator listens for once it's already
+            // scrollable — always-scrollable physics keeps pull-to-refresh
+            // working regardless of how much content is on screen.
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16),
+            children: [
+              const SavedSplitConfigsSection(),
               const SizedBox(height: 24),
-              _DisplayUnitsSection(plan: plan, notifier: notifier),
+              const Divider(),
+              const SizedBox(height: 16),
+              _SplitTypeSection(plan: plan, notifier: notifier),
+              if (plan.base.kind == SplitKind.timeMin) ...[
+                const SizedBox(height: 24),
+                _DisplayUnitsSection(plan: plan, notifier: notifier),
+              ],
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 16),
+              _TargetsAsSection(plan: plan, notifier: notifier),
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 16),
+              _PlanTypeSection(plan: plan, notifier: notifier),
+              const SizedBox(height: 16),
+              if (plan.isCustom)
+                _CustomPlanSection(plan: plan, notifier: notifier)
+              else
+                _RollingPlanSection(plan: plan, notifier: notifier),
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 16),
+              const _AudioCuesSection(),
             ],
-            const SizedBox(height: 24),
-            const Divider(),
-            const SizedBox(height: 16),
-            _TargetsAsSection(plan: plan, notifier: notifier),
-            const SizedBox(height: 24),
-            const Divider(),
-            const SizedBox(height: 16),
-            _PlanTypeSection(plan: plan, notifier: notifier),
-            const SizedBox(height: 16),
-            if (plan.isCustom)
-              _CustomPlanSection(plan: plan, notifier: notifier)
-            else
-              _RollingPlanSection(plan: plan, notifier: notifier),
-            const SizedBox(height: 24),
-            const Divider(),
-            const SizedBox(height: 16),
-            const _AudioCuesSection(),
-          ],
+          ),
         ),
       ),
     );
@@ -201,7 +219,8 @@ class _SplitTypeSection extends StatelessWidget {
                 child: _CommittingTextField(
                   key: ValueKey(plan.base.value),
                   initialValue: '${plan.base.value}',
-                  parse: (text) => int.tryParse(text)?.let((v) => v > 0 ? v : null),
+                  parse: (text) =>
+                      int.tryParse(text)?.let((v) => v > 0 ? v : null),
                   format: (v) => '$v',
                   onCommit: (value) => notifier.select(
                     plan.copyWith(
@@ -457,9 +476,8 @@ class _RollingPlanSection extends StatelessWidget {
               IconButton(
                 icon: const Icon(Icons.close, size: 18),
                 tooltip: 'Clear target',
-                onPressed: () => notifier.select(
-                  plan.copyWith(clearRollingTarget: true),
-                ),
+                onPressed: () =>
+                    notifier.select(plan.copyWith(clearRollingTarget: true)),
               ),
             ],
           ],
@@ -512,8 +530,8 @@ class _CustomPlanSection extends StatelessWidget {
               child: _CommittingTextField(
                 key: ValueKey(plan.customSplits.length),
                 initialValue: '${plan.customSplits.length}',
-                parse: (text) =>
-                    int.tryParse(text)?.let((v) => (v > 0 && v <= maxCustomSplits) ? v : null),
+                parse: (text) => int.tryParse(text)
+                    ?.let((v) => (v > 0 && v <= maxCustomSplits) ? v : null),
                 format: (v) => '$v',
                 onCommit: (count) => _changeCount(context, count),
               ),
@@ -539,7 +557,8 @@ class _CustomPlanSection extends StatelessWidget {
                     notifier.select(plan.copyWith(customSplits: splits));
                   }
                 : null,
-            onApplyTargetToAll: i == 0 && plan.customSplits[i].targetSpeedMps != null
+            onApplyTargetToAll:
+                i == 0 && plan.customSplits[i].targetSpeedMps != null
                 ? () {
                     final target = plan.customSplits[i].targetSpeedMps;
                     final splits = [
@@ -559,9 +578,7 @@ class _CustomPlanSection extends StatelessWidget {
                       ? PlannedSplit(size: _rollingSizeInPlanUnits(plan.base))
                       : plan.customSplits.last;
                   notifier.select(
-                    plan.copyWith(
-                      customSplits: [...plan.customSplits, last],
-                    ),
+                    plan.copyWith(customSplits: [...plan.customSplits, last]),
                   );
                 },
           icon: const Icon(Icons.add),
@@ -647,7 +664,10 @@ class _CustomSplitRow extends StatelessWidget {
             children: [
               SizedBox(
                 width: 28,
-                child: Text('#${index + 1}', style: Theme.of(context).textTheme.bodySmall),
+                child: Text(
+                  '#${index + 1}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ),
               SizedBox(
                 width: 72,
@@ -662,14 +682,23 @@ class _CustomSplitRow extends StatelessWidget {
                   // earlier value instead of the one just committed).
                   key: ValueKey('custom_size-$index-${split.size}'),
                   initialValue: isTimeKind
-                      ? formatMinSec(Duration(milliseconds: (split.size * 1000).round()))
-                      : _sizeToDecimalText(split.size, plan.base.effectiveDistanceUnit),
+                      ? formatMinSec(
+                          Duration(milliseconds: (split.size * 1000).round()),
+                        )
+                      : _sizeToDecimalText(
+                          split.size,
+                          plan.base.effectiveDistanceUnit,
+                        ),
                   hintText: isTimeKind ? 'm:ss' : sizeHint,
                   parse: (text) => isTimeKind
-                      ? parseMinSec(text, bareNumberAsSeconds: true)
-                          ?.inMilliseconds
-                          .let((ms) => ms / 1000)
-                      : _parseDecimalSize(text, plan.base.effectiveDistanceUnit),
+                      ? parseMinSec(
+                          text,
+                          bareNumberAsSeconds: true,
+                        )?.inMilliseconds.let((ms) => ms / 1000)
+                      : _parseDecimalSize(
+                          text,
+                          plan.base.effectiveDistanceUnit,
+                        ),
                   format: (v) => isTimeKind
                       ? formatMinSec(Duration(milliseconds: (v * 1000).round()))
                       : _sizeToDecimalText(v, plan.base.effectiveDistanceUnit),
@@ -729,9 +758,13 @@ class _CustomSplitRow extends StatelessWidget {
   }
 
   String _sizeToDecimalText(double meters, DistanceUnit unit) {
-    final value = unit == DistanceUnit.mi ? meters / metersPerMile : meters / 1000;
+    final value = unit == DistanceUnit.mi
+        ? meters / metersPerMile
+        : meters / 1000;
     final fixed = value.toStringAsFixed(3);
-    return fixed.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+    return fixed
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
   }
 
   double? _parseDecimalSize(String text, DistanceUnit unit) {
@@ -773,7 +806,8 @@ class _CommittingTextField<T> extends StatefulWidget {
   });
 
   @override
-  State<_CommittingTextField<T>> createState() => _CommittingTextFieldState<T>();
+  State<_CommittingTextField<T>> createState() =>
+      _CommittingTextFieldState<T>();
 }
 
 class _CommittingTextFieldState<T> extends State<_CommittingTextField<T>> {

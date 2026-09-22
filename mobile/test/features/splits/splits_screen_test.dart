@@ -3,16 +3,36 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/test/test_flutter_secure_storage_platform.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:simple_activity_tracker/core/api/api_client.dart';
+import 'package:simple_activity_tracker/core/auth/auth_state.dart';
+import 'package:simple_activity_tracker/core/auth/auth_state_controller.dart';
 import 'package:simple_activity_tracker/core/tracking/split_plan_controller.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_plan.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_preference.dart';
 import 'package:simple_activity_tracker/features/splits/splits_screen.dart';
 
+import '../../fakes/fake_api_client.dart';
+
+/// Signed-out by default — most of this screen's tests exercise the plan
+/// editor, not the saved-configs section (issue #126), so the section
+/// should just show its "sign in" prompt without making a real network
+/// call. Tests that specifically exercise saved configs override this.
+class _NotSignedInAuthController extends AuthStateController {
+  @override
+  Future<AuthState> build() async => AuthState.empty;
+}
+
 Future<void> _pumpScreen(WidgetTester tester) async {
   FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform({});
   await tester.pumpWidget(
-    const ProviderScope(
-      child: MaterialApp(home: SplitsScreen()),
+    ProviderScope(
+      overrides: [
+        authStateControllerProvider.overrideWith(
+          _NotSignedInAuthController.new,
+        ),
+        apiClientProvider.overrideWithValue(FakeApiClient()),
+      ],
+      child: const MaterialApp(home: SplitsScreen()),
     ),
   );
   // Let the controller's async _load() resolve.
@@ -29,10 +49,7 @@ Finder _rollingTargetField() {
         widget.key is ValueKey<String> &&
         (widget.key! as ValueKey<String>).value.startsWith('rolling_target-'),
   );
-  return find.descendant(
-    of: wrapper,
-    matching: find.byType(TextFormField),
-  );
+  return find.descendant(of: wrapper, matching: find.byType(TextFormField));
 }
 
 /// Finds the "Number of splits" count field. Unlike the rolling/custom
@@ -57,11 +74,18 @@ Finder _customSplitField(int index, {required bool target}) {
         widget.key is ValueKey<String> &&
         (widget.key! as ValueKey<String>).value.startsWith(prefix),
   );
-  return find.descendant(
-    of: wrapper,
-    matching: find.byType(TextFormField),
-  );
+  return find.descendant(of: wrapper, matching: find.byType(TextFormField));
 }
+
+/// Finds the [index]th custom split row's delete button, via the row's own
+/// `ValueKey(index)` (splits_screen.dart's `_CustomSplitRow(key:
+/// ValueKey(i), ...)`) rather than `find.byIcon(...).first`, which picks
+/// whichever delete icon happens to be first in the tree — not necessarily
+/// row 0's, and wrong once more than one row exists off-screen at once.
+Finder _customSplitDeleteButton(int index) => find.descendant(
+  of: find.byKey(ValueKey(index)),
+  matching: find.byIcon(Icons.delete_outline),
+);
 
 void main() {
   testWidgets('setting a rolling target shows an equivalent-pace hint', (
@@ -105,6 +129,12 @@ void main() {
   ) async {
     await _pumpScreen(tester);
 
+    await tester.dragUntilVisible(
+      find.text('Custom'),
+      find.byType(ListView),
+      const Offset(0, -100),
+    );
+    await tester.pump();
     await tester.tap(find.text('Custom'));
     await tester.pumpAndSettle();
     // The custom split row sits below the fold on the default test surface
@@ -122,7 +152,14 @@ void main() {
   testWidgets(
     'changing split type while custom splits exist asks for confirmation',
     (tester) async {
-      final container = ProviderContainer();
+      final container = ProviderContainer(
+        overrides: [
+          authStateControllerProvider.overrideWith(
+            _NotSignedInAuthController.new,
+          ),
+          apiClientProvider.overrideWithValue(FakeApiClient()),
+        ],
+      );
       addTearDown(container.dispose);
       FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(
         {},
@@ -163,10 +200,7 @@ void main() {
       await tester.tap(find.text('Change'));
       await tester.pumpAndSettle();
 
-      expect(
-        container.read(splitPlanControllerProvider).customSplits,
-        isEmpty,
-      );
+      expect(container.read(splitPlanControllerProvider).customSplits, isEmpty);
       expect(
         container.read(splitPlanControllerProvider).base.kind,
         SplitKind.distanceMi,
@@ -175,7 +209,14 @@ void main() {
   );
 
   testWidgets('deleting a custom split removes only that row', (tester) async {
-    final container = ProviderContainer();
+    final container = ProviderContainer(
+      overrides: [
+        authStateControllerProvider.overrideWith(
+          _NotSignedInAuthController.new,
+        ),
+        apiClientProvider.overrideWithValue(FakeApiClient()),
+      ],
+    );
     addTearDown(container.dispose);
     FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(
       {},
@@ -185,10 +226,7 @@ void main() {
         .select(
           const SplitPlan(
             base: SplitPreference.defaultPreference,
-            customSplits: [
-              PlannedSplit(size: 400),
-              PlannedSplit(size: 200),
-            ],
+            customSplits: [PlannedSplit(size: 400), PlannedSplit(size: 200)],
           ),
         );
 
@@ -199,16 +237,20 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    // Scroll directly to row 0's own delete button (not just its "#1" text
+    // label) so the tap below actually lands on it — the label alone can be
+    // visible while the button beside it, further right/below, still isn't.
     await tester.dragUntilVisible(
-      find.text('#2'),
+      _customSplitDeleteButton(0),
       find.byType(ListView),
       const Offset(0, -100),
     );
+    await tester.pump();
 
     expect(find.text('#1'), findsOneWidget);
     expect(find.text('#2'), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.delete_outline).first);
+    await tester.tap(_customSplitDeleteButton(0));
     await tester.pumpAndSettle();
 
     final plan = container.read(splitPlanControllerProvider);
@@ -219,7 +261,14 @@ void main() {
   testWidgets(
     'shrinking the split count asks for confirmation before discarding splits',
     (tester) async {
-      final container = ProviderContainer();
+      final container = ProviderContainer(
+        overrides: [
+          authStateControllerProvider.overrideWith(
+            _NotSignedInAuthController.new,
+          ),
+          apiClientProvider.overrideWithValue(FakeApiClient()),
+        ],
+      );
       addTearDown(container.dispose);
       FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(
         {},
@@ -282,7 +331,14 @@ void main() {
   testWidgets(
     'growing the split count from empty seeds a split sized for the plan kind, not a hardcoded 1000',
     (tester) async {
-      final container = ProviderContainer();
+      final container = ProviderContainer(
+        overrides: [
+          authStateControllerProvider.overrideWith(
+            _NotSignedInAuthController.new,
+          ),
+          apiClientProvider.overrideWithValue(FakeApiClient()),
+        ],
+      );
       addTearDown(container.dispose);
       FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(
         {},
@@ -311,6 +367,7 @@ void main() {
         find.byType(ListView),
         const Offset(0, -100),
       );
+      await tester.pump();
       await tester.tap(find.text('Custom'));
       await tester.pumpAndSettle();
 
@@ -320,6 +377,7 @@ void main() {
         find.byType(ListView),
         const Offset(0, -100),
       );
+      await tester.pump();
       await tester.enterText(countField, '2');
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
@@ -341,7 +399,14 @@ void main() {
       // never fires for a route pop. The field committing on focus loss
       // itself (which a pop always causes, since the framework unfocuses a
       // field before disposing it) is what actually fixes this.
-      final container = ProviderContainer();
+      final container = ProviderContainer(
+        overrides: [
+          authStateControllerProvider.overrideWith(
+            _NotSignedInAuthController.new,
+          ),
+          apiClientProvider.overrideWithValue(FakeApiClient()),
+        ],
+      );
       addTearDown(container.dispose);
       FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(
         {},
@@ -404,7 +469,14 @@ void main() {
   testWidgets(
     'a target edit also commits on focus loss without pressing Done',
     (tester) async {
-      final container = ProviderContainer();
+      final container = ProviderContainer(
+        overrides: [
+          authStateControllerProvider.overrideWith(
+            _NotSignedInAuthController.new,
+          ),
+          apiClientProvider.overrideWithValue(FakeApiClient()),
+        ],
+      );
       addTearDown(container.dispose);
       FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(
         {},
@@ -441,7 +513,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        container.read(splitPlanControllerProvider).customSplits[0].targetSpeedMps,
+        container
+            .read(splitPlanControllerProvider)
+            .customSplits[0]
+            .targetSpeedMps,
         closeTo(5.5 / 3.6, 0.001),
       );
     },

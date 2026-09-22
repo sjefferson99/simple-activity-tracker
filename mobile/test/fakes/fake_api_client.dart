@@ -6,6 +6,7 @@ import 'package:simple_activity_tracker/core/api/dto/analysis_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/device_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/login_response_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/run_dto.dart';
+import 'package:simple_activity_tracker/core/api/dto/split_config_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/user_dto.dart';
 import 'package:simple_activity_tracker/domain/models/run_summary.dart';
 
@@ -56,6 +57,22 @@ class FakeApiClient implements ApiClient {
     int limit,
   })?
   listActivitiesHandler;
+
+  final List<SplitConfigSaveRequestDto> saveSplitConfigCalls = [];
+  int deleteSplitConfigCallCount = 0;
+
+  Future<List<SplitConfigDto>> Function({required String baseUrl, required String token})?
+  listSplitConfigsHandler;
+
+  Future<SplitConfigDto> Function({
+    required String baseUrl,
+    required String token,
+    required SplitConfigSaveRequestDto request,
+  })?
+  saveSplitConfigHandler;
+
+  Future<void> Function({required String baseUrl, required String token, required String configId})?
+  deleteSplitConfigHandler;
 
   @override
   Future<LoginResponseDto> login({
@@ -202,5 +219,46 @@ class FakeApiClient implements ApiClient {
       return handler(baseUrl: baseUrl, token: token, cursor: cursor, limit: limit);
     }
     return Future.value(const ActivityListResponseDto(activities: [], nextCursor: null));
+  }
+
+  @override
+  Future<List<SplitConfigDto>> listSplitConfigs({
+    required String baseUrl,
+    required String token,
+  }) {
+    final handler = listSplitConfigsHandler;
+    if (handler != null) return handler(baseUrl: baseUrl, token: token);
+    return Future.value(const []);
+  }
+
+  @override
+  Future<SplitConfigDto> saveSplitConfig({
+    required String baseUrl,
+    required String token,
+    required SplitConfigSaveRequestDto request,
+  }) {
+    saveSplitConfigCalls.add(request);
+    final handler = saveSplitConfigHandler;
+    if (handler != null) {
+      return handler(baseUrl: baseUrl, token: token, request: request);
+    }
+    final now = DateTime.utc(2026);
+    return Future.value(
+      SplitConfigDto(id: 'sc1', name: request.name, plan: request.plan, createdAt: now, updatedAt: now),
+    );
+  }
+
+  @override
+  Future<void> deleteSplitConfig({
+    required String baseUrl,
+    required String token,
+    required String configId,
+  }) {
+    deleteSplitConfigCallCount++;
+    final handler = deleteSplitConfigHandler;
+    if (handler != null) {
+      return handler(baseUrl: baseUrl, token: token, configId: configId);
+    }
+    return Future.value();
   }
 }

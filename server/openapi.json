@@ -703,6 +703,184 @@
         "title": "LoginResponse",
         "type": "object"
       },
+      "SplitConfigCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "title": "Overwrite",
+            "type": "boolean"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/SplitPlanIn"
+          }
+        },
+        "required": [
+          "name",
+          "plan"
+        ],
+        "title": "SplitConfigCreateRequest",
+        "type": "object"
+      },
+      "SplitConfigListResponse": {
+        "properties": {
+          "configs": {
+            "items": {
+              "$ref": "#/components/schemas/SplitConfigOut"
+            },
+            "title": "Configs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "configs"
+        ],
+        "title": "SplitConfigListResponse",
+        "type": "object"
+      },
+      "SplitConfigOut": {
+        "description": "A saved, named split plan (issue #126).\n\nplan is typed as SplitPlanIn, not SplitPlanOut \u2014 unlike an activity's\nsplit_plan (where split_type/split_value already live on separate\nActivity columns, so SplitPlanOut only needs the other three fields), a\nSplitConfig is a standalone plan with nothing else to fall back on: its\nplan JSON carries split_type/split_value directly, and SplitPlanIn is\nthe model with all five fields plus the validation new plan data must\nalready have passed to be stored here.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/SplitPlanIn"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "plan",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SplitConfigOut",
+        "type": "object"
+      },
+      "SplitConfigPatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SplitPlanIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "SplitConfigPatchRequest",
+        "type": "object"
+      },
+      "SplitPlanIn": {
+        "additionalProperties": false,
+        "description": "A client-supplied split plan (issue #126) \u2014 the same five fields as\nSplitPlanOut/app.analysis.gpx_parser.SplitPlanData, but as an untrusted\nwrite-side model with real validation, used to create/update a\nSplitConfig. Unlike SplitPlanOut (built server-side from a parsed GPX,\nnever re-validated) this is the boundary that stops a malformed plan \u2014\nnegative sizes, an over-long custom list, both/neither of rolling vs\ncustom \u2014 from ever reaching the database. Mirrors mobile's\nSplitPlan.fromJson validation exactly (see\ndocs/SPLIT-CONFIGS-PLAN.md \u00a72.2).",
+        "properties": {
+          "custom_splits": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "type": "array"
+            },
+            "maxItems": 50,
+            "title": "Custom Splits",
+            "type": "array"
+          },
+          "rolling_target_mps": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rolling Target Mps"
+          },
+          "split_type": {
+            "enum": [
+              "distance_km",
+              "distance_mi",
+              "time_min"
+            ],
+            "title": "Split Type",
+            "type": "string"
+          },
+          "split_value": {
+            "exclusiveMinimum": 0.0,
+            "title": "Split Value",
+            "type": "integer"
+          },
+          "targets_as": {
+            "default": "pace",
+            "enum": [
+              "pace",
+              "speed"
+            ],
+            "title": "Targets As",
+            "type": "string"
+          }
+        },
+        "required": [
+          "split_type",
+          "split_value"
+        ],
+        "title": "SplitPlanIn",
+        "type": "object"
+      },
       "SplitPlanOut": {
         "description": "The split plan an activity was uploaded with (issue #100) \u2014 mirrors\nActivity.split_plan/app.analysis.gpx_parser.SplitPlanData. None on\nActivityOut for an activity with no plan at all (an old upload, or a\nplain rolling preference with no target).",
         "properties": {
@@ -2000,6 +2178,192 @@
         "summary": "Change Password",
         "tags": [
           "me"
+        ]
+      }
+    },
+    "/api/v1/split-configs": {
+      "get": {
+        "operationId": "list_split_configs_api_v1_split_configs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SplitConfigListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Split Configs",
+        "tags": [
+          "split-configs"
+        ]
+      },
+      "post": {
+        "description": "Creates a new config, or \u2014 with overwrite=true \u2014 replaces an existing\nsame-named one in place (same id, bumped updated_at). Without\noverwrite=true, a name collision is a 409 so the caller can ask the user\nto confirm and retry (see docs/SPLIT-CONFIGS-PLAN.md \u00a73/\u00a75.4).",
+        "operationId": "create_split_config_api_v1_split_configs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SplitConfigCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SplitConfigOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Split Config",
+        "tags": [
+          "split-configs"
+        ]
+      }
+    },
+    "/api/v1/split-configs/{config_id}": {
+      "delete": {
+        "operationId": "delete_split_config_api_v1_split_configs__config_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "config_id",
+            "required": true,
+            "schema": {
+              "title": "Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Split Config",
+        "tags": [
+          "split-configs"
+        ]
+      },
+      "get": {
+        "operationId": "get_split_config_api_v1_split_configs__config_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "config_id",
+            "required": true,
+            "schema": {
+              "title": "Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SplitConfigOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Split Config",
+        "tags": [
+          "split-configs"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_split_config_api_v1_split_configs__config_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "config_id",
+            "required": true,
+            "schema": {
+              "title": "Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SplitConfigPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SplitConfigOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Split Config",
+        "tags": [
+          "split-configs"
         ]
       }
     },

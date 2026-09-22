@@ -55,6 +55,42 @@ def format_split_target(target_speed_mps: float | None, targets_as: str | None) 
 _SPEED_DELTA_TOLERANCE = 0.05
 
 
+_SPLIT_TYPE_LABELS = {
+    "distance_km": "km",
+    "distance_mi": "mi",
+    "time_min": "min",
+}
+
+
+def format_split_plan_summary(plan: dict[str, object]) -> str:
+    """A one-line human summary of a saved SplitConfig's plan (issue #126),
+    e.g. "Rolling, every 1 km @ 5:00 /km" or "Custom, 6 splits" — used on the
+    split configs list page. Mirrors the equivalent summary mobile's home
+    screen shows for the current plan (docs/SPLIT-TARGETS-PLAN.md §5.4)."""
+    split_type = str(plan.get("split_type") or "distance_km")
+    unit = _SPLIT_TYPE_LABELS.get(split_type, split_type)
+    custom_splits = plan.get("custom_splits") or []
+    if custom_splits:
+        count = len(custom_splits) if isinstance(custom_splits, list) else 0
+        return f"Custom, {count} split{'s' if count != 1 else ''}"
+
+    split_value = plan.get("split_value") or 1
+    rolling_target_mps_raw = plan.get("rolling_target_mps")
+    targets_as = plan.get("targets_as")
+    base = f"Rolling, every {split_value} {unit}"
+    if rolling_target_mps_raw is None:
+        return base
+    rolling_target_mps = (
+        rolling_target_mps_raw
+        if isinstance(rolling_target_mps_raw, int | float)
+        else float(str(rolling_target_mps_raw))
+    )
+    target_str = format_split_target(
+        float(rolling_target_mps), str(targets_as) if targets_as else None
+    )
+    return f"{base} @ {target_str}"
+
+
 def format_speed_delta(
     avg_speed_mps: float | None, target_speed_mps: float | None, targets_as: str | None
 ) -> str:

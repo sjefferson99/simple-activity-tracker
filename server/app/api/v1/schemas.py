@@ -1,13 +1,16 @@
+import math
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.validation import (
     EMAIL_MAX_LENGTH,
     NAME_MAX_LENGTH,
     NOTES_MAX_LENGTH,
     PASSWORD_MAX_LENGTH,
+    SPLIT_CONFIG_MAX_CUSTOM_SPLITS,
+    SPLIT_CONFIG_NAME_MAX_LENGTH,
     SPLITS_MAX_COUNT,
     TAG_NAME_MAX_LENGTH,
     TITLE_MAX_LENGTH,
@@ -165,6 +168,110 @@ class SplitPlanOut(BaseModel):
     # split_type; target is null for an untargeted custom split.
     custom_splits: list[tuple[float, float | None]]
     targets_as: Literal["pace", "speed"]
+
+
+class SplitPlanIn(BaseModel):
+    """A client-supplied split plan (issue #126) — the same five fields as
+    SplitPlanOut/app.analysis.gpx_parser.SplitPlanData, but as an untrusted
+    write-side model with real validation, used to create/update a
+    SplitConfig. Unlike SplitPlanOut (built server-side from a parsed GPX,
+    never re-validated) this is the boundary that stops a malformed plan —
+    negative sizes, an over-long custom list, both/neither of rolling vs
+    custom — from ever reaching the database. Mirrors mobile's
+    SplitPlan.fromJson validation exactly (see
+    docs/SPLIT-CONFIGS-PLAN.md §2.2)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    split_type: Literal["distance_km", "distance_mi", "time_min"]
+    split_value: int = Field(gt=0)
+    rolling_target_mps: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    custom_splits: list[tuple[float, float | None]] = Field(
+        default_factory=list, max_length=SPLIT_CONFIG_MAX_CUSTOM_SPLITS
+    )
+    targets_as: Literal["pace", "speed"] = "pace"
+
+    @field_validator("custom_splits")
+    @classmethod
+    def _validate_custom_splits(
+        cls, value: list[tuple[float, float | None]]
+    ) -> list[tuple[float, float | None]]:
+        for size, target in value:
+            if not (size > 0) or not math.isfinite(size):
+                raise ValueError("Each custom split's size must be greater than 0")
+            if target is not None and (not (target > 0) or not math.isfinite(target)):
+                raise ValueError("Each custom split's target must be greater than 0")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_rolling_vs_custom(self) -> "SplitPlanIn":
+        # Mirrors mobile's SplitPlan: rolling_target_mps only ever applies to
+        # a rolling plan (empty custom_splits) — a custom plan's per-split
+        # targets are the only targets that apply once it is non-empty (see
+        # SplitPlan.targetOf). Silently accepting both would let a client
+        # send a rolling_target_mps that the server (and every other client)
+        # would then ignore without any indication why.
+        if self.custom_splits and self.rolling_target_mps is not None:
+            raise ValueError("rolling_target_mps must not be set when custom_splits is non-empty")
+        return self
+
+
+class SplitConfigOut(BaseModel):
+    """A saved, named split plan (issue #126).
+
+    plan is typed as SplitPlanIn, not SplitPlanOut — unlike an activity's
+    split_plan (where split_type/split_value already live on separate
+    Activity columns, so SplitPlanOut only needs the other three fields), a
+    SplitConfig is a standalone plan with nothing else to fall back on: its
+    plan JSON carries split_type/split_value directly, and SplitPlanIn is
+    the model with all five fields plus the validation new plan data must
+    already have passed to be stored here."""
+
+    id: str
+    name: str
+    plan: SplitPlanIn
+    created_at: datetime
+    updated_at: datetime
+
+
+class SplitConfigListResponse(BaseModel):
+    configs: list[SplitConfigOut]
+
+
+class SplitConfigCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=SPLIT_CONFIG_NAME_MAX_LENGTH)
+    plan: SplitPlanIn
+    # When true and a config with this name already exists for the caller,
+    # overwrite it in place (same id, bumped updated_at) instead of
+    # rejecting with 409 — see docs/SPLIT-CONFIGS-PLAN.md §3.
+    overwrite: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("name must not be blank")
+        return stripped
+
+
+class SplitConfigPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=SPLIT_CONFIG_NAME_MAX_LENGTH)
+    plan: SplitPlanIn | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("name must not be blank")
+        return stripped
 
 
 class ActivityOut(BaseModel):

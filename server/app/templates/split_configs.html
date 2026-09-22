@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Splits — Simple Activity Tracker{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom: 1.25rem;">
+  <h1>Splits</h1>
+  <a class="button" href="/split-configs/new">New config</a>
+</div>
+<div class="card" id="split-config-list">
+  {% include "partials/split_config_list.html" %}
+</div>
+{% endblock %}

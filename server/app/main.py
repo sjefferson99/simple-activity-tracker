@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from app.api.v1 import activities as activities_api
 from app.api.v1 import admin as admin_api
 from app.api.v1 import auth as auth_api
+from app.api.v1 import split_configs as split_configs_api
 from app.config import get_settings
 from app.db import check_db_connection
 from app.security_headers import SecurityHeadersMiddleware
@@ -21,6 +22,7 @@ from app.web import devices as devices_web
 from app.web import login as login_web
 from app.web import register as register_web
 from app.web import settings as settings_web
+from app.web import split_configs as split_configs_web
 from app.web.paths import STATIC_DIR
 from app.web.templating import templates
 
@@ -62,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_api.me_router)
     app.include_router(activities_api.router)
     app.include_router(admin_api.router)
+    app.include_router(split_configs_api.router)
 
     app.include_router(login_web.router)
     app.include_router(activities_web.router)
@@ -69,6 +72,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_web.router)
     app.include_router(register_web.router)
     app.include_router(admin_web.router)
+    app.include_router(split_configs_web.router)
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

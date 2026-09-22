@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit split config" if config_id else "New split config" }} — Simple Activity Tracker{% endblock %}
+{% block content %}
+<h1>{{ "Edit split config" if config_id else "New split config" }}</h1>
+<div class="card">
+  <div id="split-config-form-area">
+    {% include "partials/split_config_form_fields.html" %}
+  </div>
+</div>
+{% endblock %}

@@ -14,6 +14,7 @@ import 'dto/activity_list_item_dto.dart';
 import 'dto/analysis_dto.dart';
 import 'dto/login_response_dto.dart';
 import 'dto/run_dto.dart';
+import 'dto/split_config_dto.dart';
 import 'dto/user_dto.dart';
 
 const _requestTimeout = Duration(seconds: 30);
@@ -243,6 +244,56 @@ class HttpApiClient implements ApiClient {
           .timeout(_requestTimeout),
     );
     return ActivityListResponseDto.fromJson(_decodeJson(response));
+  }
+
+  @override
+  Future<List<SplitConfigDto>> listSplitConfigs({
+    required String baseUrl,
+    required String token,
+  }) async {
+    final response = await _send(
+      () => _client
+          .get(_uri(baseUrl, '/api/v1/split-configs'), headers: _authHeaders(token))
+          .timeout(_requestTimeout),
+    );
+    final body = _decodeJson(response);
+    return (body['configs'] as List<dynamic>)
+        .map((item) => SplitConfigDto.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<SplitConfigDto> saveSplitConfig({
+    required String baseUrl,
+    required String token,
+    required SplitConfigSaveRequestDto request,
+  }) async {
+    final response = await _send(
+      () => _client
+          .post(
+            _uri(baseUrl, '/api/v1/split-configs'),
+            headers: {..._authHeaders(token), 'Content-Type': 'application/json'},
+            body: jsonEncode(request.toJson()),
+          )
+          .timeout(_requestTimeout),
+    );
+    return SplitConfigDto.fromJson(_decodeJson(response));
+  }
+
+  @override
+  Future<void> deleteSplitConfig({
+    required String baseUrl,
+    required String token,
+    required String configId,
+  }) async {
+    await _send(
+      () => _client
+          .delete(
+            _uri(baseUrl, '/api/v1/split-configs/$configId'),
+            headers: _authHeaders(token),
+          )
+          .timeout(_requestTimeout),
+    );
   }
 
   Map<String, dynamic> _decodeJson(http.Response response) =>
