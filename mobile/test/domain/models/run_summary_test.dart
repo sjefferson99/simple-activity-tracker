@@ -27,11 +27,14 @@ void main() {
     expect(summary.movingSeconds, 900.0);
     expect(summary.distanceMeters, 3000.0);
     expect(summary.avgSpeedMps, 3.33);
+    expect(summary.maxSpeedMps, 4.5);
+    expect(summary.elevationGainMeters, 12.5);
     expect(summary.splits, hasLength(1));
     expect(summary.splits.first.index, 1);
     expect(summary.splits.first.durationSeconds, 300.0);
     expect(summary.splits.first.avgSpeedMps, 3.33);
     expect(summary.splits.first.distanceMeters, 1000.0);
+    expect(summary.splits.first.targetSpeedMps, 3.5);
     expect(summary.sourcePlatform, 'android');
     expect(summary.sourceAppVersion, '1.0.0+1');
   });
@@ -49,12 +52,15 @@ void main() {
       elapsed: const Duration(seconds: 900),
       distanceMeters: 3000.0,
       avgSpeedMps: 3.33,
+      maxSpeedMps: 4.5,
+      elevationGainMeters: 12.5,
       completedSplits: const [
         Split(
           index: 1,
           duration: Duration(seconds: 300),
           avgSpeedMps: 3.33,
           distanceMeters: 1000.0,
+          targetSpeedMps: 3.5,
         ),
       ],
       currentSplitElapsed: Duration.zero,
@@ -91,6 +97,29 @@ void main() {
 
       final summary = RunSummary.fromJson(oldShape);
       expect(summary.splits.first.distanceMeters, 1000.0);
+    },
+  );
+
+  test(
+    'fromJson defaults maxSpeedMps/elevationGainMeters/targetSpeedMps for '
+    'an old sidecar written before #106',
+    () {
+      final oldShape = Map<String, dynamic>.from(fixture)
+        ..remove('max_speed_mps')
+        ..remove('elevation_gain_meters');
+      oldShape['splits'] = [
+        {
+          'index': 1,
+          'duration_seconds': 300.0,
+          'avg_speed_mps': 3.33,
+          'distance_m': 1000.0,
+        },
+      ];
+
+      final summary = RunSummary.fromJson(oldShape);
+      expect(summary.maxSpeedMps, isNull);
+      expect(summary.elevationGainMeters, 0);
+      expect(summary.splits.first.targetSpeedMps, isNull);
     },
   );
 

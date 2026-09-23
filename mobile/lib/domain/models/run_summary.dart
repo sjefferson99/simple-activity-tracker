@@ -19,6 +19,19 @@ class RunSummary {
   final double movingSeconds;
   final double distanceMeters;
   final double? avgSpeedMps;
+
+  /// Highest accepted instantaneous/segment speed seen this run (issue
+  /// #106) — mirrors [LiveMetrics.maxSpeedMps]. Null if the run never had
+  /// one (no accepted segment), or for a sidecar/upload written before this
+  /// field existed.
+  final double? maxSpeedMps;
+
+  /// Cumulative positive elevation change (issue #106) — mirrors
+  /// [LiveMetrics.elevationGainMeters]. Defaults to 0, same as that field,
+  /// rather than being nullable — a missing/old value is indistinguishable
+  /// from a genuinely flat run either way.
+  final double elevationGainMeters;
+
   final List<RunSummarySplit> splits;
   final String sourcePlatform;
   final String sourceAppVersion;
@@ -34,6 +47,8 @@ class RunSummary {
     required this.splits,
     required this.sourcePlatform,
     required this.sourceAppVersion,
+    this.maxSpeedMps,
+    this.elevationGainMeters = 0,
   });
 
   /// [metrics.elapsed] is already moving time, not wall-clock elapsed — see
@@ -55,6 +70,8 @@ class RunSummary {
       movingSeconds: metrics.elapsed.inMilliseconds / 1000,
       distanceMeters: metrics.distanceMeters,
       avgSpeedMps: metrics.avgSpeedMps,
+      maxSpeedMps: metrics.maxSpeedMps,
+      elevationGainMeters: metrics.elevationGainMeters,
       splits: [
         for (final split in metrics.completedSplits)
           RunSummarySplit(
@@ -62,6 +79,7 @@ class RunSummary {
             durationSeconds: split.duration.inMilliseconds / 1000,
             avgSpeedMps: split.avgSpeedMps,
             distanceMeters: split.distanceMeters,
+            targetSpeedMps: split.targetSpeedMps,
           ),
       ],
       sourcePlatform: sourcePlatform,
@@ -79,6 +97,10 @@ class RunSummary {
       movingSeconds: (json['moving_seconds'] as num).toDouble(),
       distanceMeters: (json['distance_meters'] as num).toDouble(),
       avgSpeedMps: (json['avg_speed_mps'] as num?)?.toDouble(),
+      // Optional: sidecars/uploads written before #106 never sent these.
+      maxSpeedMps: (json['max_speed_mps'] as num?)?.toDouble(),
+      elevationGainMeters:
+          (json['elevation_gain_meters'] as num?)?.toDouble() ?? 0,
       splits: [
         for (final split in json['splits'] as List<dynamic>)
           RunSummarySplit.fromJson(split as Map<String, dynamic>),
@@ -96,6 +118,8 @@ class RunSummary {
     'moving_seconds': movingSeconds,
     'distance_meters': distanceMeters,
     'avg_speed_mps': avgSpeedMps,
+    'max_speed_mps': maxSpeedMps,
+    'elevation_gain_meters': elevationGainMeters,
     'splits': [for (final split in splits) split.toJson()],
     'source': {'platform': sourcePlatform, 'app_version': sourceAppVersion},
   };
@@ -107,11 +131,18 @@ class RunSummarySplit {
   final double avgSpeedMps;
   final double distanceMeters;
 
+  /// The target average speed this split was measured against (issue
+  /// #99/#106), or null if the run had no target for it — mirrors
+  /// [Split.targetSpeedMps]. Null for a sidecar/upload written before this
+  /// field existed, indistinguishable from "genuinely no target".
+  final double? targetSpeedMps;
+
   const RunSummarySplit({
     required this.index,
     required this.durationSeconds,
     required this.avgSpeedMps,
     required this.distanceMeters,
+    this.targetSpeedMps,
   });
 
   factory RunSummarySplit.fromJson(Map<String, dynamic> json) =>
@@ -123,6 +154,8 @@ class RunSummarySplit {
         // 0 rather than making it nullable throughout the app, since the
         // pre-#43 wire format always meant an implicit 1km split anyway.
         distanceMeters: (json['distance_m'] as num?)?.toDouble() ?? 1000.0,
+        // Optional: sidecars/uploads written before #106 never sent this.
+        targetSpeedMps: (json['target_speed_mps'] as num?)?.toDouble(),
       );
 
   Map<String, dynamic> toJson() => {
@@ -130,5 +163,6 @@ class RunSummarySplit {
     'duration_seconds': durationSeconds,
     'avg_speed_mps': avgSpeedMps,
     'distance_m': distanceMeters,
+    'target_speed_mps': targetSpeedMps,
   };
 }
