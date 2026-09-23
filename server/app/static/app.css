@@ -176,6 +176,44 @@ fieldset button:first-child { margin-top: 0; }
 .stat .value { font-size: 1.4rem; font-weight: 600; }
 .stat .label { color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; }
 
+/* CSS-driven tooltip so the appear delay is ours to set (a native title=
+   attribute's delay isn't configurable) — content comes from the
+   data-tooltip attribute so it works with Jinja-escaped text with no JS.
+   tabindex + :focus (as well as :hover) so it's reachable by keyboard, and
+   with the tab key on a touch device where :hover may not fire at all. */
+.stat[data-tooltip] { position: relative; cursor: help; }
+.stat[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 260px;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  background: var(--text);
+  color: var(--bg-elevated);
+  font-size: 0.75rem;
+  font-weight: 400;
+  text-transform: none;
+  text-align: left;
+  line-height: 1.4;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s ease 0.5s, visibility 0s linear 0.5s;
+  z-index: 10;
+}
+.stat[data-tooltip]:hover::after,
+.stat[data-tooltip]:focus::after {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0.5s;
+}
+
 label { display: block; margin-bottom: 0.3rem; color: var(--text-muted); font-size: 0.9rem; }
 
 input[type="text"], input[type="email"], input[type="password"], input[type="number"], input[type="search"], textarea, select {
