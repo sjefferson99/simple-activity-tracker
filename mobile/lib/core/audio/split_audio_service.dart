@@ -118,26 +118,29 @@ class AudioPlayersSplitAudioService implements SplitAudioService {
       // volume stream than media. `music`/`media` puts the beep on the same
       // stream as everything else this service plays (and the same one a
       // user's music volume slider already controls), so it can't go
-      // silently mute on its own. gainTransientMayDuck (duck, don't
-      // silence, background audio) is unaffected by this — it's an
-      // orthogonal focus request, not the stream choice.
+      // silently mute on its own. gainTransient (pause, not duck, background
+      // audio — issue #135: a ducked-under pace cue was hard to make out
+      // over music/podcasts) is unaffected by this — it's an orthogonal
+      // focus request, not the stream choice.
       await _beepPlayer
           .setAudioContext(
             ap.AudioContext(
               android: const ap.AudioContextAndroid(
                 contentType: ap.AndroidContentType.music,
                 usageType: ap.AndroidUsageType.media,
-                audioFocus: ap.AndroidAudioFocus.gainTransientMayDuck,
+                audioFocus: ap.AndroidAudioFocus.gainTransient,
               ),
-              // AVAudioSessionCategory.ambient can't take duckOthers — only
-              // playback/playAndRecord/multiRoute can (asserted by
-              // AudioContextIOS itself; caught on a real device, see git
-              // log). playback is the right one here: output-only, silenced
-              // by the ring/silent switch like ambient, but able to duck
-              // instead of fully interrupting whatever's already playing.
+              // AVAudioSessionCategory.ambient can't take exclusive-focus
+              // options — only playback/playAndRecord/multiRoute can
+              // (asserted by AudioContextIOS itself; caught on a real
+              // device, see git log). playback is the right one here:
+              // output-only, silenced by the ring/silent switch like
+              // ambient. No duckOthers/mixWithOthers option means other
+              // apps' audio is paused/interrupted for the cue's duration
+              // (issue #135), not just lowered in volume, and resumes once
+              // this session's playback ends.
               iOS: ap.AudioContextIOS(
                 category: ap.AVAudioSessionCategory.playback,
-                options: const {ap.AVAudioSessionOptions.duckOthers},
               ),
             ),
           )
@@ -166,11 +169,14 @@ class AudioPlayersSplitAudioService implements SplitAudioService {
             .catchError((Object e) => _log('initialize: awaitSpeakCompletion FAILED: $e')),
       );
 
+      // .ambient is inherently mixable regardless of options (per
+      // flutter_tts's own doc comment on the enum) — dropping duckOthers
+      // alone would leave speech still mixed quietly under other audio
+      // rather than pausing it. .playback (same category the beep now
+      // uses, see above) is nonmixable by default, so spoken cues actually
+      // interrupt/pause background audio too, not just the beeps.
       await _tts
-          .setIosAudioCategory(
-            tts.IosTextToSpeechAudioCategory.ambient,
-            [tts.IosTextToSpeechAudioCategoryOptions.duckOthers],
-          )
+          .setIosAudioCategory(tts.IosTextToSpeechAudioCategory.playback, [])
           .timeout(_initStepTimeout);
       _log('initialize: setIosAudioCategory done');
     } catch (e, st) {
