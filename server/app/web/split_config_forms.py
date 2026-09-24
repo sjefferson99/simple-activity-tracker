@@ -53,10 +53,15 @@ def parse_pace_to_mps(raw: str, *, field: str, meters_per_unit: float) -> float:
     SplitPlan)."""
     stripped = raw.strip()
     match = _MM_SS_RE.match(stripped)
-    if not match:
+    if match:
+        total_seconds = int(match.group(1)) * 60 + int(match.group(2))
+    elif stripped.isdigit():
+        # A bare whole number is whole minutes ("5" -> 5:00), mirroring
+        # mobile's parsePaceToMps/parseMinSec default — easy to forget the
+        # colon, and "5" meaning 5 min/km is the natural reading.
+        total_seconds = int(stripped) * 60
+    else:
         raise SplitConfigFormError(field, "Enter a pace as mm:ss")
-    minutes, seconds = int(match.group(1)), int(match.group(2))
-    total_seconds = minutes * 60 + seconds
     if total_seconds <= 0:
         raise SplitConfigFormError(field, "Pace must be greater than zero")
     return meters_per_unit / total_seconds

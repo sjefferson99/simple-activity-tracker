@@ -378,6 +378,10 @@ void main() {
       expect(formatSplitSizeMeters(1500, DistanceUnit.km), '1.5 km');
     });
 
+    test('a value that rounds to 1000 m reads as 1 km, not 1000 m', () {
+      expect(formatSplitSizeMeters(999.9999, DistanceUnit.km), '1 km');
+    });
+
     test('shows decimal miles for a mile-kind split', () {
       expect(formatSplitSizeMeters(1609.344, DistanceUnit.mi), '1 mi');
       expect(formatSplitSizeMeters(804.672, DistanceUnit.mi), '0.5 mi');

@@ -87,7 +87,69 @@ Finder _customSplitDeleteButton(int index) => find.descendant(
   matching: find.byIcon(Icons.delete_outline),
 );
 
+/// Pumps the screen with [plan] already selected (issue #134 tests).
+Future<void> _pumpWithPlan(WidgetTester tester, SplitPlan plan) async {
+  final container = ProviderContainer(
+    overrides: [
+      authStateControllerProvider.overrideWith(_NotSignedInAuthController.new),
+      apiClientProvider.overrideWithValue(FakeApiClient()),
+    ],
+  );
+  addTearDown(container.dispose);
+  FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform({});
+  await container.read(splitPlanControllerProvider.notifier).select(plan);
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(home: SplitsScreen()),
+    ),
+  );
+  await tester.pumpAndSettle();
+  await tester.dragUntilVisible(
+    find.byKey(const ValueKey('custom_plan_totals')),
+    find.byType(ListView),
+    const Offset(0, -100),
+  );
+  await tester.pump();
+}
+
 void main() {
+  testWidgets('custom distance plan shows per-split times and a summed total '
+      '(issue #134)', (tester) async {
+    await _pumpWithPlan(
+      tester,
+      const SplitPlan(
+        base: SplitPreference.defaultPreference,
+        customSplits: [
+          PlannedSplit(size: 1000, targetSpeedMps: 1000 / 300),
+          PlannedSplit(size: 2000, targetSpeedMps: 1000 / 330),
+        ],
+      ),
+    );
+
+    expect(find.text('= 5:00'), findsOneWidget);
+    expect(find.text('= 11:00'), findsOneWidget);
+    expect(find.text('Distance: 3 km'), findsOneWidget);
+    expect(find.text('Time: 16:00'), findsOneWidget);
+  });
+
+  testWidgets('custom time plan sums distance; a missing target blanks it '
+      '(issue #134)', (tester) async {
+    await _pumpWithPlan(
+      tester,
+      const SplitPlan(
+        base: SplitPreference(kind: SplitKind.timeMin, value: 1),
+        customSplits: [
+          PlannedSplit(size: 90, targetSpeedMps: 4),
+          PlannedSplit(size: 30),
+        ],
+      ),
+    );
+
+    expect(find.text('= 360 m'), findsOneWidget);
+    expect(find.text('Time: 2:00'), findsOneWidget);
+    expect(find.text('Distance: — (1 split without a target)'), findsOneWidget);
+  });
   testWidgets('setting a rolling target shows an equivalent-pace hint', (
     tester,
   ) async {

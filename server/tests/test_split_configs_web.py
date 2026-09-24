@@ -191,6 +191,7 @@ class TestCustomPlan:
                 "rolling_target": "",
                 "split_size": ["1:30"],
                 "split_target": ["5:00"],
+                "row_action": "add",
             },
         )
         assert response.status_code == 200
@@ -387,3 +388,225 @@ class TestRateLimiting:
 
         response = client.delete(f"/split-configs/{config_ids[5]}", headers=HTMX_HEADERS)
         assert response.status_code == 429
+
+
+class TestPreview:
+    """Issue #134: per-split estimates and plan totals on the editor."""
+
+    def _preview(self, client, **fields):
+        payload = {
+            "split_type": "distance_km",
+            "split_value": "1",
+            "targets_as": "pace",
+            "plan_kind": "custom",
+            "rolling_target": "",
+        }
+        payload.update(fields)
+        return client.post("/split-configs/preview", headers=HTMX_HEADERS, data=payload)
+
+    def test_requires_htmx_header(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = client.post("/split-configs/preview", data={"plan_kind": "rolling"})
+        assert response.status_code == 403
+
+    def test_rolling_distance_shows_time_per_split(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._preview(client, plan_kind="rolling", rolling_target="5:00")
+        assert response.status_code == 200
+        assert "At target: 5:00 per split" in response.text
+
+    def test_rolling_without_target_shows_nothing(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._preview(client, plan_kind="rolling")
+        assert "At target" not in response.text
+
+    def test_rolling_time_shows_distance_per_split(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        # 5 min at 12 km/h = 1 km.
+        response = self._preview(
+            client,
+            plan_kind="rolling",
+            split_type="time_min",
+            split_value="5",
+            targets_as="speed",
+            rolling_target="12",
+        )
+        assert "At target: 1 km per split" in response.text
+
+    def test_custom_distance_sums_time_and_distance(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._preview(client, split_size=["1", "2"], split_target=["5:00", "5:30"])
+        assert "<td>5:00</td>" in response.text
+        assert "<td>11:00</td>" in response.text
+        assert "Distance: 3 km" in response.text
+        assert "Time: 16:00" in response.text
+
+    def test_custom_missing_target_blanks_derived_total(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._preview(client, split_size=["1", "0.4"], split_target=["5:00", ""])
+        assert "Distance: 1.4 km" in response.text
+        assert "Time: —" in response.text
+        assert "1 split without a target" in response.text
+
+    def test_custom_time_plan_sums_distance(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        # 1:30 and 0:30 at 12 km/h (200 m/min) = 300 m + 100 m.
+        response = self._preview(
+            client,
+            split_type="time_min",
+            targets_as="speed",
+            split_size=["1:30", "0:30"],
+            split_target=["12", "12"],
+        )
+        assert "<td>300 m</td>" in response.text
+        assert "Distance: 400 m" in response.text
+        assert "Time: 2:00" in response.text
+
+    def test_invalid_value_suppresses_totals(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._preview(client, split_size=["1", "abc"], split_target=["5:00", ""])
+        assert response.status_code == 200
+        assert "Totals appear once every size and target is valid" in response.text
+
+    def test_edit_page_renders_preview_for_saved_custom_plan(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        _create(
+            client,
+            plan_kind="custom",
+            rolling_target="",
+            split_size=["1", "1"],
+            split_target=["5:00", "4:30"],
+        )
+        config_id = _edit_ids(client.get("/split-configs").text)[0]
+        page = client.get(f"/split-configs/{config_id}/edit").text
+        assert 'id="split-config-preview"' in page
+        assert "Distance: 2 km" in page
+        assert "Time: 9:30" in page
+
+
+class TestFormRefresh:
+    """Issue #134 follow-ups found on the live form: a Unit/Targets-as/
+    plan-kind change must not add a row, and must convert typed targets."""
+
+    def _refresh(self, client, **fields):
+        payload = {
+            "config_id": "",
+            "name": "x",
+            "split_type": "distance_km",
+            "split_value": "1",
+            "targets_as": "pace",
+            "plan_kind": "custom",
+            "rolling_target": "",
+            "prev_targets_as": "pace",
+            "prev_split_type": "distance_km",
+            "split_size": ["1"],
+            "split_target": ["5:00"],
+        }
+        payload.update(fields)
+        return client.post("/split-configs/custom-rows", headers=HTMX_HEADERS, data=payload)
+
+    def test_settings_change_does_not_add_a_row(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._refresh(client, split_type="distance_mi")
+        assert response.text.count('name="split_size"') == 1
+
+    def test_pace_to_speed_converts_targets_and_keeps_totals(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._refresh(client, targets_as="speed")
+        assert 'name="split_target" value="12"' in response.text
+        assert "Time: 5:00" in response.text
+
+    def test_speed_to_pace_converts_rolling_target(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._refresh(
+            client, plan_kind="rolling", prev_targets_as="speed", rolling_target="12"
+        )
+        assert 'name="rolling_target" value="5:00"' in response.text
+
+    def test_km_to_mi_pace_keeps_the_same_speed(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        # 5:00 /km = 3.333 m/s = 8:03 /mi.
+        response = self._refresh(client, split_type="distance_mi")
+        assert 'name="split_target" value="8:03"' in response.text
+
+    def test_unparseable_target_is_left_as_typed(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._refresh(client, targets_as="speed", split_target=["abc"])
+        assert 'name="split_target" value="abc"' in response.text
+
+    def test_bare_number_pace_means_whole_minutes(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = client.post(
+            "/split-configs/preview",
+            headers=HTMX_HEADERS,
+            data={
+                "split_type": "distance_km",
+                "targets_as": "pace",
+                "plan_kind": "custom",
+                "split_size": ["2"],
+                "split_target": ["5"],
+            },
+        )
+        assert "Time: 10:00" in response.text
+
+    def test_minutes_to_km_converts_sizes_through_targets(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        # The screenshot case: 5:00 @ 6 km/h = 0.5 km; 1:30 @ 8 km/h = 0.2 km.
+        response = self._refresh(
+            client,
+            prev_split_type="time_min",
+            prev_targets_as="speed",
+            targets_as="speed",
+            split_size=["5:00", "1:30"],
+            split_target=["6", "8"],
+        )
+        assert 'name="split_size" value="0.5"' in response.text
+        assert 'name="split_size" value="0.2"' in response.text
+        assert "Distance: 700 m" in response.text
+
+    def test_km_to_minutes_converts_sizes_through_targets(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        # 1 km @ 5:00 /km = 5:00.
+        response = self._refresh(client, split_type="time_min")
+        assert 'name="split_size" value="5:00"' in response.text
+        assert "Time: 5:00" in response.text
+
+    def test_time_distance_switch_blanks_untargeted_sizes(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._refresh(
+            client,
+            split_type="time_min",
+            split_size=["1", "2"],
+            split_target=["5:00", ""],
+        )
+        assert 'name="split_size" value="5:00"' in response.text
+        assert 'name="split_size" value=""' in response.text
+
+    def test_km_to_mi_keeps_the_typed_size(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._refresh(client, split_type="distance_mi", split_size=["1.5"])
+        assert 'name="split_size" value="1.5"' in response.text
+
+    def test_minutes_to_km_keeps_metre_precision_for_a_round_trip(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        # 1:30 @ 7 km/h = 0.175 km; 2-decimal rounding would give 0.18 and
+        # convert back as 1:33.
+        to_km = self._refresh(
+            client,
+            prev_split_type="time_min",
+            prev_targets_as="speed",
+            targets_as="speed",
+            split_size=["1:30"],
+            split_target=["7"],
+        )
+        assert 'name="split_size" value="0.175"' in to_km.text
+        back = self._refresh(
+            client,
+            prev_split_type="distance_km",
+            split_type="time_min",
+            prev_targets_as="speed",
+            targets_as="speed",
+            split_size=["0.175"],
+            split_target=["7"],
+        )
+        assert 'name="split_size" value="1:30"' in back.text
