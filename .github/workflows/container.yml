@@ -31,6 +31,15 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history + tags, so release-version.sh can `git describe`.
+          fetch-depth: 0
+
+      - name: Compute release version
+        id: version
+        # 1.3.0 on a v1.3.0 tag, 1.3.0+4.gabc1234 on main — baked into the
+        # image and shown in the web footer / server-info (docs/VERSIONING.md).
+        run: echo "app_version=$(./scripts/release-version.sh)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -39,6 +48,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: server
+          build-args: APP_VERSION=${{ steps.version.outputs.app_version }}
           platforms: linux/amd64,linux/arm64
           push: false
           load: false
@@ -50,6 +60,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: server
+          build-args: APP_VERSION=${{ steps.version.outputs.app_version }}
           platforms: linux/amd64
           load: true
           tags: ${{ env.IMAGE_NAME }}:smoke-test
@@ -61,12 +72,19 @@ jobs:
           chmod 777 /tmp/sr-smoke-data
           docker run -d --name smoke -p 8000:8000 \
             -e SR_SECRET_KEY=ci-smoke-test-key-not-a-real-secret-32chars \
+            -e SR_ENABLE_API_DOCS=true \
             -v /tmp/sr-smoke-data:/data \
             ${{ env.IMAGE_NAME }}:smoke-test
+          # SR_ENABLE_API_DOCS only so /healthz includes the version — proves
+          # the APP_VERSION build arg actually reached the running app.
+          expected='"version":"${{ steps.version.outputs.app_version }}"'
           for i in $(seq 1 15); do
-            if curl -sf http://127.0.0.1:8000/healthz; then
-              echo "healthz OK"
-              exit 0
+            if body=$(curl -sf http://127.0.0.1:8000/healthz); then
+              echo "$body"
+              case "$body" in
+                *"$expected"*) echo "healthz OK"; exit 0 ;;
+                *) echo "healthz reported the wrong version (expected $expected)"; exit 1 ;;
+              esac
             fi
             sleep 2
           done
@@ -205,6 +223,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: server
+          build-args: APP_VERSION=${{ steps.version.outputs.app_version }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

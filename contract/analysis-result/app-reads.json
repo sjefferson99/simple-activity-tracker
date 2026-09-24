@@ -1,0 +1,30 @@
+{
+  "_about": "Every analysis.result field a released or current app reads, and the type it expects. The server must keep each one present (unless 'optional') with this type for as long as MIN_APP_API_LEVEL is 0: released apps (v1.2.4 and earlier) cast some of these with no fallback, and a mismatch crashes their activity screen. analysis.result is a free-form object in openapi.json, so neither the API-level guard nor oasdiff can see it; server/tests/test_api_contract.py checks the real analyzer output against this file instead. Only ever add entries. See docs/VERSIONING.md section 6.",
+  "result": {
+    "distance_meters": "number",
+    "elapsed_seconds": "number",
+    "moving_seconds": "number",
+    "avg_moving_speed_mps": "number|null",
+    "elevation": "object",
+    "best_efforts": "array",
+    "splits": "array",
+    "split_type": "string",
+    "split_targets_as": "string|null|optional"
+  },
+  "elevation": {
+    "gain_m": "number|null",
+    "loss_m": "number|null"
+  },
+  "best_efforts[]": {
+    "distance_meters": "number",
+    "duration_seconds": "number"
+  },
+  "splits[]": {
+    "index": "integer",
+    "distance_m": "number",
+    "duration_seconds": "number",
+    "avg_speed_mps": "number|null",
+    "target_speed_mps": "number|null|optional",
+    "verdict": "string|null|optional"
+  }
+}

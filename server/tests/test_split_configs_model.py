@@ -244,9 +244,11 @@ class TestSplitPlanInValidation:
         with pytest.raises(ValidationError):
             SplitPlanIn.model_validate(_rolling_plan(split_type="distance_furlongs"))
 
-    def test_rejects_unknown_fields(self):
-        with pytest.raises(ValidationError):
-            SplitPlanIn.model_validate(_rolling_plan(unexpected_field=True))
+    def test_ignores_unknown_fields(self):
+        # docs/VERSIONING.md §5: a newer app's extra field must not fail
+        # validation, and must not survive into the parsed model either.
+        plan = SplitPlanIn.model_validate(_rolling_plan(unexpected_field=True))
+        assert "unexpected_field" not in plan.model_dump()
 
     def test_defaults_targets_as_to_pace(self):
         payload = _rolling_plan(rolling_target_mps=None)

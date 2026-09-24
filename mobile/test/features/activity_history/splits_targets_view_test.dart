@@ -104,4 +104,30 @@ void main() {
 
     expect(find.textContaining('mi'), findsWidgets);
   });
+
+  // docs/VERSIONING.md §3.3: a server that reshapes analysis.result must cost
+  // a row, never the whole activity screen.
+  testWidgets('skips malformed splits instead of crashing', (tester) async {
+    await _pump(tester, {
+      'split_type': 'distance_km',
+      'splits': [
+        _split(index: 1),
+        {'index': 2, 'distance_m': 1000.0}, // no duration_seconds
+        'not an object',
+        {'index': 3.0, 'distance_m': 1000, 'duration_seconds': 280, 'avg_speed_mps': 'fast'},
+      ],
+    });
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('#1'), findsOneWidget);
+    expect(find.text('#2'), findsNothing);
+    expect(find.text('#3'), findsOneWidget);
+  });
+
+  testWidgets('a wrongly typed splits field renders nothing, not an error', (tester) async {
+    await _pump(tester, {'splits': 'oops', 'split_type': 7});
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Splits'), findsNothing);
+  });
 }

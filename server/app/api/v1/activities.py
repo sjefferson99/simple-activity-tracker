@@ -58,6 +58,7 @@ from app.api.v1.schemas import (
     StravaImportJobStatus,
     TagOut,
     TrackOut,
+    known_summary_fields,
 )
 from app.audit import log_audit_event
 from app.auth.current_user import CurrentDeviceName, CurrentUser
@@ -393,7 +394,7 @@ def upload_activity(
             activity_type=summary_model.activity_type,
             started_at=summary_model.started_at,
             ended_at=summary_model.ended_at,
-            client_summary=json.loads(summary),
+            client_summary=known_summary_fields(json.loads(summary)),
             source_platform=summary_model.source.platform,
             source_app_version=summary_model.source.app_version,
             device_name=device_name,

@@ -7,7 +7,10 @@ import '../../domain/models/run_record.dart';
 import '../../domain/models/sync_status.dart';
 import '../api/api_client.dart';
 import '../api/api_exception.dart';
+import '../api/dto/server_info_dto.dart';
 import '../auth/auth_service.dart';
+import '../auth/auth_state.dart';
+import '../version/api_compat.dart';
 import 'connectivity.dart';
 import 'file_run_store.dart';
 import 'run_store.dart';
@@ -45,6 +48,11 @@ const _backoffSchedule = [
 /// run finishing) happened to come along. Found via real on-device testing:
 /// switching networks produced no retry until this periodic tick was added.
 const _periodicRetryInterval = Duration(minutes: 1);
+
+/// How often a record an older server rejected is re-checked against the
+/// server's API level (docs/VERSIONING.md §3.4) — see
+/// SyncService._rejectedRecheckDue.
+const _rejectedRecheckInterval = Duration(minutes: 15);
 
 /// Bounded retry for a still-`pending` analysis fetch right after upload
 /// (issue #97/#101, Slice C) — short-lived (well under a minute total), so
@@ -89,6 +97,10 @@ class SyncService {
   /// safe (if slightly eager) to just retry immediately in that case.
   final Map<String, int> _attemptCounts = {};
   final Map<String, DateTime> _lastAttemptTimes = {};
+
+  /// When rejected records were last checked against the server's API level
+  /// — see [_rejectedRecheckDue].
+  DateTime? _lastRejectedRecheck;
 
   final _statusController = StreamController<(String, SyncStatus)>.broadcast();
 
@@ -196,19 +208,41 @@ class SyncService {
   }
 
   Future<void> _drainQueue() async {
-    final queue = await _runStore.listPendingOrRetryable();
+    var queue = await _runStore.listPendingOrRetryable();
+    final rejected = _rejectedRecheckDue() ? await _rejectedByServer() : <RunRecord>[];
+    // Nothing to upload yet (every queued record is still backing off) and
+    // no rejected record to re-check: skip the pass, including the
+    // server-info call — the periodic timer fires every minute.
+    if (!queue.any(_isDue) && rejected.isEmpty) return;
+    if (!await _connectivity.isConnected) return;
+
+    // Not signed in / no server configured: leave everything pending —
+    // every record would fail the same way right now.
+    final auth = await _authService.currentState();
+    if (!auth.isSignedIn || !auth.hasServerUrl) return;
+
+    final server = await _fetchServerInfo(auth, queue);
+    if (server == null) return;
+    if (rejected.isNotEmpty) _lastRejectedRecheck = _now();
+    // Out of each other's supported range: uploads wait (pending, nothing
+    // lost) until one side is updated. Settings says which one.
+    if (server.compatibility != ServerCompatibility.compatible) return;
+
+    if (await _requeueRejectedByOlderServer(rejected, server.apiLevel)) {
+      queue = await _runStore.listPendingOrRetryable();
+    }
+
     for (final record in queue) {
       if (!await _connectivity.isConnected) return;
 
-      final due = _dueAt(record);
-      if (due != null && _now().isBefore(due)) {
+      if (!_isDue(record)) {
         // Not a `return`: oldest-first is about upload order, not
         // eligibility — a not-yet-due retryable record must not block a
         // later one (e.g. freshly pending) that's ready now.
         continue;
       }
 
-      if (!await _attemptUpload(record)) return;
+      if (!await _attemptUpload(record, auth, server.apiLevel)) return;
       // A successful upload always continues to the next record. A failed
       // one also continues rather than stopping the pass — the record just
       // moved to `failed` (retryable or not) and simply won't be picked up
@@ -227,23 +261,90 @@ class SyncService {
     return lastAttemptAt.add(_backoffSchedule[index]);
   }
 
-  /// Returns false only when the pass as a whole should stop (not signed in
-  /// / no server configured — every other queued record would fail the same
-  /// way right now, so there's no point trying them). Returns true for every
-  /// other outcome, including a recorded failure: a broken record (retryable
-  /// or not) is done with for this pass either way, and must not block the
-  /// rest of the queue from being attempted.
-  Future<bool> _attemptUpload(RunRecord record) async {
+  bool _isDue(RunRecord record) {
+    final due = _dueAt(record);
+    return due == null || !_now().isBefore(due);
+  }
+
+  /// Whether it's time to look for rejected records to re-queue. A server
+  /// upgrade is rare, and checking means a server-info request, so a record
+  /// the server rejected at its *current* level must not trigger one every
+  /// minute for as long as it sits in the queue. The first pass after launch
+  /// always checks.
+  bool _rejectedRecheckDue() {
+    final last = _lastRejectedRecheck;
+    return last == null || !_now().isBefore(last.add(_rejectedRecheckInterval));
+  }
+
+  /// Records a server permanently rejected at a known API level — candidates
+  /// for [_requeueRejectedByOlderServer].
+  Future<List<RunRecord>> _rejectedByServer() async => [
+    for (final record in await _runStore.listAll())
+      if (record.syncStatus case SyncStatusFailed(
+        retryable: false,
+        rejectedAtServerApiLevel: final int _,
+      ))
+        record,
+  ];
+
+  /// The server's version and API level, fetched once per pass
+  /// (docs/VERSIONING.md §3) — it decides how each upload is shaped. Returns
+  /// null when the pass should stop: signed out (401), or the server
+  /// couldn't be reached, in which case every due record is marked with the
+  /// same retryable failure its own upload attempt would have produced.
+  Future<ServerInfoDto?> _fetchServerInfo(AuthState auth, List<RunRecord> queue) async {
+    try {
+      return await _apiClient.getServerInfo(baseUrl: auth.serverUrl!, token: auth.token!);
+    } on ApiUnauthorizedException {
+      await _authService.markSignedOutDueToAuthFailure();
+      return null;
+    } on ApiException catch (e) {
+      for (final record in queue) {
+        if (!_isDue(record)) continue;
+        _lastAttemptTimes[record.clientRunId] = _now();
+        await _setStatus(
+          record.clientRunId,
+          SyncStatusFailed(
+            error: e.message,
+            attempts: _bumpAttempts(record.clientRunId),
+            retryable: true,
+          ),
+        );
+      }
+      return null;
+    }
+  }
+
+  /// An older server can reject what this app sends (docs/VERSIONING.md
+  /// §3.4). Once the server reports a higher API level than the one that
+  /// rejected a record, give that record another go automatically — the
+  /// user shouldn't have to find "Retry now" after updating their server.
+  /// Returns whether anything was re-queued.
+  Future<bool> _requeueRejectedByOlderServer(
+    List<RunRecord> rejected,
+    int serverApiLevel,
+  ) async {
+    var requeued = false;
+    for (final record in rejected) {
+      final status = record.syncStatus as SyncStatusFailed;
+      if (status.rejectedAtServerApiLevel! < serverApiLevel) {
+        _attemptCounts.remove(record.clientRunId);
+        _lastAttemptTimes.remove(record.clientRunId);
+        await _setStatus(record.clientRunId, const SyncStatusPending());
+        requeued = true;
+      }
+    }
+    return requeued;
+  }
+
+  /// Returns false only when the pass as a whole should stop (a 401 —
+  /// every other queued record would fail the same way right now). Returns
+  /// true for every other outcome, including a recorded failure: a broken
+  /// record (retryable or not) is done with for this pass either way, and
+  /// must not block the rest of the queue from being attempted.
+  Future<bool> _attemptUpload(RunRecord record, AuthState auth, int serverApiLevel) async {
     await _setStatus(record.clientRunId, const SyncStatusUploading());
     _lastAttemptTimes[record.clientRunId] = _now();
-
-    final auth = await _authService.currentState();
-    if (!auth.isSignedIn || !auth.hasServerUrl) {
-      // Leave the record pending (not failed) — retrying immediately would
-      // just fail the same way for every other queued record too.
-      await _setStatus(record.clientRunId, const SyncStatusPending());
-      return false;
-    }
 
     try {
       final runDto = await _apiClient.uploadRun(
@@ -251,6 +352,7 @@ class SyncService {
         token: auth.token!,
         summary: record.summary,
         gpxFile: File(record.gpxPath),
+        serverApiLevel: serverApiLevel,
       );
       await _setStatus(record.clientRunId, SyncStatusUploaded(serverRunId: runDto.id));
       _attemptCounts.remove(record.clientRunId);
@@ -269,7 +371,15 @@ class SyncService {
       final attempts = _bumpAttempts(record.clientRunId);
       await _setStatus(
         record.clientRunId,
-        SyncStatusFailed(error: e.message, attempts: attempts, retryable: false),
+        SyncStatusFailed(
+          error: serverApiLevel < kAppApiLevel
+              ? '${e.message}\nThe server is older than this app, which may be why. '
+                    'This activity will upload automatically once the server is updated.'
+              : e.message,
+          attempts: attempts,
+          retryable: false,
+          rejectedAtServerApiLevel: serverApiLevel,
+        ),
       );
       return true;
     } on ApiException catch (e) {

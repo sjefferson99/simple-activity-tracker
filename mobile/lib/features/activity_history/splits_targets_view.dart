@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/api/tolerant_json.dart';
 import '../../core/units/units.dart';
 import '../../domain/tracking/split_target.dart';
 
@@ -26,16 +27,24 @@ class SplitsTargetsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final splits = (analysisResult['splits'] as List<dynamic>? ?? const [])
-        .cast<Map<String, dynamic>>();
+    // A split missing a field this row needs is skipped rather than crashing
+    // the screen — docs/VERSIONING.md §3.3.
+    final splits = readMapList(analysisResult, 'splits')
+        .where(
+          (s) =>
+              readInt(s, 'index') != null &&
+              readDouble(s, 'distance_m') != null &&
+              readDouble(s, 'duration_seconds') != null,
+        )
+        .toList();
     if (splits.isEmpty) return const SizedBox.shrink();
 
-    final targetsAs = analysisResult['split_targets_as'] as String?;
+    final targetsAs = readString(analysisResult, 'split_targets_as');
     final speedUnit = _speedUnitFor(
-      splitType: analysisResult['split_type'] as String?,
+      splitType: readString(analysisResult, 'split_type'),
       targetsAs: targetsAs,
     );
-    final hasTargets = splits.any((s) => s['target_speed_mps'] != null);
+    final hasTargets = splits.any((s) => readDouble(s, 'target_speed_mps') != null);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -81,12 +90,13 @@ class _SplitTargetRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final index = split['index'] as int;
-    final distanceM = (split['distance_m'] as num).toDouble();
-    final durationS = (split['duration_seconds'] as num).toDouble();
-    final avgSpeedMps = (split['avg_speed_mps'] as num?)?.toDouble();
-    final targetSpeedMps = (split['target_speed_mps'] as num?)?.toDouble();
-    final verdictName = split['verdict'] as String?;
+    // Presence of the first three is checked by SplitsTargetsView's filter.
+    final index = readInt(split, 'index')!;
+    final distanceM = readDouble(split, 'distance_m')!;
+    final durationS = readDouble(split, 'duration_seconds')!;
+    final avgSpeedMps = readDouble(split, 'avg_speed_mps');
+    final targetSpeedMps = readDouble(split, 'target_speed_mps');
+    final verdictName = readString(split, 'verdict');
 
     final verdict = switch (verdictName) {
       'on_target' => SplitVerdict.onTarget,

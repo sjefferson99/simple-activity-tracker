@@ -30,6 +30,17 @@ _ServerCreds? _credsFrom(AsyncValue<AuthState> authState) {
   return _ServerCreds(baseUrl: baseUrl, token: token);
 }
 
+/// Saved split configs arrived in server v1.2.4, which is still API level 0,
+/// so the app can't gate on the level — a 404 from the list/save endpoint
+/// means "this server is too old", not a failure (docs/VERSIONING.md §3.2).
+/// Only for those two calls: a 404 from delete means the config is gone.
+String _describeConfigsError(Object error) {
+  if (error is ApiRejectedException && error.statusCode == 404) {
+    return 'this server is too old for saved configs — update the server to use them.';
+  }
+  return error is ApiException ? error.message : '$error';
+}
+
 /// Fetches the signed-in user's saved split configs fresh every time it's
 /// read — never cached locally (docs/SPLIT-CONFIGS-PLAN.md O3), same
 /// reasoning as [activityDetailProvider]. `autoDispose` so leaving the
@@ -110,7 +121,7 @@ class _LoadFromSavedList extends ConsumerWidget {
           children: [
             Expanded(
               child: Text(
-                'Could not load saved configs: ${error is ApiException ? error.message : error}',
+                'Could not load saved configs: ${_describeConfigsError(error)}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
@@ -283,9 +294,9 @@ class _SaveAsButtonState extends ConsumerState<_SaveAsButton> {
           return;
         }
       } else if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Could not save: ${e.message}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save: ${_describeConfigsError(e)}')),
+        );
       }
     } on Object catch (e) {
       if (context.mounted) {

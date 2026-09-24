@@ -16,7 +16,11 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+#
+# Placeholder — do not bump. Release builds take the version from the vX.Y.Z
+# tag (mobile-release.yml passes --build-name/--build-number), and the app
+# shows "dev build" whenever it sees 0.0.0. See docs/VERSIONING.md §1.
+version: 0.0.0+1
 
 environment:
   sdk: ^3.13.2
