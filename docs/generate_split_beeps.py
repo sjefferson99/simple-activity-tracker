@@ -21,6 +21,18 @@ beep_double.wav:  2 tones, 880Hz (A5) — target-verdict "too fast".
 beep_triple.wav:  3 tones, 880Hz (A5) — target-verdict "too slow".
 beep_long.wav:    1 tone,  660Hz (E5), longer — target-verdict "back on
                   target" ("split time OK again").
+silence.wav:      issue #135 follow-up. A short (0.2s) silent clip, looped
+                  on the beep player (ReleaseMode.loop) around every
+                  speak() call to hold real Android audio focus for the
+                  spoken phrase's whole duration. flutter_tts's own Android
+                  focus request is hardcoded to AUDIOFOCUS_GAIN_TRANSIENT_
+                  MAY_DUCK (duck, not pause — see git log) with no
+                  non-duck option exposed from Dart, so TTS speech can only
+                  get real pause-other-audio behavior by riding on
+                  audioplayers' own (correctly non-duck) focus request
+                  instead. A silent clip rather than a truly empty
+                  no-op keeps this on the exact same AudioContext/focus
+                  path the beeps already use and verified.
 
 The double/triple clips deliberately reuse beep_single's exact tone
 (frequency, duration, gain) repeated with a fixed silent gap between
@@ -74,6 +86,16 @@ def _silence_samples(duration_s: float) -> bytearray:
     return bytearray(int(SAMPLE_RATE * duration_s) * 2)  # 2 bytes/sample, all zero
 
 
+# 0.2s: short enough that looping it doesn't itself introduce an audible
+# gap/click cadence, long enough that a real device's platform audio stack
+# isn't asked to loop unreasonably fast.
+_SILENCE_LOOP_S = 0.2
+
+
+def make_silence(path: str, duration_s: float) -> None:
+    _write_wav(path, _silence_samples(duration_s))
+
+
 def _write_wav(path: str, frames: bytearray) -> None:
     with wave.open(path, 'wb') as f:
         f.setnchannels(1)
@@ -101,4 +123,5 @@ if __name__ == '__main__':
     make_repeated_tone(f'{out_dir}/beep_double.wav', freq_hz=880.0, duration_s=_SHORT_TONE_S, repeats=2)
     make_repeated_tone(f'{out_dir}/beep_triple.wav', freq_hz=880.0, duration_s=_SHORT_TONE_S, repeats=3)
     make_repeated_tone(f'{out_dir}/beep_long.wav', freq_hz=660.0, duration_s=_LONG_TONE_S, repeats=1)
+    make_silence(f'{out_dir}/silence.wav', duration_s=_SILENCE_LOOP_S)
     print('done')

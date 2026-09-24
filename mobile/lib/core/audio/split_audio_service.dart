@@ -59,6 +59,23 @@ const _doubleBeepAsset = 'audio/beep_double.wav';
 const _tripleBeepAsset = 'audio/beep_triple.wav';
 const _longBeepAsset = 'audio/beep_long.wav';
 
+/// Looped on [_beepPlayer] for the duration of every [speak] call (issue
+/// #135). `flutter_tts`'s own Android focus request is hardcoded to
+/// `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` (duck, not pause) with no non-duck
+/// option exposed from Dart — see
+/// `flutter_tts-*/android/.../FlutterTtsPlugin.kt`'s `requestAudioFocus()`,
+/// confirmed by reading the plugin source, not guessing. Worse, this
+/// service's `speak()` calls `FlutterTts.speak()` with the default
+/// `focus: false`, so on Android it was requesting *no* focus at all, not
+/// even a duck — the plugin's own hardcoded request is simply never
+/// invoked. Since `_beepPlayer`'s `AudioContext` already requests genuine
+/// non-duck focus (`AndroidAudioFocus.gainTransient` / iOS
+/// `.playback` with no duck option) and is proven to do so correctly for
+/// the beep clips, looping this silent clip on it for the spoken phrase's
+/// duration rides on that same, already-correct request instead of relying
+/// on `flutter_tts`'s own (Android: duck-only-or-nothing) focus handling.
+const _silenceAsset = 'audio/silence.wav';
+
 /// Gap after a beep before any spoken phrase for that same cue starts — on
 /// a real device (S23) the beep and TTS were audibly overlapping despite
 /// going through the same serialized queue, because `AudioPlayer.play()`
@@ -260,7 +277,26 @@ class AudioPlayersSplitAudioService implements SplitAudioService {
     // occasionally a beat more silence than strictly necessary.
     await Future<void>.delayed(_beepToSpeechGap);
     _log('speak: "$text" start');
-    await _tts.speak(text);
+    // Hold real (non-duck) audio focus for the whole spoken phrase — see
+    // _silenceAsset's doc comment for why this is necessary on Android
+    // (issue #135). try/finally so a play()/speak() failure still releases
+    // focus in the finally block below rather than leaving it held for the
+    // rest of the app session.
+    await _beepPlayer.setReleaseMode(ap.ReleaseMode.loop);
+    try {
+      await _beepPlayer.play(ap.AssetSource(_silenceAsset));
+      await _tts.speak(text);
+    } finally {
+      await _beepPlayer.stop();
+      // ReleaseMode.loop keeps resources allocated after stop() (see the
+      // package's own doc comment on the enum) — release() is needed so
+      // the next _playBeep() call's play() actually starts a fresh
+      // playback rather than being ignored because `playing` never went
+      // false. release() also re-requests nothing until the next play(),
+      // which correctly drops focus once this cue is done speaking.
+      await _beepPlayer.release();
+      await _beepPlayer.setReleaseMode(ap.ReleaseMode.release);
+    }
     _log('speak: "$text" done');
   });
 
