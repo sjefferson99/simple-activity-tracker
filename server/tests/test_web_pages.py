@@ -1489,10 +1489,9 @@ def test_web_import_requires_htmx_header(app_client, auth_headers):
     assert response.status_code == 403
 
 
-def test_web_import_round_trip(app_client, sample_gpx_bytes, auth_headers):
-    original = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
-    app_client.delete(f"/api/v1/activities/{original['id']}", headers=auth_headers)
-
+def _backup_archive(original: dict, gpx_bytes: bytes) -> bytes:
+    """A one-activity archive in /export's format, rebuilt from an uploaded
+    activity's API representation."""
     manifest = {
         "activities": [
             {
@@ -1512,19 +1511,136 @@ def test_web_import_round_trip(app_client, sample_gpx_bytes, auth_headers):
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("manifest.json", json.dumps(manifest))
-        archive.writestr(f"{original['client_activity_id']}.gpx", sample_gpx_bytes)
+        archive.writestr(f"{original['client_activity_id']}.gpx", gpx_bytes)
+    return buffer.getvalue()
 
-    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
-    response = app_client.post(
+
+def _start_web_import(app_client, archive_bytes: bytes):
+    return app_client.post(
         "/import",
         headers=HTMX_HEADERS,
-        files={"archive": ("export.zip", buffer.getvalue(), "application/zip")},
+        files={"archive": ("export.zip", archive_bytes, "application/zip")},
     )
-    assert response.status_code == 200
-    assert "Imported 1" in response.text
+
+
+def _import_job_id(progress_html: str) -> str:
+    return progress_html.split('hx-get="/import/')[1].split("/status")[0]
+
+
+def test_web_import_round_trip(app_client, sample_gpx_bytes, auth_headers):
+    """POST /import returns a polling progress fragment (issue #114, same as
+    the Strava import), and GET /import/{job_id}/status shows the finished
+    result. TestClient runs BackgroundTasks to completion before .post()
+    returns, so the job is already done by the first poll; a real browser
+    would see one or more "Processing…" responses first."""
+    original = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
+    app_client.delete(f"/api/v1/activities/{original['id']}", headers=auth_headers)
+
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+    started = _start_web_import(app_client, _backup_archive(original, sample_gpx_bytes))
+    assert started.status_code == 200
+    assert "Processing… 0 / 1" in started.text
+    assert 'hx-target="#import-result"' in started.text
+
+    status = app_client.get(f"/import/{_import_job_id(started.text)}/status")
+    assert status.status_code == 200
+    assert "Imported 1" in status.text
+    # The terminal fragment must not carry its own polling trigger, or
+    # polling would never stop.
+    assert "hx-trigger" not in status.text
 
     listing = app_client.get("/api/v1/activities", headers=auth_headers).json()
     assert len(listing["activities"]) == 1
+
+
+def test_web_import_invalid_archive_fails_immediately(app_client, auth_headers):
+    """Validation stays synchronous, so a bad upload never becomes a job."""
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+    response = _start_web_import(app_client, b"not a zip")
+    assert response.status_code == 400
+    assert "error-banner" in response.text
+    assert "hx-trigger" not in response.text
+
+
+def test_web_import_status_unknown_job_id_is_a_friendly_404(app_client, auth_headers):
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+    response = app_client.get("/import/does-not-exist/status")
+    assert response.status_code == 404
+    assert "error-banner" in response.text
+
+
+def test_web_import_status_is_scoped_per_user(app_client, sample_gpx_bytes, auth_headers):
+    original = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
+    _login_cookie_client(app_client, "admin@example.com", "admin-password-123")
+    started = _start_web_import(app_client, _backup_archive(original, sample_gpx_bytes))
+    job_id = _import_job_id(started.text)
+
+    from datetime import UTC
+
+    from app.auth.passwords import hash_password
+    from app.db import get_session_factory
+    from app.models.user import User
+    from app.repositories.users import SqlAlchemyUserRepository
+
+    with get_session_factory()() as session:
+        now = datetime.now(UTC)
+        SqlAlchemyUserRepository(session).add(
+            User(
+                email="other-importer@example.com",
+                password_hash=hash_password("other-password-123"),
+                display_name="Other",
+                is_admin=False,
+                sessions_invalidated_at=now,
+                created_at=now,
+            )
+        )
+        session.commit()
+
+    app_client.post("/logout", headers=HTMX_HEADERS)
+    _login_cookie_client(app_client, "other-importer@example.com", "other-password-123")
+    response = app_client.get(f"/import/{job_id}/status")
+    assert response.status_code == 404
+
+
+def test_run_import_calls_on_progress_after_every_entry(app_client, sample_gpx_bytes, auth_headers):
+    """run_import's on_progress (app/activity_export.py) drives the polled
+    status — fires once per entry, failures included, with the right total."""
+    from app.activity_export import read_import_archive, run_import
+    from app.api.v1.activities import _insert_from_manifest_entry
+    from app.db import get_session_factory
+    from app.repositories.users import SqlAlchemyUserRepository
+
+    original = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
+    buffer = BytesIO(_backup_archive(original, sample_gpx_bytes))
+    with zipfile.ZipFile(buffer, "a") as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+        # A second entry whose GPX is missing: still counts as processed.
+        manifest["activities"].append(
+            {**manifest["activities"][0], "client_activity_id": "x", "gpx_filename": "x.gpx"}
+        )
+    rebuilt = BytesIO()
+    with zipfile.ZipFile(rebuilt, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+        archive.writestr(f"{original['client_activity_id']}.gpx", sample_gpx_bytes)
+
+    parsed_manifest, zip_archive = read_import_archive(rebuilt.getvalue(), 200_000_000)
+    with get_session_factory()() as session:
+        user = SqlAlchemyUserRepository(session).get_by_email("admin@example.com")
+        assert user is not None
+        calls: list[tuple[int, int]] = []
+        with zip_archive:
+            summary = run_import(
+                session,
+                user.id,
+                parsed_manifest,
+                zip_archive,
+                20_000_000,
+                _insert_from_manifest_entry,
+                on_progress=lambda processed, total: calls.append((processed, total)),
+            )
+
+    assert calls == [(1, 2), (2, 2)]
+    assert (summary.skipped, summary.failed) == (1, 1)
 
 
 def test_devices_page_lists_bearer_device(app_client, auth_headers):

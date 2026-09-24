@@ -1,0 +1,14 @@
+{# Rendered by POST /import and POST /import/strava (job just started) and by
+   their GET .../{job_id}/status routes while the job is still pending/running
+   (see app/web/activities.py). Polls itself every 2s via hx-trigger — the
+   terminal partials/import_result.html fragment has no such trigger, so
+   swapping it in here is what makes the polling stop (htmx convention: a
+   polling element only keeps polling while it keeps re-rendering itself).
+   status_url/result_target pick which import's job and result box this is. #}
+<div class="import-progress"
+     hx-get="{{ status_url }}"
+     hx-trigger="every 2s"
+     hx-target="#{{ result_target }}"
+     hx-swap="innerHTML">
+  <p>Processing… {{ processed }} / {{ total }}</p>
+</div>

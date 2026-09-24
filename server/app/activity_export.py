@@ -12,6 +12,7 @@ per-entry import loop."""
 
 import json
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Protocol
@@ -188,6 +189,63 @@ class ImportSummary:
     items: list[ImportResultItem]
 
 
+def _import_entry(
+    session: Session,
+    user_id: str,
+    entry: ExportManifestEntry,
+    zip_archive: zipfile.ZipFile,
+    max_gpx_bytes: int,
+    insert: ActivityInserter,
+) -> ImportResultItem:
+    """Imports one manifest entry and returns its result row — see run_import."""
+    if len(json.dumps(entry.client_summary).encode()) > SUMMARY_MAX_BYTES:
+        return ImportResultItem(
+            client_activity_id=entry.client_activity_id,
+            status="failed",
+            reason=f"client_summary exceeds the {SUMMARY_MAX_BYTES}-byte limit",
+        )
+    if (entry.title is not None and len(entry.title) > TITLE_MAX_LENGTH) or (
+        entry.notes is not None and len(entry.notes) > NOTES_MAX_LENGTH
+    ):
+        return ImportResultItem(
+            client_activity_id=entry.client_activity_id,
+            status="failed",
+            reason="title or notes exceed the allowed length",
+        )
+
+    try:
+        info = zip_archive.getinfo(entry.gpx_filename)
+    except KeyError:
+        return ImportResultItem(
+            client_activity_id=entry.client_activity_id,
+            status="failed",
+            reason=f"Archive is missing {entry.gpx_filename}",
+        )
+    if info.file_size > max_gpx_bytes:
+        return ImportResultItem(
+            client_activity_id=entry.client_activity_id,
+            status="failed",
+            reason=f"GPX exceeds the {max_gpx_bytes}-byte limit",
+        )
+
+    gpx_bytes = zip_archive.read(entry.gpx_filename)
+    try:
+        with session.begin_nested():
+            created = insert(session, user_id, entry, gpx_bytes)
+    except Exception as exc:  # one bad entry must not abort the whole import batch
+        return ImportResultItem(
+            client_activity_id=entry.client_activity_id,
+            status="failed",
+            reason=failure_reason(exc),
+        )
+
+    return ImportResultItem(
+        client_activity_id=entry.client_activity_id,
+        status="imported" if created else "skipped",
+        reason=None if created else "Activity already exists",
+    )
+
+
 def run_import(
     session: Session,
     user_id: str,
@@ -195,78 +253,26 @@ def run_import(
     zip_archive: zipfile.ZipFile,
     max_gpx_bytes: int,
     insert: ActivityInserter,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> ImportSummary:
     """Processes every manifest entry, inserting via `insert` (the race-safe
     _insert_activity_with_gpx from app.api.v1.activities). One bad entry must
     never abort the whole batch, but nor may a later failure roll back an
-    earlier entry's successful insert — db_session only commits once, at the
-    very end of the request, so each entry gets its own SAVEPOINT via
-    begin_nested() and only that savepoint is rolled back on failure."""
+    earlier entry's successful insert — the session (db_session, or the web
+    route's background job) only commits once, at the very end, so each
+    entry gets its own SAVEPOINT via
+    begin_nested() and only that savepoint is rolled back on failure.
+
+    on_progress, when given, is called with (processed, total) after each
+    entry — the web route's background job (app/activity_import_jobs.py)
+    uses it to update the polled status, mirroring run_strava_import
+    (issue #114)."""
+    total = len(manifest.activities)
     items: list[ImportResultItem] = []
-    for entry in manifest.activities:
-        if len(json.dumps(entry.client_summary).encode()) > SUMMARY_MAX_BYTES:
-            items.append(
-                ImportResultItem(
-                    client_activity_id=entry.client_activity_id,
-                    status="failed",
-                    reason=f"client_summary exceeds the {SUMMARY_MAX_BYTES}-byte limit",
-                )
-            )
-            continue
-        if (entry.title is not None and len(entry.title) > TITLE_MAX_LENGTH) or (
-            entry.notes is not None and len(entry.notes) > NOTES_MAX_LENGTH
-        ):
-            items.append(
-                ImportResultItem(
-                    client_activity_id=entry.client_activity_id,
-                    status="failed",
-                    reason="title or notes exceed the allowed length",
-                )
-            )
-            continue
-
-        try:
-            info = zip_archive.getinfo(entry.gpx_filename)
-        except KeyError:
-            items.append(
-                ImportResultItem(
-                    client_activity_id=entry.client_activity_id,
-                    status="failed",
-                    reason=f"Archive is missing {entry.gpx_filename}",
-                )
-            )
-            continue
-        if info.file_size > max_gpx_bytes:
-            items.append(
-                ImportResultItem(
-                    client_activity_id=entry.client_activity_id,
-                    status="failed",
-                    reason=f"GPX exceeds the {max_gpx_bytes}-byte limit",
-                )
-            )
-            continue
-
-        gpx_bytes = zip_archive.read(entry.gpx_filename)
-        try:
-            with session.begin_nested():
-                created = insert(session, user_id, entry, gpx_bytes)
-        except Exception as exc:  # one bad entry must not abort the whole import batch
-            items.append(
-                ImportResultItem(
-                    client_activity_id=entry.client_activity_id,
-                    status="failed",
-                    reason=failure_reason(exc),
-                )
-            )
-            continue
-
-        items.append(
-            ImportResultItem(
-                client_activity_id=entry.client_activity_id,
-                status="imported" if created else "skipped",
-                reason=None if created else "Activity already exists",
-            )
-        )
+    for index, entry in enumerate(manifest.activities):
+        items.append(_import_entry(session, user_id, entry, zip_archive, max_gpx_bytes, insert))
+        if on_progress is not None:
+            on_progress(index + 1, total)
 
     return ImportSummary(
         imported=sum(1 for item in items if item.status == "imported"),
