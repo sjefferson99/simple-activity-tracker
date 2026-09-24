@@ -49,6 +49,11 @@ const _backoffSchedule = [
 /// switching networks produced no retry until this periodic tick was added.
 const _periodicRetryInterval = Duration(minutes: 1);
 
+/// How often a record an older server rejected is re-checked against the
+/// server's API level (docs/VERSIONING.md §3.4) — see
+/// SyncService._rejectedRecheckDue.
+const _rejectedRecheckInterval = Duration(minutes: 15);
+
 /// Bounded retry for a still-`pending` analysis fetch right after upload
 /// (issue #97/#101, Slice C) — short-lived (well under a minute total), so
 /// the post-Stop summary screen's "View full summary" link has a real
@@ -92,6 +97,10 @@ class SyncService {
   /// safe (if slightly eager) to just retry immediately in that case.
   final Map<String, int> _attemptCounts = {};
   final Map<String, DateTime> _lastAttemptTimes = {};
+
+  /// When rejected records were last checked against the server's API level
+  /// — see [_rejectedRecheckDue].
+  DateTime? _lastRejectedRecheck;
 
   final _statusController = StreamController<(String, SyncStatus)>.broadcast();
 
@@ -200,8 +209,11 @@ class SyncService {
 
   Future<void> _drainQueue() async {
     var queue = await _runStore.listPendingOrRetryable();
-    final rejected = await _rejectedByServer();
-    if (queue.isEmpty && rejected.isEmpty) return;
+    final rejected = _rejectedRecheckDue() ? await _rejectedByServer() : <RunRecord>[];
+    // Nothing to upload yet (every queued record is still backing off) and
+    // no rejected record to re-check: skip the pass, including the
+    // server-info call — the periodic timer fires every minute.
+    if (!queue.any(_isDue) && rejected.isEmpty) return;
     if (!await _connectivity.isConnected) return;
 
     // Not signed in / no server configured: leave everything pending —
@@ -211,6 +223,7 @@ class SyncService {
 
     final server = await _fetchServerInfo(auth, queue);
     if (server == null) return;
+    if (rejected.isNotEmpty) _lastRejectedRecheck = _now();
     // Out of each other's supported range: uploads wait (pending, nothing
     // lost) until one side is updated. Settings says which one.
     if (server.compatibility != ServerCompatibility.compatible) return;
@@ -251,6 +264,16 @@ class SyncService {
   bool _isDue(RunRecord record) {
     final due = _dueAt(record);
     return due == null || !_now().isBefore(due);
+  }
+
+  /// Whether it's time to look for rejected records to re-queue. A server
+  /// upgrade is rare, and checking means a server-info request, so a record
+  /// the server rejected at its *current* level must not trigger one every
+  /// minute for as long as it sits in the queue. The first pass after launch
+  /// always checks.
+  bool _rejectedRecheckDue() {
+    final last = _lastRejectedRecheck;
+    return last == null || !_now().isBefore(last.add(_rejectedRecheckInterval));
   }
 
   /// Records a server permanently rejected at a known API level — candidates

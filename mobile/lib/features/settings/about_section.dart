@@ -50,7 +50,9 @@ CompatibilityNote? compatibilityNote(AppVersion app, ServerInfoDto server) {
   // Compare release versions only — "1.3.0+4.gabc1234" is a main build past
   // 1.3.0, and a dev build of either side has nothing meaningful to compare.
   final serverRelease = server.version!.split('+').first;
-  if (app.isDevBuild || serverRelease == 'dev' || serverRelease == app.version) {
+  if (app.isDevBuild ||
+      const {'dev', 'unknown'}.contains(serverRelease) ||
+      serverRelease == app.version) {
     return null;
   }
   return (message: 'Matching versions are recommended.', isWarning: false);

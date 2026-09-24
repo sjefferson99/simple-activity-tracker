@@ -45,7 +45,11 @@ RunRecord _record({
   );
 }
 
-Future<SyncService> _service(FakeApiClient api, FakeRunStore store) async {
+Future<SyncService> _service(
+  FakeApiClient api,
+  FakeRunStore store, {
+  DateTime Function()? now,
+}) async {
   FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform({});
   final auth = AuthService(apiClient: api, storage: const FlutterSecureStorage());
   await auth.setServerUrl('https://runner.example.com');
@@ -56,6 +60,7 @@ Future<SyncService> _service(FakeApiClient api, FakeRunStore store) async {
     runStore: store,
     authService: auth,
     connectivity: connectivity,
+    now: now,
   );
   addTearDown(service.dispose);
   addTearDown(connectivity.dispose);
@@ -197,6 +202,66 @@ void main() {
     service.onAppResumed();
     await pumpEventQueue();
 
+    expect(api.uploadCallCount, 0);
+  });
+
+  test('a pass with nothing due makes no server-info request', () async {
+    var clock = DateTime.utc(2026, 9, 24, 12);
+    final api = FakeApiClient()
+      ..uploadRunHandler = ({
+        required baseUrl,
+        required token,
+        required summary,
+        required gpxFile,
+      }) async => throw const ApiNetworkException('offline');
+    final service = await _service(api, FakeRunStore()..seed(_record()), now: () => clock);
+
+    service.runFinished();
+    await pumpEventQueue();
+    expect(api.getServerInfoCallCount, 1);
+
+    // Still inside the 30 s backoff: the periodic/resume pass is a no-op.
+    clock = clock.add(const Duration(seconds: 10));
+    service.onAppResumed();
+    await pumpEventQueue();
+    expect(api.getServerInfoCallCount, 1);
+
+    // Once due, the pass runs again.
+    clock = clock.add(const Duration(minutes: 1));
+    service.onAppResumed();
+    await pumpEventQueue();
+    expect(api.getServerInfoCallCount, 2);
+  });
+
+  test('rejected records are re-checked at most every 15 minutes', () async {
+    var clock = DateTime.utc(2026, 9, 24, 12);
+    final api = FakeApiClient()..getServerInfoHandler = _serverAt(1);
+    final store = FakeRunStore()
+      ..seed(
+        _record(
+          syncStatus: const SyncStatusFailed(
+            error: 'rejected',
+            attempts: 1,
+            retryable: false,
+            rejectedAtServerApiLevel: 1,
+          ),
+        ),
+      );
+    final service = await _service(api, store, now: () => clock);
+
+    service.onAppResumed();
+    await pumpEventQueue();
+    expect(api.getServerInfoCallCount, 1);
+
+    clock = clock.add(const Duration(minutes: 5));
+    service.onAppResumed();
+    await pumpEventQueue();
+    expect(api.getServerInfoCallCount, 1);
+
+    clock = clock.add(const Duration(minutes: 11));
+    service.onAppResumed();
+    await pumpEventQueue();
+    expect(api.getServerInfoCallCount, 2);
     expect(api.uploadCallCount, 0);
   });
 
