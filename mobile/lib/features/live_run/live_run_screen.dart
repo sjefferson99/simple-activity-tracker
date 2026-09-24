@@ -357,14 +357,14 @@ class LiveRunScreen extends ConsumerWidget {
                             child: SingleChildScrollView(
                               child: Column(
                                 children: [
-                                  _MetricGrid(
+                                  MetricGrid(
                                     metrics: metrics,
                                     speedUnit: effectiveUnit,
                                     unit: unit,
                                     activityMode: runActivityMode,
                                   ),
                                   if (!isCycling)
-                                    _SplitsPanel(
+                                    SplitsPanel(
                                       completedSplits: metrics.completedSplits,
                                       speedUnit: effectiveUnit,
                                       unit: unit,
@@ -499,17 +499,18 @@ class _StatusLine extends StatelessWidget {
   }
 }
 
-class _MetricGrid extends StatelessWidget {
+class MetricGrid extends StatelessWidget {
   final LiveMetrics metrics;
   final SpeedUnit speedUnit;
   final double unit;
   final ActivityMode activityMode;
 
-  const _MetricGrid({
+  const MetricGrid({
     required this.metrics,
     required this.speedUnit,
     required this.unit,
     required this.activityMode,
+    super.key,
   });
 
   @override
@@ -542,7 +543,7 @@ class _MetricGrid extends StatelessWidget {
               for (final spec in row)
                 Expanded(
                   flex: 2,
-                  child: _MetricTile(
+                  child: MetricTile(
                     label: spec.label(speedUnit),
                     description: spec.description,
                     value: spec.valueOf(metrics, null, speedUnit),
@@ -564,15 +565,16 @@ class _MetricGrid extends StatelessWidget {
 /// of every completed split. Hidden entirely for cycling (no split-pace
 /// concept — see the cycling [MetricSpec] layout) and while there are no
 /// completed splits yet, so it never claims space with nothing to show.
-class _SplitsPanel extends ConsumerWidget {
+class SplitsPanel extends ConsumerWidget {
   final List<domain.Split> completedSplits;
   final SpeedUnit speedUnit;
   final double unit;
 
-  const _SplitsPanel({
+  const SplitsPanel({
     required this.completedSplits,
     required this.speedUnit,
     required this.unit,
+    super.key,
   });
 
   @override
@@ -616,7 +618,7 @@ class _SplitsPanel extends ConsumerWidget {
               itemCount: completedSplits.length,
               // Most recent split first — the one the runner just finished
               // is what they want to check without scrolling.
-              itemBuilder: (context, index) => _SplitRow(
+              itemBuilder: (context, index) => SplitRow(
                 split: completedSplits[completedSplits.length - 1 - index],
                 speedUnit: speedUnit,
                 unit: unit,
@@ -630,15 +632,16 @@ class _SplitsPanel extends ConsumerWidget {
   }
 }
 
-class _SplitRow extends StatelessWidget {
+class SplitRow extends StatelessWidget {
   final domain.Split split;
   final SpeedUnit speedUnit;
   final double unit;
 
-  const _SplitRow({
+  const SplitRow({
     required this.split,
     required this.speedUnit,
     required this.unit,
+    super.key,
   });
 
   @override
@@ -710,7 +713,7 @@ class _SplitRow extends StatelessWidget {
   }
 }
 
-class _MetricTile extends StatelessWidget {
+class MetricTile extends StatelessWidget {
   final String label;
   final String description;
   final String value;
@@ -725,13 +728,14 @@ class _MetricTile extends StatelessWidget {
   /// background (issue #99) — null for no target/no tile-level target.
   final SplitVerdict? verdict;
 
-  const _MetricTile({
+  const MetricTile({
     required this.label,
     required this.description,
     required this.value,
     required this.unit,
     this.detail,
     this.verdict,
+    super.key,
   });
 
   @override

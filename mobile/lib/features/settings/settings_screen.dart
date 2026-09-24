@@ -13,6 +13,8 @@ import '../../core/units/units.dart' show formatDistanceKm;
 import '../../domain/models/run_record.dart';
 import '../../domain/models/sync_status.dart';
 import '../../domain/tracking/split_preference.dart' show SplitKind;
+import '../live_run/confirm_delete_run_record.dart';
+import '../live_run/reopened_run_screen.dart';
 import '../splits/splits_screen.dart';
 
 /// Re-fetches the run queue on every SyncService status change, so the
@@ -515,47 +517,35 @@ class _ActivityList extends ConsumerWidget {
             key: ValueKey(record.clientRunId),
             record: record,
             onDelete: () => _confirmAndDelete(context, ref, record),
+            onReopened: () => _openReopenedScreen(context, ref, record),
           ),
       ],
     );
   }
 
-  /// A record's local GPX/sidecar is its only copy on this phone — deleting
-  /// it here never touches the server (issue #74: the two are managed
-  /// independently once uploaded), but is still permanent locally, so confirm
-  /// first.
+  /// Pushes [ReopenedRunScreen] and refreshes the queue if it reports back
+  /// that its own Delete control was used — see that screen's doc for why
+  /// this can't just invalidate _syncQueueProvider from inside it directly.
+  Future<void> _openReopenedScreen(
+    BuildContext context,
+    WidgetRef ref,
+    RunRecord record,
+  ) async {
+    final deleted = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => ReopenedRunScreen(record: record)),
+    );
+    if (deleted == true) {
+      ref.invalidate(_syncQueueProvider);
+    }
+  }
+
   Future<void> _confirmAndDelete(
     BuildContext context,
     WidgetRef ref,
     RunRecord record,
   ) async {
-    final isUploaded = record.syncStatus is SyncStatusUploaded;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete this activity?'),
-        content: Text(
-          isUploaded
-              ? 'This removes the activity from this phone only. The copy '
-                    'already uploaded to the server is not affected. This '
-                    'cannot be undone.'
-              : 'This permanently deletes the activity and its local GPX '
-                    'track from this phone. This cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      await ref.read(runStoreProvider).deleteRecord(record.clientRunId);
+    final deleted = await confirmAndDeleteRunRecord(context, ref, record);
+    if (deleted) {
       // deleteRecord() doesn't go through SyncService, so _syncQueueProvider's
       // statusChanges trigger never fires for it — force a re-read.
       ref.invalidate(_syncQueueProvider);
@@ -566,8 +556,14 @@ class _ActivityList extends ConsumerWidget {
 class _ActivityRow extends StatelessWidget {
   final RunRecord record;
   final VoidCallback onDelete;
+  final VoidCallback onReopened;
 
-  const _ActivityRow({super.key, required this.record, required this.onDelete});
+  const _ActivityRow({
+    super.key,
+    required this.record,
+    required this.onDelete,
+    required this.onReopened,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -585,6 +581,7 @@ class _ActivityRow extends StatelessWidget {
         tooltip: 'Delete this activity',
         onPressed: onDelete,
       ),
+      onTap: onReopened,
     );
   }
 

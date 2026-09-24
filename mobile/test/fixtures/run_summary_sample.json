@@ -6,8 +6,10 @@
   "moving_seconds": 900.0,
   "distance_meters": 3000.0,
   "avg_speed_mps": 3.33,
+  "max_speed_mps": 4.5,
+  "elevation_gain_meters": 12.5,
   "splits": [
-    {"index": 1, "duration_seconds": 300.0, "avg_speed_mps": 3.33, "distance_m": 1000.0}
+    {"index": 1, "duration_seconds": 300.0, "avg_speed_mps": 3.33, "distance_m": 1000.0, "target_speed_mps": 3.5}
   ],
   "source": {"platform": "android", "app_version": "1.0.0+1"}
 }
