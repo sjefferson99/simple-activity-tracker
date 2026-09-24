@@ -84,6 +84,7 @@ flutter:
     - assets/audio/beep_double.wav
     - assets/audio/beep_triple.wav
     - assets/audio/beep_long.wav
+    - assets/audio/silence.wav
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

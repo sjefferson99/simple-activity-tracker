@@ -1,4 +1,4 @@
-# Split audio cue tones (issue #125)
+# Split audio cue tones (issue #125, extended for #135)
 
 Four generated tones, not sourced/licensed audio — see the generator script kept at
 `docs/generate_split_beeps.py` in the repo root's `docs/` folder. Re-run it with an output
@@ -28,3 +28,11 @@ the runtime chaining entirely, so there's nothing left for the platform to drop.
 - `beep_long.wav` — one 0.6s, 660Hz (E5) tone — deliberately a different pitch as well as
   duration from the others, so it reads as a genuinely different event. Target-verdict
   "back on target" ("split time OK again").
+- `silence.wav` — a 0.2s silent clip, added for issue #135. Looped
+  (`ReleaseMode.loop`) on the beep player for the duration of every `speak()` call, so
+  spoken cues hold real (non-duck) Android audio focus too. `flutter_tts`'s own Android
+  focus request is hardcoded to `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` with no non-duck
+  option exposed from Dart — TTS speech can only pause (not just duck) other apps' audio
+  by riding on `audioplayers`' own, correctly non-duck, focus request instead. Not needed
+  on iOS: `flutter_tts`'s `setIosAudioCategory(.playback, [])` already gets non-mixing
+  behavior there directly.

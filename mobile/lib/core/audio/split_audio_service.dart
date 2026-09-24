@@ -59,6 +59,23 @@ const _doubleBeepAsset = 'audio/beep_double.wav';
 const _tripleBeepAsset = 'audio/beep_triple.wav';
 const _longBeepAsset = 'audio/beep_long.wav';
 
+/// Looped on [_beepPlayer] for the duration of every [speak] call (issue
+/// #135). `flutter_tts`'s own Android focus request is hardcoded to
+/// `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` (duck, not pause) with no non-duck
+/// option exposed from Dart — see
+/// `flutter_tts-*/android/.../FlutterTtsPlugin.kt`'s `requestAudioFocus()`,
+/// confirmed by reading the plugin source, not guessing. Worse, this
+/// service's `speak()` calls `FlutterTts.speak()` with the default
+/// `focus: false`, so on Android it was requesting *no* focus at all, not
+/// even a duck — the plugin's own hardcoded request is simply never
+/// invoked. Since `_beepPlayer`'s `AudioContext` already requests genuine
+/// non-duck focus (`AndroidAudioFocus.gainTransient` / iOS
+/// `.playback` with no duck option) and is proven to do so correctly for
+/// the beep clips, looping this silent clip on it for the spoken phrase's
+/// duration rides on that same, already-correct request instead of relying
+/// on `flutter_tts`'s own (Android: duck-only-or-nothing) focus handling.
+const _silenceAsset = 'audio/silence.wav';
+
 /// Gap after a beep before any spoken phrase for that same cue starts — on
 /// a real device (S23) the beep and TTS were audibly overlapping despite
 /// going through the same serialized queue, because `AudioPlayer.play()`
@@ -118,26 +135,29 @@ class AudioPlayersSplitAudioService implements SplitAudioService {
       // volume stream than media. `music`/`media` puts the beep on the same
       // stream as everything else this service plays (and the same one a
       // user's music volume slider already controls), so it can't go
-      // silently mute on its own. gainTransientMayDuck (duck, don't
-      // silence, background audio) is unaffected by this — it's an
-      // orthogonal focus request, not the stream choice.
+      // silently mute on its own. gainTransient (pause, not duck, background
+      // audio — issue #135: a ducked-under pace cue was hard to make out
+      // over music/podcasts) is unaffected by this — it's an orthogonal
+      // focus request, not the stream choice.
       await _beepPlayer
           .setAudioContext(
             ap.AudioContext(
               android: const ap.AudioContextAndroid(
                 contentType: ap.AndroidContentType.music,
                 usageType: ap.AndroidUsageType.media,
-                audioFocus: ap.AndroidAudioFocus.gainTransientMayDuck,
+                audioFocus: ap.AndroidAudioFocus.gainTransient,
               ),
-              // AVAudioSessionCategory.ambient can't take duckOthers — only
-              // playback/playAndRecord/multiRoute can (asserted by
-              // AudioContextIOS itself; caught on a real device, see git
-              // log). playback is the right one here: output-only, silenced
-              // by the ring/silent switch like ambient, but able to duck
-              // instead of fully interrupting whatever's already playing.
+              // AVAudioSessionCategory.ambient can't take exclusive-focus
+              // options — only playback/playAndRecord/multiRoute can
+              // (asserted by AudioContextIOS itself; caught on a real
+              // device, see git log). playback is the right one here:
+              // output-only, silenced by the ring/silent switch like
+              // ambient. No duckOthers/mixWithOthers option means other
+              // apps' audio is paused/interrupted for the cue's duration
+              // (issue #135), not just lowered in volume, and resumes once
+              // this session's playback ends.
               iOS: ap.AudioContextIOS(
                 category: ap.AVAudioSessionCategory.playback,
-                options: const {ap.AVAudioSessionOptions.duckOthers},
               ),
             ),
           )
@@ -166,11 +186,14 @@ class AudioPlayersSplitAudioService implements SplitAudioService {
             .catchError((Object e) => _log('initialize: awaitSpeakCompletion FAILED: $e')),
       );
 
+      // .ambient is inherently mixable regardless of options (per
+      // flutter_tts's own doc comment on the enum) — dropping duckOthers
+      // alone would leave speech still mixed quietly under other audio
+      // rather than pausing it. .playback (same category the beep now
+      // uses, see above) is nonmixable by default, so spoken cues actually
+      // interrupt/pause background audio too, not just the beeps.
       await _tts
-          .setIosAudioCategory(
-            tts.IosTextToSpeechAudioCategory.ambient,
-            [tts.IosTextToSpeechAudioCategoryOptions.duckOthers],
-          )
+          .setIosAudioCategory(tts.IosTextToSpeechAudioCategory.playback, [])
           .timeout(_initStepTimeout);
       _log('initialize: setIosAudioCategory done');
     } catch (e, st) {
@@ -254,7 +277,26 @@ class AudioPlayersSplitAudioService implements SplitAudioService {
     // occasionally a beat more silence than strictly necessary.
     await Future<void>.delayed(_beepToSpeechGap);
     _log('speak: "$text" start');
-    await _tts.speak(text);
+    // Hold real (non-duck) audio focus for the whole spoken phrase — see
+    // _silenceAsset's doc comment for why this is necessary on Android
+    // (issue #135). try/finally so a play()/speak() failure still releases
+    // focus in the finally block below rather than leaving it held for the
+    // rest of the app session.
+    await _beepPlayer.setReleaseMode(ap.ReleaseMode.loop);
+    try {
+      await _beepPlayer.play(ap.AssetSource(_silenceAsset));
+      await _tts.speak(text);
+    } finally {
+      await _beepPlayer.stop();
+      // ReleaseMode.loop keeps resources allocated after stop() (see the
+      // package's own doc comment on the enum) — release() is needed so
+      // the next _playBeep() call's play() actually starts a fresh
+      // playback rather than being ignored because `playing` never went
+      // false. release() also re-requests nothing until the next play(),
+      // which correctly drops focus once this cue is done speaking.
+      await _beepPlayer.release();
+      await _beepPlayer.setReleaseMode(ap.ReleaseMode.release);
+    }
     _log('speak: "$text" done');
   });
 
