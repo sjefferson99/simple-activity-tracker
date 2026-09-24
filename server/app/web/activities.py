@@ -20,9 +20,13 @@ from app.activity_export import (
     ImportArchiveError,
     export_activities_archive,
     read_import_archive,
-    run_import,
 )
-from app.activity_import_jobs import create_job, get_job, run_strava_import_job
+from app.activity_import_jobs import (
+    create_job,
+    get_job,
+    run_backup_import_job,
+    run_strava_import_job,
+)
 from app.activity_import_strava import (
     StravaImportError,
     parse_activities_csv,
@@ -32,7 +36,6 @@ from app.analysis.gpx_parser import GpxParseError, guess_device_name, parse_gpx
 from app.analysis.v1 import AnalyzerV1
 from app.api.v1.activities import (
     _insert_activity_with_gpx,
-    _insert_from_manifest_entry,
     _NewActivity,
 )
 from app.audit import log_audit_event
@@ -40,7 +43,7 @@ from app.config import get_settings
 from app.deps import db_session
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
-from app.models.user import _new_uuid
+from app.models.user import User, _new_uuid
 from app.repositories.activities import (
     ActivityListDirection,
     ActivityListFilters,
@@ -835,9 +838,14 @@ def export_filtered(
 def import_activities(
     request: Request,
     user: WebUser,
-    session: Annotated[Session, Depends(db_session)],
+    background_tasks: BackgroundTasks,
     archive: Annotated[UploadFile, File()],
 ) -> Response:
+    """Imports a backup archive made by /export. Same shape as import_strava
+    below (issue #114): the cheap validation stays synchronous so a bad
+    upload still 400/413s immediately, then the per-entry import runs as a
+    BackgroundTask and the browser polls GET /import/{job_id}/status for
+    progress. No db_session dependency for the same reason as there."""
     settings = get_settings()
     data = archive.file.read(settings.max_import_bytes + 1)
     if len(data) > settings.max_import_bytes:
@@ -858,35 +866,24 @@ def import_activities(
             status_code=400,
         )
 
-    with zip_archive:
-        summary = run_import(
-            session,
-            user.id,
-            manifest,
-            zip_archive,
-            settings.max_gpx_bytes,
-            _insert_from_manifest_entry,
-        )
-
-    if summary.imported:
-        log_audit_event(
-            "activity.imported",
-            actor_id=user.id,
-            client_ip=request.client.host if request.client else "unknown",
-            count=str(summary.imported),
-        )
-
-    return templates.TemplateResponse(
-        request,
-        "partials/import_result.html",
-        {
-            "user": user,
-            "imported": summary.imported,
-            "skipped": summary.skipped,
-            "failed": summary.failed,
-            "items": summary.items,
-        },
+    job = create_job(user.id, total=len(manifest.activities))
+    background_tasks.add_task(
+        run_backup_import_job,
+        job.id,
+        user.id,
+        request.client.host if request.client else "unknown",
+        manifest,
+        zip_archive,
     )
+    return _import_progress_response(request, user, job.id, "import", processed=0, total=job.total)
+
+
+@router.get("/import/{job_id}/status")
+def import_status(job_id: str, request: Request, user: WebUser) -> Response:
+    """Polled by partials/import_progress.html while a background backup
+    import (see import_activities above) is running — see
+    _import_job_status_response."""
+    return _import_job_status_response(request, user, job_id, "import")
 
 
 @router.post("/import/strava", dependencies=[Depends(require_htmx_header)])
@@ -905,7 +902,7 @@ def import_strava(
     slow enough to blow past nginx's proxy_read_timeout (see
     deploy/standalone-tls/nginx.conf) — is handed to a BackgroundTask so this
     handler can return right away; the browser then polls
-    GET /import/strava/{job_id}/status (partials/import_strava_progress.html)
+    GET /import/strava/{job_id}/status (partials/import_progress.html)
     until it's done. No db_session dependency here (unlike every other route
     in this file) — the import doesn't touch the DB until the background task
     runs, well after this request's session would already be closed."""
@@ -959,10 +956,8 @@ def import_strava(
         zip_archive,
     )
 
-    return templates.TemplateResponse(
-        request,
-        "partials/import_strava_progress.html",
-        {"user": user, "job_id": job.id, "processed": 0, "total": job.total},
+    return _import_progress_response(
+        request, user, job.id, "import/strava", processed=0, total=job.total
     )
 
 
@@ -972,13 +967,40 @@ def import_strava_status(
     request: Request,
     user: WebUser,
 ) -> Response:
-    """Polled by partials/import_strava_progress.html (hx-trigger="every 2s")
-    while a background import (see import_strava above) is running. Once the
-    job reaches a terminal state, renders the exact same
-    partials/import_result.html the old synchronous path rendered — that
-    fragment has no polling trigger of its own, so swapping it in naturally
-    stops the polling (htmx convention: polling continues only as long as
-    the polling element itself keeps being re-rendered)."""
+    """Polled by partials/import_progress.html while a background Strava
+    import (see import_strava above) is running — see
+    _import_job_status_response."""
+    return _import_job_status_response(request, user, job_id, "import/strava")
+
+
+# Which result box each import's progress fragment swaps into
+# (activities_list.html).
+_IMPORT_RESULT_TARGETS = {"import": "import-result", "import/strava": "import-strava-result"}
+
+
+def _import_progress_response(
+    request: Request, user: User, job_id: str, route: str, *, processed: int, total: int
+) -> Response:
+    return templates.TemplateResponse(
+        request,
+        "partials/import_progress.html",
+        {
+            "user": user,
+            "status_url": f"/{route}/{job_id}/status",
+            "result_target": _IMPORT_RESULT_TARGETS[route],
+            "processed": processed,
+            "total": total,
+        },
+    )
+
+
+def _import_job_status_response(request: Request, user: User, job_id: str, route: str) -> Response:
+    """Shared by both import status routes. Once the job reaches a terminal
+    state, renders the exact same partials/import_result.html the old
+    synchronous path rendered — that fragment has no polling trigger of its
+    own, so swapping it in naturally stops the polling (htmx convention:
+    polling continues only as long as the polling element itself keeps being
+    re-rendered)."""
     job = get_job(job_id)
     if job is None or job.user_id != user.id:
         # Unknown/expired job (process restarted, evicted, or someone else's
@@ -992,10 +1014,8 @@ def import_strava_status(
         )
 
     if job.status in ("pending", "running"):
-        return templates.TemplateResponse(
-            request,
-            "partials/import_strava_progress.html",
-            {"user": user, "job_id": job.id, "processed": job.processed, "total": job.total},
+        return _import_progress_response(
+            request, user, job.id, route, processed=job.processed, total=job.total
         )
 
     if job.status == "error":
