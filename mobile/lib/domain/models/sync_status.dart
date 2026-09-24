@@ -13,6 +13,8 @@ sealed class SyncStatus {
           error: json['error'] as String,
           attempts: json['attempts'] as int,
           retryable: json['retryable'] as bool,
+          // Absent from sidecars written before #141.
+          rejectedAtServerApiLevel: json['rejectedAtServerApiLevel'] as int?,
         ),
       final other => throw ArgumentError('Unknown SyncStatus type: $other'),
     };
@@ -52,10 +54,19 @@ class SyncStatusFailed extends SyncStatus {
   final int attempts;
   final bool retryable;
 
+  /// The server's API level when it rejected this upload, for a permanent
+  /// rejection — null for a transient failure, or a sidecar from before
+  /// #141. An older server may reject what a newer app sends (an activity
+  /// type it doesn't know yet, say), so SyncService re-queues the record
+  /// automatically once the server reports a higher level than this
+  /// (docs/VERSIONING.md §3.4).
+  final int? rejectedAtServerApiLevel;
+
   const SyncStatusFailed({
     required this.error,
     required this.attempts,
     required this.retryable,
+    this.rejectedAtServerApiLevel,
   });
 
   @override
@@ -64,5 +75,7 @@ class SyncStatusFailed extends SyncStatus {
         'error': error,
         'attempts': attempts,
         'retryable': retryable,
+        if (rejectedAtServerApiLevel != null)
+          'rejectedAtServerApiLevel': rejectedAtServerApiLevel,
       };
 }

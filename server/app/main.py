@@ -1,4 +1,3 @@
-import importlib.metadata
 import logging
 import sys
 import uuid
@@ -12,10 +11,13 @@ from pydantic import ValidationError
 from app.api.v1 import activities as activities_api
 from app.api.v1 import admin as admin_api
 from app.api.v1 import auth as auth_api
+from app.api.v1 import server_info as server_info_api
 from app.api.v1 import split_configs as split_configs_api
+from app.api_compat import API_LEVEL
 from app.config import get_settings
 from app.db import check_db_connection
 from app.security_headers import SecurityHeadersMiddleware
+from app.version import APP_VERSION
 from app.web import activities as activities_web
 from app.web import admin as admin_web
 from app.web import devices as devices_web
@@ -28,11 +30,6 @@ from app.web.templating import templates
 
 _logger = logging.getLogger("app.errors")
 
-try:
-    _VERSION = importlib.metadata.version("simple-activity-tracker-server") or "0.0.0-dev"
-except importlib.metadata.PackageNotFoundError:
-    _VERSION = "0.0.0-dev"
-
 
 def create_app() -> FastAPI:
     try:
@@ -42,7 +39,9 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="Simple Activity Tracker Server",
-        version=_VERSION,
+        # The OpenAPI document versions the API contract, not the release —
+        # CI's API-level check reads it (docs/VERSIONING.md §2).
+        version=str(API_LEVEL),
         docs_url="/api/docs" if settings.enable_api_docs else None,
         openapi_url="/api/openapi.json" if settings.enable_api_docs else None,
     )
@@ -57,11 +56,12 @@ def create_app() -> FastAPI:
         # Version disclosure is only useful for debugging, same as the docs —
         # see SR_ENABLE_API_DOCS and S7 in docs/SERVER-PRODUCTION-PLAN.md.
         if settings.enable_api_docs:
-            body["version"] = _VERSION
+            body["version"] = APP_VERSION
         return body
 
     app.include_router(auth_api.router)
     app.include_router(auth_api.me_router)
+    app.include_router(server_info_api.router)
     app.include_router(activities_api.router)
     app.include_router(admin_api.router)
     app.include_router(split_configs_api.router)

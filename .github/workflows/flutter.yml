@@ -5,11 +5,15 @@ on:
     paths:
       - "mobile/**"
       - ".github/workflows/flutter.yml"
+      - "contract/**"
+      - "server/app/api_compat.py"
   push:
     branches: [main]
     paths:
       - "mobile/**"
       - ".github/workflows/flutter.yml"
+      - "contract/**"
+      - "server/app/api_compat.py"
 
 jobs:
   analyze-and-test:

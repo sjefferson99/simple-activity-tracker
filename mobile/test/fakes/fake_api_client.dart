@@ -6,8 +6,10 @@ import 'package:simple_activity_tracker/core/api/dto/analysis_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/device_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/login_response_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/run_dto.dart';
+import 'package:simple_activity_tracker/core/api/dto/server_info_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/split_config_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/user_dto.dart';
+import 'package:simple_activity_tracker/core/version/api_compat.dart';
 import 'package:simple_activity_tracker/domain/models/run_summary.dart';
 
 /// A scriptable [ApiClient] test double. Each method defers to a settable
@@ -16,7 +18,16 @@ import 'package:simple_activity_tracker/domain/models/run_summary.dart';
 /// assertions on retry counts / ordering.
 class FakeApiClient implements ApiClient {
   final List<RunSummary> uploadCalls = [];
+
+  /// The `serverApiLevel` each [uploadRun] call was shaped for, in order.
+  final List<int> uploadApiLevels = [];
   int uploadCallCount = 0;
+  int getServerInfoCallCount = 0;
+
+  /// Defaults to a server at the app's own API level — override to simulate
+  /// an older ([ServerInfoDto.legacy]) or incompatible server.
+  Future<ServerInfoDto> Function({required String baseUrl, required String token})?
+  getServerInfoHandler;
   int getAnalysisCallCount = 0;
   int getActivityCallCount = 0;
 
@@ -125,14 +136,26 @@ class FakeApiClient implements ApiClient {
   }
 
   @override
+  Future<ServerInfoDto> getServerInfo({required String baseUrl, required String token}) {
+    getServerInfoCallCount++;
+    final handler = getServerInfoHandler;
+    if (handler != null) return handler(baseUrl: baseUrl, token: token);
+    return Future.value(
+      const ServerInfoDto(version: '1.3.0', apiLevel: kAppApiLevel, minAppApiLevel: 0),
+    );
+  }
+
+  @override
   Future<RunDto> uploadRun({
     required String baseUrl,
     required String token,
     required RunSummary summary,
     required File gpxFile,
+    required int serverApiLevel,
   }) {
     uploadCallCount++;
     uploadCalls.add(summary);
+    uploadApiLevels.add(serverApiLevel);
     final handler = uploadRunHandler;
     if (handler != null) {
       return handler(

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
 import '../../domain/models/run_summary.dart';
+import '../version/api_compat.dart';
 import 'api_client.dart';
 import 'api_exception.dart';
 import 'cert_trust_store.dart';
@@ -14,10 +15,41 @@ import 'dto/activity_list_item_dto.dart';
 import 'dto/analysis_dto.dart';
 import 'dto/login_response_dto.dart';
 import 'dto/run_dto.dart';
+import 'dto/server_info_dto.dart';
 import 'dto/split_config_dto.dart';
 import 'dto/user_dto.dart';
+import 'upload_payload.dart';
 
 const _requestTimeout = Duration(seconds: 30);
+
+/// Stamps every request with the app's API level and release version
+/// (docs/VERSIONING.md §1). Nothing server-side reads them yet — they exist
+/// so a future server can tell old apps apart, which can't be retrofitted
+/// onto builds already installed on phones.
+class _AppHeadersClient extends http.BaseClient {
+  final http.Client _inner;
+  final Future<String> Function()? _appVersion;
+  String? _cachedAppVersion;
+
+  _AppHeadersClient(this._inner, this._appVersion);
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    request.headers['X-App-Api-Level'] = '$kAppApiLevel';
+    final loader = _appVersion;
+    if (loader != null) {
+      try {
+        request.headers['X-App-Version'] = _cachedAppVersion ??= await loader();
+      } on Object {
+        // Informational only — never fail a request over it.
+      }
+    }
+    return _inner.send(request);
+  }
+
+  @override
+  void close() => _inner.close();
+}
 
 /// The outcome of [decideCertificateTrust]: either accept the handshake, or
 /// reject it with the [ApiCertificateException] to surface to the caller.
@@ -96,15 +128,22 @@ class HttpApiClient implements ApiClient {
   /// field is enough — it's cleared at the start of every `_send`.
   ApiCertificateException? _lastCertRejection;
 
-  HttpApiClient({http.Client? client, CertTrustStore? certTrustStore})
-    : _certTrustStore = certTrustStore ?? CertTrustStore(),
-      _checksCertificates = client == null {
+  /// [appVersion] supplies the `X-App-Version` header value (the provider
+  /// reads it from the platform); left null, only `X-App-Api-Level` is sent.
+  HttpApiClient({
+    http.Client? client,
+    CertTrustStore? certTrustStore,
+    Future<String> Function()? appVersion,
+  }) : _certTrustStore = certTrustStore ?? CertTrustStore(),
+       _checksCertificates = client == null {
+    final http.Client transport;
     if (client != null) {
-      _client = client;
-      return;
+      transport = client;
+    } else {
+      final ioClient = HttpClient()..badCertificateCallback = _acceptCertificate;
+      transport = IOClient(ioClient);
     }
-    final ioClient = HttpClient()..badCertificateCallback = _acceptCertificate;
-    _client = IOClient(ioClient);
+    _client = _AppHeadersClient(transport, appVersion);
   }
 
   /// Must run synchronously (the platform API gives no async hook here), so
@@ -174,17 +213,39 @@ class HttpApiClient implements ApiClient {
   }
 
   @override
+  Future<ServerInfoDto> getServerInfo({
+    required String baseUrl,
+    required String token,
+  }) async {
+    try {
+      final response = await _send(
+        () => _client
+            .get(_uri(baseUrl, '/api/v1/server-info'), headers: _authHeaders(token))
+            .timeout(_requestTimeout),
+      );
+      return ServerInfoDto.fromJson(_decodeJson(response));
+    } on ApiRejectedException catch (e) {
+      // Servers up to v1.2.4 have no such endpoint — that's API level 0,
+      // not a failure (docs/VERSIONING.md §2).
+      if (e.statusCode == 404) return ServerInfoDto.legacy;
+      rethrow;
+    }
+  }
+
+  @override
   Future<RunDto> uploadRun({
     required String baseUrl,
     required String token,
     required RunSummary summary,
     required File gpxFile,
+    required int serverApiLevel,
   }) async {
+    final summaryJson = buildUploadSummaryJson(summary, serverApiLevel: serverApiLevel);
     final response = await _send(() async {
       final request =
           http.MultipartRequest('POST', _uri(baseUrl, '/api/v1/activities'))
             ..headers.addAll(_authHeaders(token))
-            ..fields['summary'] = jsonEncode(summary.toJson())
+            ..fields['summary'] = jsonEncode(summaryJson)
             ..files.add(await http.MultipartFile.fromPath('gpx', gpxFile.path));
       final streamed = await _client.send(request).timeout(_requestTimeout);
       return http.Response.fromStream(streamed);

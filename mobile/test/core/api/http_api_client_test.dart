@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:simple_activity_tracker/core/api/api_exception.dart';
 import 'package:simple_activity_tracker/core/api/dto/split_config_dto.dart';
 import 'package:simple_activity_tracker/core/api/http_api_client.dart';
+import 'package:simple_activity_tracker/core/version/api_compat.dart';
 import 'package:simple_activity_tracker/domain/models/run_summary.dart';
 import 'package:simple_activity_tracker/domain/tracking/activity_mode.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_plan.dart';
@@ -176,6 +177,7 @@ void main() {
         token: 't',
         summary: _summary(),
         gpxFile: File('test/fixtures/run_dto_sample.json'), // any existing file
+        serverApiLevel: kAppApiLevel,
       ),
       throwsA(isA<ApiRejectedException>()),
     );
@@ -225,6 +227,7 @@ void main() {
       token: 't',
       summary: _summary(),
       gpxFile: File('test/fixtures/run_dto_sample.json'),
+      serverApiLevel: kAppApiLevel,
     );
 
     expect(capturedUrl, Uri.parse('$_baseUrl/api/v1/activities'));

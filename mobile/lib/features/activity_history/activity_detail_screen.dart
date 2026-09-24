@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/api/dto/run_dto.dart';
+import '../../core/api/tolerant_json.dart';
 import '../../core/auth/auth_state_controller.dart';
 import '../../core/units/units.dart';
 import 'splits_targets_view.dart';
@@ -111,14 +112,16 @@ class _HeadlineStats extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final distanceM = (result['distance_meters'] as num?)?.toDouble();
-    final elapsedS = (result['elapsed_seconds'] as num?)?.toDouble();
-    final movingS = (result['moving_seconds'] as num?)?.toDouble();
-    final avgSpeedMps = (result['avg_moving_speed_mps'] as num?)?.toDouble();
-    final elevation = result['elevation'] as Map<String, dynamic>?;
-    final gainM = (elevation?['gain_m'] as num?)?.toDouble();
-    final lossM = (elevation?['loss_m'] as num?)?.toDouble();
-    final bestEfforts = (result['best_efforts'] as List<dynamic>?) ?? const [];
+    // Tolerant reads (docs/VERSIONING.md §3.3): a field an older or newer
+    // server omits or reshapes costs one missing line, never the screen.
+    final distanceM = readDouble(result, 'distance_meters');
+    final elapsedS = readDouble(result, 'elapsed_seconds');
+    final movingS = readDouble(result, 'moving_seconds');
+    final avgSpeedMps = readDouble(result, 'avg_moving_speed_mps');
+    final elevation = readMap(result, 'elevation');
+    final gainM = readDouble(elevation, 'gain_m');
+    final lossM = readDouble(elevation, 'loss_m');
+    final bestEfforts = readMapList(result, 'best_efforts');
     final best1km = _bestEffortFor(bestEfforts, 1000);
     final best5km = _bestEffortFor(bestEfforts, 5000);
 
@@ -139,11 +142,14 @@ class _HeadlineStats extends StatelessWidget {
     );
   }
 
-  Duration? _bestEffortFor(List<dynamic> bestEfforts, double targetDistanceMeters) {
+  Duration? _bestEffortFor(
+    List<Map<String, dynamic>> bestEfforts,
+    double targetDistanceMeters,
+  ) {
     for (final entry in bestEfforts) {
-      final map = entry as Map<String, dynamic>;
-      if ((map['distance_meters'] as num).toDouble() == targetDistanceMeters) {
-        return Duration(seconds: (map['duration_seconds'] as num).round());
+      final durationS = readDouble(entry, 'duration_seconds');
+      if (readDouble(entry, 'distance_meters') == targetDistanceMeters && durationS != null) {
+        return Duration(seconds: durationS.round());
       }
     }
     return null;

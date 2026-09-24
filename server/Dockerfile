@@ -27,6 +27,14 @@ COPY --from=build --chown=app:app /app /app
 WORKDIR /app
 ENV PATH="/app/.venv/bin:$PATH"
 
+# The release version (docs/VERSIONING.md §1), shown in the web footer and
+# /api/v1/server-info. container.yml passes it from scripts/release-version.sh;
+# a plain local `docker build` leaves it as "dev". Declared late so a new
+# version only invalidates these final metadata layers, not the dependency
+# install.
+ARG APP_VERSION=dev
+ENV SAT_BUILD_VERSION=$APP_VERSION
+
 VOLUME /data
 EXPOSE 8000
 

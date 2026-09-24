@@ -1,0 +1,12 @@
+{
+  "split_type": "distance_km",
+  "split_value": 1,
+  "rolling_target_mps": 3.0,
+  "custom_splits": [],
+  "targets_as": "speed",
+  "point_count": 12,
+  "first_point": {
+    "accuracy_m": 4.0,
+    "speed_mps": 3.0
+  }
+}

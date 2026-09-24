@@ -6,6 +6,7 @@ import 'package:simple_activity_tracker/core/api/api_exception.dart';
 import 'package:simple_activity_tracker/core/api/dto/analysis_dto.dart';
 import 'package:simple_activity_tracker/core/auth/auth_service.dart';
 import 'package:simple_activity_tracker/core/sync/sync_service.dart';
+import 'package:simple_activity_tracker/core/version/api_compat.dart';
 import 'package:simple_activity_tracker/domain/models/run_record.dart';
 import 'package:simple_activity_tracker/domain/models/run_summary.dart';
 import 'package:simple_activity_tracker/domain/models/sync_status.dart';
@@ -176,6 +177,7 @@ void main() {
                 token: token,
                 summary: summary,
                 gpxFile: gpxFile,
+                serverApiLevel: kAppApiLevel,
               );
             };
       final store = FakeRunStore()..seed(_record());
@@ -358,6 +360,7 @@ void main() {
             token: token,
             summary: summary,
             gpxFile: gpxFile,
+            serverApiLevel: kAppApiLevel,
           );
         };
       final store = FakeRunStore()
@@ -441,6 +444,7 @@ void main() {
                   token: token,
                   summary: summary,
                   gpxFile: gpxFile,
+                  serverApiLevel: kAppApiLevel,
                 );
               };
         final store = FakeRunStore()..seed(_record());

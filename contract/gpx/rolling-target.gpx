@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:sat="https://simple-activity-tracker.local/gpx-extensions" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd" version="1.1" creator="Simple Activity Tracker">
+  <extensions>
+    <sat:split_type>distance_km</sat:split_type>
+    <sat:split_value>1</sat:split_value>
+    <sat:split_target>3.0</sat:split_target>
+    <sat:split_targets_as>speed</sat:split_targets_as>
+  </extensions>
+  <trk>
+    <trkseg>
+      <trkpt lat="51.5" lon="-0.1">
+        <ele>20.0</ele>
+        <time>2026-09-24T07:00:00.000Z</time>
+        <extensions>
+          <sat:accuracy>4.0</sat:accuracy>
+          <sat:has_accuracy>true</sat:has_accuracy>
+          <sat:speed>3.0</sat:speed>
+          <sat:has_speed>true</sat:has_speed>
+        </extensions>
+      </trkpt>
+      <trkpt lat="51.50027" lon="-0.1">
+        <ele>21.0</ele>
+        <time>2026-09-24T07:00:10.000Z</time>
+        <extensions>
+          <sat:accuracy>4.0</sat:accuracy>
+          <sat:has_accuracy>true</sat:has_accuracy>
+          <sat:speed>3.0</sat:speed>
+          <sat:has_speed>true</sat:has_speed>
+        </extensions>
+      </trkpt>
+      <trkpt lat="51.50054" lon="-0.1">
+        <ele>22.0</ele>
+        <time>2026-09-24T07:00:20.000Z</time>
+        <extensions>
+          <sat:accuracy>4.0</sat:accuracy>
+          <sat:has_accuracy>true</sat:has_accuracy>
+          <sat:speed>3.0</sat:speed>
+          <sat:has_speed>true</sat:has_speed>
+        </extensions>
+      </trkpt>
+      <trkpt lat="51.50081" lon="-0.1">
+        <ele>23.0</ele>
+        <time>2026-09-24T07:00:30.000Z</time>
+        <extensions>
+          <sat:accuracy>4.0</sat:accuracy>
+          <sat:has_accuracy>true</sat:has_accuracy>
+          <sat:speed>3.0</sat:speed>
+          <sat:has_speed>true</sat:has_speed>
+        </extensions>
+      </trkpt>
+      <trkpt lat="51.50108" lon="-0.1">
+        <ele>24.0</ele>
+        <time>2026-09-24T07:00:40.000Z</time>
+        <extensions>
+          <sat:accuracy>4.0</sat:accuracy>
+          <sat:has_accuracy>true</sat:has_accuracy>
+          <sat:speed>3.0</sat:speed>
+          <sat:has_speed>true</sat:has_speed>
+        </extensions>
+      </trkpt>
+      <trkpt lat="51.50135" lon="-0.1">
+        <ele>25.0</ele>
+        <time>2026-09-24T07:00:50.000Z</time>
+        <extensions>
+          <sat:accuracy>4.0</sat:accuracy>
+          <sat:has_accuracy>true</sat:has_accuracy>
+          <sat:speed>3.0</sat:speed>
+          <sat:has_speed>true</sat:has_speed>
+        </extensions>
+      </trkpt>
+      <trkpt lat="51.50162" lon="-0.1">
+        <ele>26.0</ele>
+        <time>2026-09-24T07:01:00.000Z</time>
+        <extensions>
+          <sat:accuracy>4.0</sat:accuracy>
+          <sat:has_accuracy>true</sat:has_accuracy>
+          <sat:speed>3.0</sat:speed>
+          <sat:has_speed>true</sat:has_speed>
+        </extensions>
+      </trkpt>
+      <trkpt lat="51.50189" lon="-0.1">
+        <ele>27.0</ele>
+        <time>2026-09-24T07:01:10.000Z</time>
+        <extensions>
+          <sat:accuracy>4.0</sat:accuracy>
+          <sat:has_accuracy>true</sat:has_accuracy>
+          <sat:speed>3.0</sat:speed>
+          <sat:has_speed>true</sat:has_speed>
+        </extensions>
+      </trkpt>
+      <trkpt lat="51.50216" lon="-0.1">
+        <ele>28.0</ele>
+        <time>2026-09-24T07:01:20.000Z</time>
+        <extensions>
+          <sat:accuracy>4.0</sat:accuracy>
+          <sat:has_accuracy>true</sat:has_accuracy>
+          <sat:speed>3.0</sat:speed>
+          <sat:has_speed>true</sat:has_speed>
+        </extensions>
+      </trkpt>
+      <trkpt lat="51.50243" lon="-0.1">
+        <ele>29.0</ele>
+        <time>2026-09-24T07:01:30.000Z</time>
+        <extensions>
+          <sat:accuracy>4.0</sat:accuracy>
+          <sat:has_accuracy>true</sat:has_accuracy>
+          <sat:speed>3.0</sat:speed>
+          <sat:has_speed>true</sat:has_speed>
+        </extensions>
+      </trkpt>
+      <trkpt lat="51.5027" lon="-0.1">
+        <ele>30.0</ele>
+        <time>2026-09-24T07:01:40.000Z</time>
+        <extensions>
+          <sat:accuracy>4.0</sat:accuracy>
+          <sat:has_accuracy>true</sat:has_accuracy>
+          <sat:speed>3.0</sat:speed>
+          <sat:has_speed>true</sat:has_speed>
+        </extensions>
+      </trkpt>
+      <trkpt lat="51.50297" lon="-0.1">
+        <ele>31.0</ele>
+        <time>2026-09-24T07:01:50.000Z</time>
+        <extensions>
+          <sat:accuracy>4.0</sat:accuracy>
+          <sat:has_accuracy>true</sat:has_accuracy>
+          <sat:speed>3.0</sat:speed>
+          <sat:has_speed>true</sat:has_speed>
+        </extensions>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

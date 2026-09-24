@@ -5,11 +5,13 @@ on:
     paths:
       - "server/**"
       - ".github/workflows/server.yml"
+      - "contract/**"
   push:
     branches: [main]
     paths:
       - "server/**"
       - ".github/workflows/server.yml"
+      - "contract/**"
 
 jobs:
   lint-type-test:
@@ -33,6 +35,45 @@ jobs:
       - run: uv run python -m app.openapi_export | diff - openapi.json
         env:
           SR_SECRET_KEY: ci-openapi-export-placeholder-not-a-real-secret-key
+
+      # API-level guard (docs/VERSIONING.md §2): a PR that changes the API
+      # contract must bump API_LEVEL, and one oasdiff calls breaking must also
+      # bump MIN_APP_API_LEVEL. PRs only — it needs a base branch to compare.
+      - name: Fetch the base branch's API contract
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --depth=1 origin "${{ github.base_ref }}"
+          mkdir -p ../.api-base
+          git show FETCH_HEAD:server/openapi.json > ../.api-base/openapi.json
+          # Absent before #141 introduced API levels — the check handles that.
+          git show FETCH_HEAD:server/app/api_compat.py > ../.api-base/api_compat.py \
+            || rm -f ../.api-base/api_compat.py
+
+      - name: Detect breaking API changes (oasdiff)
+        if: github.event_name == 'pull_request'
+        id: oasdiff
+        uses: oasdiff/oasdiff-action/breaking@5e81b5c380accc6b523f9d32a637ca630e33620b # v0.1.17
+        with:
+          base: .api-base/openapi.json
+          revision: server/openapi.json
+          # Never upload the spec to oasdiff.com, and don't post PR comments —
+          # the next step's pass/fail is the only signal needed.
+          review: "false"
+          github-token: ""
+
+      - name: Check API level bumps
+        if: github.event_name == 'pull_request'
+        env:
+          OASDIFF_BREAKING: ${{ steps.oasdiff.outputs.breaking }}
+        run: |
+          flag=""
+          if [ "$OASDIFF_BREAKING" != "No breaking changes" ]; then
+            echo "$OASDIFF_BREAKING"
+            flag="--breaking"
+          fi
+          uv run python scripts/check_api_level.py \
+            ../.api-base/openapi.json ../.api-base/api_compat.py \
+            openapi.json app/api_compat.py $flag
 
       - name: Dependency audit (pip-audit)
         run: |

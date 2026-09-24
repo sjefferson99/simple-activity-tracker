@@ -306,14 +306,22 @@ def test_patch_updates_device_name(app_client, auth_headers, sample_gpx_bytes) -
     assert response.json()["device_name"] == "Garmin Forerunner 245"
 
 
-def test_patch_rejects_unknown_fields(app_client, auth_headers, sample_gpx_bytes) -> None:
+def test_patch_cannot_change_fields_it_does_not_accept(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    """Request models ignore unknown fields rather than rejecting them
+    (docs/VERSIONING.md §5) — so a field PATCH doesn't accept must be dropped,
+    never applied: the phone's recorded stats stay read-only."""
     created = upload_sample_activity(app_client, auth_headers, sample_gpx_bytes).json()
     response = app_client.patch(
         f"/api/v1/activities/{created['id']}",
         headers=auth_headers,
-        json={"distance_meters": 999.0},
+        json={"distance_meters": 999.0, "title": "Renamed"},
     )
-    assert response.status_code == 422
+    assert response.status_code == 200
+    body = response.json()
+    assert body["title"] == "Renamed"
+    assert body["client_summary"]["distance_meters"] == 3000.0
 
 
 def test_delete_removes_the_activity(app_client, auth_headers, sample_gpx_bytes) -> None:

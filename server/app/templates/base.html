@@ -26,6 +26,11 @@
   <main class="content">
     {% block content %}{% endblock %}
   </main>
+  {% if user %}
+  {# Signed-in only: an anonymous visitor learns nothing about the version (S7,
+     docs/VERSIONING.md §1). #}
+  <footer class="site-footer">Simple Activity Tracker {{ app_version }} · API level {{ api_level }}</footer>
+  {% endif %}
   <script src="/static/vendor/htmx/htmx.min.js"></script>
   <script nonce="{{ csp_nonce(request) }}">
     // Login/register/settings/admin forms render an error fragment with a

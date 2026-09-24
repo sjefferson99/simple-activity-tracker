@@ -16,6 +16,7 @@ import '../../domain/tracking/split_preference.dart' show SplitKind;
 import '../live_run/confirm_delete_run_record.dart';
 import '../live_run/reopened_run_screen.dart';
 import '../splits/splits_screen.dart';
+import 'about_section.dart';
 
 /// Re-fetches the run queue on every SyncService status change, so the
 /// summary below stays live while a pass is running — a StreamProvider
@@ -52,6 +53,10 @@ class SettingsScreen extends ConsumerWidget {
               ),
               error: (error, _) => _ErrorBanner(message: _messageFor(error)),
             ),
+            const SizedBox(height: 24),
+            const Divider(),
+            const SizedBox(height: 16),
+            const AboutSection(),
             const SizedBox(height: 24),
             const Divider(),
             const SizedBox(height: 16),

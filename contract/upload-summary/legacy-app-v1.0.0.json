@@ -1,0 +1,13 @@
+{
+  "client_activity_id": "c0a1e9d2-0000-4000-8000-000000000100",
+  "started_at": "2026-09-14T07:00:00.000Z",
+  "ended_at": "2026-09-14T07:16:30.000Z",
+  "activity_type": "running",
+  "moving_seconds": 900.0,
+  "distance_meters": 3000.0,
+  "avg_speed_mps": 3.33,
+  "splits": [
+    {"index": 1, "duration_seconds": 300.0, "avg_speed_mps": 3.33, "distance_m": 1000.0}
+  ],
+  "source": {"platform": "android", "app_version": "1.0.0+1"}
+}

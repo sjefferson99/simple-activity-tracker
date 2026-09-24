@@ -382,21 +382,25 @@ class TestValidation:
         )
         assert response.status_code == 422
 
-    def test_create_rejects_unknown_fields_in_plan(self, app_client, auth_headers):
+    # Unknown fields are ignored, not rejected, so a newer app can't be broken
+    # by this server (docs/VERSIONING.md §5) — but they must never be stored.
+    def test_create_ignores_unknown_fields_in_plan(self, app_client, auth_headers):
         plan = _rolling_plan()
         plan["unexpected"] = True
         response = app_client.post(
-            "/api/v1/split-configs", headers=auth_headers, json={"name": "Bad", "plan": plan}
+            "/api/v1/split-configs", headers=auth_headers, json={"name": "Extra", "plan": plan}
         )
-        assert response.status_code == 422
+        assert response.status_code == 200
+        assert "unexpected" not in response.json()["plan"]
 
-    def test_create_rejects_unknown_top_level_fields(self, app_client, auth_headers):
+    def test_create_ignores_unknown_top_level_fields(self, app_client, auth_headers):
         response = app_client.post(
             "/api/v1/split-configs",
             headers=auth_headers,
-            json={"name": "Bad", "plan": _rolling_plan(), "unexpected": True},
+            json={"name": "Extra", "plan": _rolling_plan(), "unexpected": True},
         )
-        assert response.status_code == 422
+        assert response.status_code == 200
+        assert "unexpected" not in response.json()
 
 
 class TestRateLimiting:

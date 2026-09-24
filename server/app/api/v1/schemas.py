@@ -20,9 +20,15 @@ from app.validation import (
     validate_password,
 )
 
+# Every request model uses extra="ignore", never "forbid": a newer app sends
+# fields this server doesn't know yet, and rejecting them (as every server up
+# to v1.2.4 did) makes the upload fail outright. See docs/VERSIONING.md §5.
+# test_api_contract.py separately proves the *current* app's payload has no
+# field this server ignores.
+
 
 class SplitSummary(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     index: int = Field(ge=1)
     duration_seconds: float = Field(ge=0)
@@ -38,7 +44,7 @@ class SplitSummary(BaseModel):
 
 
 class ActivitySource(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     platform: str
     app_version: str
@@ -48,7 +54,7 @@ class ActivitySummary(BaseModel):
     """The phone's own numbers, uploaded verbatim — mirrors LiveMetrics.
     See docs/WEB-PLAN.md §5.3."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     client_activity_id: str
     activity_type: Literal["running", "cycling", "walking"]
@@ -64,11 +70,31 @@ class ActivitySummary(BaseModel):
     source: ActivitySource
 
 
+def known_summary_fields(raw: dict[str, Any]) -> dict[str, Any]:
+    """The uploaded summary JSON minus any field this server doesn't know.
+
+    Uploads store the phone's summary verbatim as ``client_summary`` (original
+    values and formatting intact), but request models now ignore unknown
+    fields rather than rejecting them — so strip those here too, keeping the
+    stored record limited to what this server actually understands. Call only
+    after ``ActivitySummary`` validation has passed (shapes are assumed valid).
+    """
+
+    def pick(model: type[BaseModel], data: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in data.items() if key in model.model_fields}
+
+    known = pick(ActivitySummary, raw)
+    known["source"] = pick(ActivitySource, raw["source"])
+    if "splits" in raw:
+        known["splits"] = [pick(SplitSummary, split) for split in raw["splits"]]
+    return known
+
+
 # --- Auth ---
 
 
 class LoginRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     email: str
     password: str = Field(max_length=PASSWORD_MAX_LENGTH)
@@ -114,7 +140,7 @@ class LoginResponse(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     current_password: str = Field(max_length=PASSWORD_MAX_LENGTH)
     new_password: str
@@ -137,7 +163,7 @@ class TagOut(BaseModel):
 
 
 class AddTagRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     name: str = Field(max_length=TAG_NAME_MAX_LENGTH)
 
@@ -188,7 +214,7 @@ class SplitPlanIn(BaseModel):
     SplitPlan.fromJson validation exactly (see
     docs/SPLIT-CONFIGS-PLAN.md §2.2)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     split_type: Literal["distance_km", "distance_mi", "time_min"]
     split_value: int = Field(gt=0)
@@ -246,7 +272,7 @@ class SplitConfigListResponse(BaseModel):
 
 
 class SplitConfigCreateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     name: str = Field(min_length=1, max_length=SPLIT_CONFIG_NAME_MAX_LENGTH)
     plan: SplitPlanIn
@@ -265,7 +291,7 @@ class SplitConfigCreateRequest(BaseModel):
 
 
 class SplitConfigPatchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     name: str | None = Field(default=None, min_length=1, max_length=SPLIT_CONFIG_NAME_MAX_LENGTH)
     plan: SplitPlanIn | None = None
@@ -301,7 +327,7 @@ class ActivityOut(BaseModel):
 
 
 class ActivityPatchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     title: str | None = Field(default=None, max_length=TITLE_MAX_LENGTH)
     notes: str | None = Field(default=None, max_length=NOTES_MAX_LENGTH)
@@ -320,7 +346,7 @@ class TrackOut(BaseModel):
 
 
 class ExportRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     # None means "export every activity the caller owns".
     activity_ids: list[str] | None = None
@@ -393,7 +419,7 @@ class AdminUserOut(BaseModel):
 
 
 class AdminCreateUserRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     email: str = Field(max_length=EMAIL_MAX_LENGTH)
     display_name: str = Field(min_length=1, max_length=NAME_MAX_LENGTH)
@@ -426,7 +452,7 @@ class AdminCreateUserRequest(BaseModel):
 
 
 class AdminPatchUserRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     display_name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
     is_admin: bool | None = None
@@ -444,7 +470,7 @@ class AdminPatchUserRequest(BaseModel):
 
 
 class AdminSetPasswordRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     new_password: str
 
@@ -455,6 +481,12 @@ class AdminSetPasswordRequest(BaseModel):
             return validate_password(value)
         except ValidationFailedError as exc:
             raise ValueError(str(exc)) from exc
+
+
+class ServerInfoOut(BaseModel):
+    version: str
+    api_level: int
+    min_app_api_level: int
 
 
 class ErrorDetail(BaseModel):

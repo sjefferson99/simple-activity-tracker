@@ -221,7 +221,6 @@
         "type": "object"
       },
       "ActivityPatchRequest": {
-        "additionalProperties": false,
         "properties": {
           "device_name": {
             "anyOf": [
@@ -264,7 +263,6 @@
         "type": "object"
       },
       "AddTagRequest": {
-        "additionalProperties": false,
         "properties": {
           "name": {
             "maxLength": 50,
@@ -279,7 +277,6 @@
         "type": "object"
       },
       "AdminCreateUserRequest": {
-        "additionalProperties": false,
         "properties": {
           "display_name": {
             "maxLength": 200,
@@ -311,7 +308,6 @@
         "type": "object"
       },
       "AdminPatchUserRequest": {
-        "additionalProperties": false,
         "properties": {
           "disabled": {
             "anyOf": [
@@ -352,7 +348,6 @@
         "type": "object"
       },
       "AdminSetPasswordRequest": {
-        "additionalProperties": false,
         "properties": {
           "new_password": {
             "title": "New Password",
@@ -500,7 +495,6 @@
         "type": "object"
       },
       "ChangePasswordRequest": {
-        "additionalProperties": false,
         "properties": {
           "current_password": {
             "maxLength": 256,
@@ -557,7 +551,6 @@
         "type": "object"
       },
       "ExportRequest": {
-        "additionalProperties": false,
         "properties": {
           "activity_ids": {
             "anyOf": [
@@ -656,7 +649,6 @@
         "type": "object"
       },
       "LoginRequest": {
-        "additionalProperties": false,
         "properties": {
           "device_name": {
             "maxLength": 200,
@@ -703,8 +695,30 @@
         "title": "LoginResponse",
         "type": "object"
       },
+      "ServerInfoOut": {
+        "properties": {
+          "api_level": {
+            "title": "Api Level",
+            "type": "integer"
+          },
+          "min_app_api_level": {
+            "title": "Min App Api Level",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "api_level",
+          "min_app_api_level"
+        ],
+        "title": "ServerInfoOut",
+        "type": "object"
+      },
       "SplitConfigCreateRequest": {
-        "additionalProperties": false,
         "properties": {
           "name": {
             "maxLength": 200,
@@ -780,7 +794,6 @@
         "type": "object"
       },
       "SplitConfigPatchRequest": {
-        "additionalProperties": false,
         "properties": {
           "name": {
             "anyOf": [
@@ -810,7 +823,6 @@
         "type": "object"
       },
       "SplitPlanIn": {
-        "additionalProperties": false,
         "description": "A client-supplied split plan (issue #126) \u2014 the same five fields as\nSplitPlanOut/app.analysis.gpx_parser.SplitPlanData, but as an untrusted\nwrite-side model with real validation, used to create/update a\nSplitConfig. Unlike SplitPlanOut (built server-side from a parsed GPX,\nnever re-validated) this is the boundary that stops a malformed plan \u2014\nnegative sizes, an over-long custom list, both/neither of rolling vs\ncustom \u2014 from ever reaching the database. Mirrors mobile's\nSplitPlan.fromJson validation exactly (see\ndocs/SPLIT-CONFIGS-PLAN.md \u00a72.2).",
         "properties": {
           "custom_splits": {
@@ -1149,7 +1161,7 @@
   },
   "info": {
     "title": "Simple Activity Tracker Server",
-    "version": "0.1.0"
+    "version": "1"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -2178,6 +2190,28 @@
         "summary": "Change Password",
         "tags": [
           "me"
+        ]
+      }
+    },
+    "/api/v1/server-info": {
+      "get": {
+        "description": "The server's release version and API level, for the app's About/\ncompatibility display (docs/VERSIONING.md). Signed-in only, so an\nanonymous caller still learns nothing about the version (S7).",
+        "operationId": "get_server_info_api_v1_server_info_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerInfoOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Server Info",
+        "tags": [
+          "server"
         ]
       }
     },

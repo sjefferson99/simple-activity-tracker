@@ -3,11 +3,14 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/models/run_summary.dart';
+import '../version/api_compat.dart';
+import '../version/app_version.dart';
 import 'cert_trust_store.dart';
 import 'dto/activity_list_item_dto.dart';
 import 'dto/analysis_dto.dart';
 import 'dto/login_response_dto.dart';
 import 'dto/run_dto.dart';
+import 'dto/server_info_dto.dart';
 import 'dto/split_config_dto.dart';
 import 'dto/user_dto.dart';
 import 'http_api_client.dart';
@@ -19,7 +22,10 @@ import 'http_api_client.dart';
 final certTrustStoreProvider = Provider<CertTrustStore>((ref) => CertTrustStore());
 
 final apiClientProvider = Provider<ApiClient>(
-  (ref) => HttpApiClient(certTrustStore: ref.read(certTrustStoreProvider)),
+  (ref) => HttpApiClient(
+    certTrustStore: ref.read(certTrustStoreProvider),
+    appVersion: () async => (await ref.read(appVersionProvider.future)).full,
+  ),
 );
 
 /// The server's `/api/v1` surface this app needs (docs/WEB-PLAN.md §5.2).
@@ -41,13 +47,22 @@ abstract class ApiClient {
 
   Future<UserDto> me({required String baseUrl, required String token});
 
+  /// The server's release version and API level (docs/VERSIONING.md §1).
+  /// A server that predates the endpoint (≤ v1.2.4) returns
+  /// [ServerInfoDto.legacy] — a 404 here is an answer, not an error.
+  Future<ServerInfoDto> getServerInfo({required String baseUrl, required String token});
+
   /// Idempotent on the summary's `clientRunId` — a retried upload after a
   /// timeout returns the same run rather than creating a duplicate.
+  /// [serverApiLevel] shapes the payload so an older server never receives
+  /// a field it doesn't know (docs/VERSIONING.md §3.1) — pass the level from
+  /// [getServerInfo], or [kLegacyServerApiLevel] when it isn't known.
   Future<RunDto> uploadRun({
     required String baseUrl,
     required String token,
     required RunSummary summary,
     required File gpxFile,
+    required int serverApiLevel,
   });
 
   Future<AnalysisDto> getAnalysis({
