@@ -1,0 +1,44 @@
+{#
+  Issue #134: what the plan being edited works out to at its targets.
+  Rendered inside split_config_form_fields.html on every full-form render,
+  and on its own by POST /split-configs/preview, which replaces just this
+  element as the user types (hx-swap="outerHTML" on itself) — swapping only
+  the panel keeps focus in the field being edited.
+#}
+<div id="split-config-preview" class="split-config-preview"
+     hx-post="/split-configs/preview"
+     hx-trigger="input from:#split-config-form delay:300ms"
+     hx-include="#split-config-form"
+     hx-target="this"
+     hx-swap="outerHTML">
+  {% if preview.plan_kind == "custom" %}
+    {% if preview.rows %}
+    <table>
+      <thead><tr><th>Split</th><th>{{ preview.derived_label }}</th></tr></thead>
+      <tbody>
+        {% for row in preview.rows %}
+        <tr><td>#{{ row.number }}</td><td>{{ row.equivalent or "—" }}</td></tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <th>Plan total</th>
+          <td>
+            {% if preview.invalid %}
+              <span class="muted">Totals appear once every size and target is valid</span>
+            {% else %}
+              Distance: {{ preview.total_distance or "—" }} ·
+              Time: {{ preview.total_time or "—" }}
+              {% if preview.untargeted %}
+                <span class="muted">({{ preview.untargeted }} split{{ "" if preview.untargeted == 1 else "s" }} without a target)</span>
+              {% endif %}
+            {% endif %}
+          </td>
+        </tr>
+      </tfoot>
+    </table>
+    {% endif %}
+  {% elif preview.per_split %}
+    <p class="muted">At target: {{ preview.per_split }}</p>
+  {% endif %}
+</div>

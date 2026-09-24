@@ -12,6 +12,10 @@
       hx-target="#split-config-form-area"
       hx-swap="innerHTML">
   <input type="hidden" name="config_id" value="{{ config_id or '' }}">
+  {# The settings this form was rendered with — lets POST /split-configs/custom-rows
+     convert already-typed targets when pace/speed or km/mi changes (issue #134). #}
+  <input type="hidden" name="prev_targets_as" value="{{ targets_as }}">
+  <input type="hidden" name="prev_split_type" value="{{ split_type }}">
 
   <label for="name">Name</label>
   <input type="text" id="name" name="name" value="{{ name }}" maxlength="200" required>
@@ -96,12 +100,14 @@
       </button>
     </div>
     {% endfor %}
-    <button type="submit" formnovalidate
+    <button type="submit" name="row_action" value="add" formnovalidate
             formaction="/split-configs/custom-rows" formmethod="post" class="secondary">
       Add split
     </button>
   </fieldset>
   {% endif %}
+
+  {% include "partials/split_config_preview.html" %}
 
   <div class="toolbar">
     <button type="submit">Save</button>

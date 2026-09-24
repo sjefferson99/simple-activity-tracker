@@ -202,7 +202,9 @@ String formatSplitSizeMeters(double sizeMeters, DistanceUnit distanceUnit) {
     if (miles < 0.1) return '${feetFromMeters(sizeMeters).round()} ft';
     return '${_trimDecimal(miles)} mi';
   }
-  if (sizeMeters < 1000) return '${sizeMeters.round()} m';
+  // Compare the rounded value: a computed 999.9999… m (a time split's
+  // distance at target, issue #134) should read "1 km", not "1000 m".
+  if (sizeMeters.round() < 1000) return '${sizeMeters.round()} m';
   return '${_trimDecimal(sizeMeters / 1000)} km';
 }
 

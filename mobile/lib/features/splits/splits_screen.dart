@@ -5,6 +5,7 @@ import '../../core/audio/split_audio_settings_controller.dart';
 import '../../core/tracking/split_plan_controller.dart';
 import '../../core/units/units.dart';
 import '../../domain/tracking/split_plan.dart';
+import '../../domain/tracking/split_plan_estimate.dart';
 import '../../domain/tracking/split_preference.dart';
 import 'saved_split_configs_section.dart';
 
@@ -493,19 +494,36 @@ class _RollingPlanSection extends StatelessWidget {
     );
   }
 
-  String _equivalentHint(SplitPlan plan, double targetMps, SpeedUnit unit) {
-    final sizeMeters = _rollingSizeInPlanUnits(plan.base);
-    if (plan.base.kind == SplitKind.timeMin) {
-      // Time split: the hint is the distance covered at this target speed
-      // over the split's duration.
-      final distance = targetMps * sizeMeters; // sizeMeters holds seconds here
-      return formatSplitSizeMeters(distance, plan.base.effectiveDistanceUnit);
-    }
-    // Distance split: the hint is the time to cover the split at this
-    // target speed.
-    final seconds = sizeMeters / targetMps;
-    return '${formatMinSec(Duration(milliseconds: (seconds * 1000).round()))} per split';
+  String _equivalentHint(SplitPlan plan, double targetMps, SpeedUnit unit) =>
+      _formatEstimate(
+        plan,
+        estimateSplit(
+          plan.base.kind,
+          _rollingSizeInPlanUnits(plan.base),
+          targetMps,
+        ),
+        suffix: ' per split',
+      );
+}
+
+/// The "other" dimension of a split estimate — the time a distance split
+/// takes at its target, or the distance a time split covers — or an empty
+/// string when there's no target. [suffix] is only appended to a time.
+String _formatEstimate(
+  SplitPlan plan,
+  SplitEstimate estimate, {
+  String suffix = '',
+}) {
+  if (plan.base.kind == SplitKind.timeMin) {
+    final meters = estimate.distanceMeters;
+    return meters == null
+        ? ''
+        : formatSplitSizeMeters(meters, plan.base.effectiveDistanceUnit);
   }
+  final seconds = estimate.durationSeconds;
+  return seconds == null
+      ? ''
+      : '${formatMinSec(Duration(milliseconds: (seconds * 1000).round()))}$suffix';
 }
 
 class _CustomPlanSection extends StatelessWidget {
@@ -584,6 +602,8 @@ class _CustomPlanSection extends StatelessWidget {
           icon: const Icon(Icons.add),
           label: const Text('Add split'),
         ),
+        const SizedBox(height: 12),
+        _CustomPlanTotals(plan: plan),
       ],
     );
   }
@@ -625,6 +645,44 @@ class _CustomPlanSection extends StatelessWidget {
         ? PlannedSplit(size: _rollingSizeInPlanUnits(plan.base))
         : splits.last;
     return [...splits, for (var i = splits.length; i < count; i++) fill];
+  }
+}
+
+/// Issue #134: the whole custom plan summed — total distance and time at the
+/// splits' targets. The dimension the plan is measured in is always shown;
+/// the derived one needs a target on every split, since a partial sum would
+/// understate it.
+class _CustomPlanTotals extends StatelessWidget {
+  final SplitPlan plan;
+
+  const _CustomPlanTotals({required this.plan});
+
+  @override
+  Widget build(BuildContext context) {
+    final totals = estimateCustomPlanTotals(plan);
+    final distance = totals.distanceMeters;
+    final duration = totals.durationSeconds;
+    final missing = totals.untargetedCount;
+    final missingNote =
+        '$missing split${missing == 1 ? '' : 's'} without a target';
+
+    final distanceText = distance != null
+        ? formatSplitSizeMeters(distance, plan.base.effectiveDistanceUnit)
+        : '— ($missingNote)';
+    final durationText = duration != null
+        ? formatDuration(Duration(milliseconds: (duration * 1000).round()))
+        : '— ($missingNote)';
+
+    return Column(
+      key: const ValueKey('custom_plan_totals'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Plan total', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 4),
+        Text('Distance: $distanceText'),
+        Text('Time: $durationText'),
+      ],
+    );
   }
 }
 
@@ -739,6 +797,14 @@ class _CustomSplitRow extends StatelessWidget {
                 ),
             ],
           ),
+          if (split.targetSpeedMps != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 28),
+              child: Text(
+                '= ${_formatEstimate(plan, estimateSplit(plan.base.kind, split.size, split.targetSpeedMps))}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
           if (onApplyTargetToAll != null)
             Padding(
               padding: const EdgeInsets.only(left: 28),
