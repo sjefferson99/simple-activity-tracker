@@ -123,6 +123,10 @@ class SqlAlchemyLiveSessionRepository:
         live.last_update_at = now
         self._delete_points(live.id)
 
+    def drop_points(self, session_id: str) -> None:
+        """Drops a session's points once an activity holds the route."""
+        self._delete_points(session_id)
+
     def delete(self, live: LiveSession) -> None:
         self._delete_points(live.id)
         self._session.delete(live)

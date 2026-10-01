@@ -57,6 +57,21 @@
 
 {% if is_owner and not live.activity_id %}
 <div class="card">
+  {% if can_convert %}
+  <h2>Save as an activity</h2>
+  <p class="muted">If the phone can't upload this activity (a flat battery, say), save what the server
+  received as a normal activity. If the phone's own upload arrives later, it replaces this one
+  automatically and keeps any title, notes, tags and sharing you've added.</p>
+  {% if recent_update_minutes %}
+  <p class="warning-banner">This updated {{ recent_update_minutes }} minute{{ "s" if recent_update_minutes != 1 else "" }} ago, so the
+  phone may just be out of signal. Saving now stops it adding any more to this live activity.</p>
+  {% endif %}
+  <form hx-post="/live/{{ live.id }}/convert"
+        hx-confirm="{{ 'The phone may still be recording. ' if recent_update_minutes else '' }}Save this live activity as an activity?">
+    <button type="submit">Convert to activity</button>
+  </form>
+  <hr style="border-color: var(--border); margin: 1.25rem 0;">
+  {% endif %}
   <p class="muted">Deleting removes this live activity from the server. It doesn't touch the phone.</p>
   <form hx-delete="/live/{{ live.id }}" hx-confirm="Delete this live activity? This cannot be undone.">
     <button type="submit" class="danger">Delete live activity</button>

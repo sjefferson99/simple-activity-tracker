@@ -34,6 +34,7 @@ from app.activity_import_strava import (
     read_strava_export_archive,
 )
 from app.analysis.gpx_parser import GpxParseError, SplitPlanData, parse_gpx, parse_split_plan
+from app.analysis.track import Track
 from app.analysis.track_sampling import DEFAULT_MAX_POINTS, sample_track
 from app.analysis.v1 import (
     ANALYSIS_VERSION,
@@ -179,6 +180,99 @@ class _NewActivity:
     tags: list[str] = field(default_factory=list)
 
 
+def _build_analysis(
+    activity_id: str, track: Track, split_plan: SplitPlanData | None, activity_type: str
+) -> ActivityAnalysis:
+    """Analyzes a parsed track into a new ActivityAnalysis row (not yet
+    added). Shared by a first insert and by replacing a converted live
+    activity's GPX (issue #130)."""
+    try:
+        analyzer = AnalyzerV1()
+        result = (
+            analyzer.analyze(
+                track,
+                split_plan.split_type,
+                split_plan.split_value,
+                activity_type=activity_type,
+                split_plan=split_plan,
+            )
+            if split_plan
+            else analyzer.analyze(track, activity_type=activity_type)
+        )
+        distance_meters, moving_seconds = distance_and_duration_from_result(result)
+        start_lat, start_lon, end_lat, end_lon = endpoints_from_result(result)
+        return ActivityAnalysis(
+            activity_id=activity_id,
+            analysis_version=ANALYSIS_VERSION,
+            status=AnalysisStatus.done,
+            result=result,
+            distance_meters=distance_meters,
+            moving_seconds=moving_seconds,
+            start_lat=start_lat,
+            start_lon=start_lon,
+            end_lat=end_lat,
+            end_lon=end_lon,
+            track=sample_track(track, max_points=DEFAULT_MAX_POINTS),
+            computed_at=datetime.now(UTC),
+        )
+    except Exception as exc:  # analysis failure must never fail the upload/import
+        return ActivityAnalysis(
+            activity_id=activity_id,
+            analysis_version=ANALYSIS_VERSION,
+            status=AnalysisStatus.failed,
+            error=str(exc),
+            computed_at=datetime.now(UTC),
+        )
+
+
+def _replace_recovered_activity(
+    session: Session,
+    activity: Activity,
+    new_activity: _NewActivity,
+    gpx_bytes: bytes,
+) -> tuple[ActivityAnalysis, str]:
+    """The phone's own upload has arrived for an activity that was saved
+    from its live session (issue #130 D6): the upload replaces the GPX,
+    summary, timings, split fields and analysis in place. The id, title,
+    notes, tags and shares stay, so links and anything the owner added
+    survive. Returns the new analysis and the old blob key, which the caller
+    deletes only after committing."""
+    try:
+        track = parse_gpx(gpx_bytes)
+    except GpxParseError as exc:
+        raise api_error(400, "invalid_gpx", str(exc)) from exc
+    split_plan = parse_split_plan(gpx_bytes)
+
+    old_blob_key = activity.gpx_blob_key
+    activity.gpx_blob_key = _blob_store().put(activity.user_id, gpx_bytes)
+    activity.gpx_sha256 = hashlib.sha256(gpx_bytes).hexdigest()
+    activity.gpx_bytes = len(gpx_bytes)
+    activity.activity_type = new_activity.activity_type
+    activity.started_at = new_activity.started_at
+    activity.ended_at = new_activity.ended_at
+    activity.client_summary = new_activity.client_summary
+    activity.source_platform = new_activity.source_platform
+    activity.source_app_version = new_activity.source_app_version
+    activity.device_name = activity.device_name or new_activity.device_name
+    activity.split_type = split_plan.split_type if split_plan else None
+    activity.split_value = split_plan.split_value if split_plan else None
+    activity.split_plan = _split_plan_to_json(split_plan) if split_plan else None
+    activity.recovered_from_live = False
+    activity.updated_at = datetime.now(UTC)
+
+    analyses = SqlAlchemyActivityAnalysisRepository(session)
+    old_analysis = analyses.get_by_activity_id(activity.id)
+    if old_analysis is not None:
+        analyses.delete(old_analysis)
+        # No relationship() to order the delete before the insert of a row
+        # with the same primary key (see delete_activity).
+        session.flush()
+    analysis = _build_analysis(activity.id, track, split_plan, new_activity.activity_type)
+    analyses.add(analysis)
+    session.flush()
+    return analysis, old_blob_key
+
+
 def _insert_activity_with_gpx(
     session: Session,
     user_id: str,
@@ -249,43 +343,7 @@ def _insert_activity_with_gpx(
             raise
         return winner, analyses.get_by_activity_id(winner.id), False  # type: ignore[return-value]
 
-    try:
-        analyzer = AnalyzerV1()
-        result = (
-            analyzer.analyze(
-                track,
-                split_plan.split_type,
-                split_plan.split_value,
-                activity_type=new_activity.activity_type,
-                split_plan=split_plan,
-            )
-            if split_plan
-            else analyzer.analyze(track, activity_type=new_activity.activity_type)
-        )
-        distance_meters, moving_seconds = distance_and_duration_from_result(result)
-        start_lat, start_lon, end_lat, end_lon = endpoints_from_result(result)
-        analysis = ActivityAnalysis(
-            activity_id=activity.id,
-            analysis_version=ANALYSIS_VERSION,
-            status=AnalysisStatus.done,
-            result=result,
-            distance_meters=distance_meters,
-            moving_seconds=moving_seconds,
-            start_lat=start_lat,
-            start_lon=start_lon,
-            end_lat=end_lat,
-            end_lon=end_lon,
-            track=sample_track(track, max_points=DEFAULT_MAX_POINTS),
-            computed_at=datetime.now(UTC),
-        )
-    except Exception as exc:  # analysis failure must never fail the upload/import
-        analysis = ActivityAnalysis(
-            activity_id=activity.id,
-            analysis_version=ANALYSIS_VERSION,
-            status=AnalysisStatus.failed,
-            error=str(exc),
-            computed_at=datetime.now(UTC),
-        )
+    analysis = _build_analysis(activity.id, track, split_plan, new_activity.activity_type)
     analyses.add(analysis)
     try:
         session.flush()
@@ -365,6 +423,7 @@ def _insert_from_strava_row(
 
 @router.post("", response_model=ActivityOut, status_code=201)
 def upload_activity(
+    request: Request,
     user: CurrentUser,
     device_name: CurrentDeviceName,
     session: Annotated[Session, Depends(db_session)],
@@ -388,19 +447,40 @@ def upload_activity(
             413, "gpx_too_large", f"GPX file exceeds the {settings.max_gpx_bytes}-byte limit"
         )
 
+    new_activity = _NewActivity(
+        client_activity_id=summary_model.client_activity_id,
+        activity_type=summary_model.activity_type,
+        started_at=summary_model.started_at,
+        ended_at=summary_model.ended_at,
+        client_summary=known_summary_fields(json.loads(summary)),
+        source_platform=summary_model.source.platform,
+        source_app_version=summary_model.source.app_version,
+        device_name=device_name,
+    )
+    recovered = SqlAlchemyActivityRepository(session).get_by_client_activity_id(
+        user.id, summary_model.client_activity_id
+    )
+    if recovered is not None and recovered.recovered_from_live:
+        replaced_analysis, old_blob_key = _replace_recovered_activity(
+            session, recovered, new_activity, gpx_bytes
+        )
+        # Committed before the old blob goes, same ordering as delete_activity:
+        # an orphaned blob is harmless, a row pointing at a deleted one isn't.
+        session.commit()
+        _blob_store().delete(old_blob_key)
+        log_audit_event(
+            "activity.replaced_recovered",
+            actor_id=user.id,
+            target_id=recovered.id,
+            client_ip=request.client.host if request.client else "unknown",
+        )
+        response.status_code = 200
+        return _activity_out(recovered, replaced_analysis)
+
     activity, analysis, created = _insert_activity_with_gpx(
         session,
         user.id,
-        _NewActivity(
-            client_activity_id=summary_model.client_activity_id,
-            activity_type=summary_model.activity_type,
-            started_at=summary_model.started_at,
-            ended_at=summary_model.ended_at,
-            client_summary=known_summary_fields(json.loads(summary)),
-            source_platform=summary_model.source.platform,
-            source_app_version=summary_model.source.app_version,
-            device_name=device_name,
-        ),
+        new_activity,
         gpx_bytes,
     )
     # The phone's live session for this activity (issue #130), if any, is now

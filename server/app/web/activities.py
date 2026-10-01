@@ -102,6 +102,7 @@ def _activity_view(activity: Activity, analysis: ActivityAnalysis | None) -> dic
         # stored dict is enough; the splits table itself always reads
         # target_speed_mps/verdict from analysis.result, not from this.
         "split_plan": activity.split_plan,
+        "recovered_from_live": activity.recovered_from_live,
     }
 
 
