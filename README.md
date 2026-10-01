@@ -9,19 +9,31 @@ Raspberry Pi on your home network.
 
 ## How it works
 
-1. **Record on the phone.** Pick Run, Walk or Cycle and press Start. The app reads GPS
-   fixes, filters out noisy ones (indoor drift, stale or jumping fixes), and keeps live
-   distance, speed or pace, time, splits and more. Every fix is written to a GPX file on
-   the phone as you go, so a crash never loses the track.
-2. **Follow along live (optional).** With live upload on, the route also goes to your
+1. **Plan your pacing.** Before you start, set how your activity is split (every km,
+   every mile, every few minutes, or a custom list of variable-length splits for
+   intervals or a race plan) and give any split a target pace or speed. Plans can be
+   built on the web and loaded on the phone.
+2. **Record, and stay on pace.** Pick Run, Walk or Cycle and press Start. The app reads
+   GPS fixes, filters out noisy ones (indoor drift, stale or jumping fixes), and shows
+   live distance, speed or pace, time and splits. Each split is judged against its
+   target as you go: the screen shows on target, too fast or too slow, and beeps and
+   spoken cues announce each split's target and tell you to speed up or ease off, so you
+   don't have to look at the phone. Every fix is written to a GPX file on the phone as
+   you go, so a crash never loses the track.
+3. **Follow along live (optional).** With live upload on, the route also goes to your
    server about once a minute. People you've chosen on the same server can watch it on
    a live map, and if the phone dies, what was uploaded can still be saved.
-3. **Sync when finished.** When you stop, the activity joins an upload queue that
+4. **Sync when finished.** When you stop, the activity joins an upload queue that
    retries with backoff until it reaches your server. Nothing is lost offline.
-4. **Analyse on the server.** The server stores the original GPX, runs its own
-   analysis (distance, moving time, smoothed speed and elevation, splits, best efforts)
-   and shows it all in the web app, alongside the phone's own numbers.
-5. **Share if you want.** Choose who can watch you live and who can see your history,
+5. **Analyse on the server.** The server stores the original GPX, runs its own
+   analysis (distance, moving time, smoothed speed and elevation, splits against your
+   targets, best efforts) and shows it all in the web app, alongside the phone's own
+   numbers. Re-slice the splits at any size afterwards.
+6. **Find any activity.** Search everything you've recorded or imported by text (title,
+   notes, tags), distance range and activity type, or by **place**: drop a pin on a map
+   and find every activity that started, finished, or did either or both near it. Sort,
+   page through and export exactly the results you filtered to.
+7. **Share if you want.** Choose who can watch you live and who can see your history,
    per person or per activity. Viewers get read-only access, and you can change or
    revoke it at any time.
 

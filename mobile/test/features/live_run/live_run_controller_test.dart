@@ -18,12 +18,14 @@ import 'package:simple_activity_tracker/core/location/location_sample.dart';
 import 'package:simple_activity_tracker/core/location/location_service.dart';
 import 'package:simple_activity_tracker/core/sync/live_sharing_store.dart';
 import 'package:simple_activity_tracker/core/sync/live_upload_service.dart';
+import 'package:simple_activity_tracker/core/sync/sync_service.dart';
 import 'package:simple_activity_tracker/features/live_run/live_run_controller.dart';
 import 'package:simple_activity_tracker/features/live_run/live_run_state.dart';
 import 'package:wakelock_plus_platform_interface/messages.g.dart';
 
 import '../../fakes/fake_api_client.dart';
 import '../../fakes/fake_connectivity_monitor.dart';
+import '../../fakes/fake_run_store.dart';
 
 /// `LiveRunController.start()` writes the run's GPX file under the app
 /// documents directory (`newRunGpxFile`) — path_provider has no real
@@ -262,7 +264,22 @@ void main() {
     addTearDown(live.dispose);
     final c2 = container(
       service,
-      extraOverrides: [liveUploadServiceProvider.overrideWithValue(live)],
+      extraOverrides: [
+        liveUploadServiceProvider.overrideWithValue(live),
+        // stop() triggers a real SyncService pass for the saved run, which
+        // checks connectivity through a plugin unit tests don't have
+        // (MissingPluginException). This test waits long enough after stop()
+        // for that pass to get there, so it gets fakes instead.
+        syncServiceProvider.overrideWithValue(
+          SyncService(
+            apiClient: FakeApiClient(),
+            runStore: FakeRunStore(),
+            authService: AuthService(apiClient: FakeApiClient()),
+            connectivity: FakeConnectivityMonitor(),
+            periodicRetryInterval: null,
+          ),
+        ),
+      ],
     );
     final controller = c2.read(liveRunControllerProvider.notifier)
       ..acquiringTimeout = const Duration(seconds: 30);
