@@ -1,6 +1,6 @@
 # Live tracking and sharing plan — issue #130
 
-Status: **approved 2026-10-01. Phases A to D done; review and README refresh before the PR.**
+Status: **approved 2026-10-01. All phases built, reviewed and documented in the README.**
 
 Scope, from [issue #130](https://github.com/sjefferson99/simple-activity-tracker/issues/130):
 
