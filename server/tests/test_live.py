@@ -604,3 +604,30 @@ def test_live_now_card_is_hidden_on_mine_when_empty(app_client, auth_headers):
 def test_live_now_fragment_requires_sign_in(app_client):
     app_client.cookies.clear()
     assert app_client.get("/live-now", follow_redirects=False).status_code == 303
+
+
+# --- review fixes ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("where", ["session", "point"])
+def test_a_time_without_a_timezone_is_rejected_not_lost(app_client, auth_headers, where):
+    """A naive time can't be stored. It used to be accepted (200) and then
+    fail at commit, after the response, silently losing the batch."""
+    if where == "session":
+        response = app_client.put(
+            f"/api/v1/live/{CID}",
+            headers=auth_headers,
+            json={"activity_type": "running", "started_at": "2026-01-01T07:00:00"},
+        )
+    else:
+        _start(app_client, auth_headers)
+        point = {**_points(0, 1)[0], "t": "2026-01-01T07:00:00"}
+        response = _send(app_client, auth_headers, 0, [point])
+    assert response.status_code == 422
+
+
+def test_finished_stays_finished(app_client, auth_headers):
+    _start(app_client, auth_headers)
+    _send(app_client, auth_headers, 0, _points(0, 2), state="finished")
+    late = _send(app_client, auth_headers, 2, [], state="active")
+    assert late.json()["state"] == "finished"

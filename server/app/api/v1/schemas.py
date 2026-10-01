@@ -2,7 +2,14 @@ import math
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from app.validation import (
     EMAIL_MAX_LENGTH,
@@ -532,14 +539,16 @@ class LiveSessionIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     activity_type: Literal["running", "cycling", "walking"]
-    started_at: datetime
+    # Aware only: a naive time can't be stored (TZDateTime), and must be a 422
+    # here rather than a failure at commit time, after the response is sent.
+    started_at: AwareDatetime
     split_plan: SplitPlanIn | None = None
 
 
 class LivePointIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    t: datetime
+    t: AwareDatetime  # see LiveSessionIn.started_at
     lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
     lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
     ele: float | None = Field(default=None, ge=-1000, le=10000, allow_inf_nan=False)

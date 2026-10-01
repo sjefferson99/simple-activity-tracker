@@ -329,4 +329,14 @@ void main() {
     await h.service.discardRun(_runId);
     expect(h.api.liveCallLog, isEmpty);
   });
+
+  test("over the server's point cap (413) it stops instead of retrying forever", () async {
+    final h = await _harness();
+    h.start();
+    await _settle(h);
+    h.api.liveFailure = const ApiRejectedException('too many points', statusCode: 413);
+    h.addPoints(0, 2);
+    await h.service.sendNow();
+    expect(h.service.status.phase, LiveUploadPhase.unavailable);
+  });
 }

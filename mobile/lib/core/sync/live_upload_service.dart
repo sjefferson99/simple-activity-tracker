@@ -371,6 +371,11 @@ class LiveUploadService {
         // Already saved as an activity: stop uploading this run.
         _stopAfterFinish();
         _setStatus(LiveUploadPhase.closed);
+      } else if (e.statusCode == 413) {
+        // Over the server's per-session point cap: nothing more will ever
+        // be accepted for this run, so stop rather than retry every minute.
+        _stopAfterFinish();
+        _setStatus(LiveUploadPhase.unavailable);
       } else if (e.statusCode == 404) {
         // The server has no such session (deleted from the web, or purged):
         // create it again on the next pass, from wherever it says.

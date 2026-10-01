@@ -131,7 +131,10 @@ def post_live_points(
     now = datetime.now(UTC)
     if body.metrics is not None:
         live.latest_metrics = body.metrics.model_dump(mode="json")
-    live.state = body.state
+    # Finished is final: a late active/paused batch must not make a finished
+    # activity look live to viewers again.
+    if live.state != "finished":
+        live.state = body.state
     if body.state == "finished":
         live.finished_at = live.finished_at or now
     live.last_update_at = now
