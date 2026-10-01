@@ -5,8 +5,14 @@
 <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
 {% endblock %}
 {% block content %}
+{# read_only: the viewer's page for an activity someone shared with them
+   (issue #130, app/web/shared_activities.py). It reads through the
+   /shared/activities/... routes and shows no edit, tag, share, download or
+   delete controls. #}
+{% set base_path = ("/shared/activities/" if read_only else "/activities/") ~ activity.id %}
 
 <div class="card">
+  {% if read_only %}<p class="muted"><a href="/?tab=shared">Shared with me</a> · shared by {{ owner_name }}</p>{% endif %}
   <h1>{{ activity.title or "Activity" }} <span class="badge type-{{ activity.activity_type }}">{{ {"cycling": "Cycle", "walking": "Walk"}.get(activity.activity_type, "Run") }}</span></h1>
   <p class="muted"><time datetime="{{ activity.started_at.isoformat() }}" class="local-time" data-format="date-time">{{ activity.started_at.isoformat() }}</time>{% if activity.device_name %} · {{ activity.device_name }}{% endif %}</p>
 
@@ -105,7 +111,7 @@
 
   {% set is_custom_plan = (activity.split_plan.custom_splits if activity.split_plan else None) %}
   <form class="split-controls"
-        hx-get="/activities/{{ activity.id }}/splits"
+        hx-get="{{ base_path }}/splits"
         hx-target="#splits-table"
         hx-trigger="change"
         style="margin-top:1.5rem;">
@@ -127,9 +133,9 @@
     </select>
     {% if activity.split_plan %}
     <button type="button" class="secondary"
-            hx-get="/activities/{{ activity.id }}/splits/reset"
+            hx-get="{{ base_path }}/splits/reset"
             hx-target="#splits-table">
-      Reset to my uploaded plan
+      Reset to {{ "the" if read_only else "my" }} uploaded plan
     </button>
     {% endif %}
   </form>
@@ -147,6 +153,22 @@
   {% endif %}
 </div>
 
+{% if read_only %}
+{% if activity.tags or activity.notes %}
+<div class="card">
+  {% if activity.tags %}
+  <h2>Tags</h2>
+  <div class="tag-chips">
+    {% for tag in activity.tags %}<span class="badge">{{ tag.name }}</span>{% endfor %}
+  </div>
+  {% endif %}
+  {% if activity.notes %}
+  <h2>Notes</h2>
+  <p style="white-space: pre-line;">{{ activity.notes }}</p>
+  {% endif %}
+</div>
+{% endif %}
+{% else %}
 <div class="card">
   <h2>Tags</h2>
   <div class="tag-chips">
@@ -192,13 +214,21 @@
   </form>
 </div>
 
+<div class="card">
+  <h2>Sharing</h2>
+  <div id="activity-share-list">
+    {% include "partials/activity_share_list.html" %}
+  </div>
+</div>
+{% endif %}
+
 {% endblock %}
 {% block scripts %}
 <script src="/static/vendor/leaflet/leaflet.js"></script>
 <script src="/static/vendor/uplot/uPlot.iife.min.js"></script>
 <script nonce="{{ csp_nonce(request) }}">
   (function () {
-    const activityId = {{ activity.id | tojson }};
+    const trackUrl = {{ ("/shared/activities/" ~ activity.id ~ "/track" if read_only else "/api/v1/activities/" ~ activity.id ~ "/track") | tojson }};
     const map = L.map('map');
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
@@ -328,7 +358,7 @@
       }
     };
 
-    fetch(`/api/v1/activities/${activityId}/track`)
+    fetch(trackUrl)
       .then((r) => r.json())
       .then((data) => {
         const allLatLngs = [];

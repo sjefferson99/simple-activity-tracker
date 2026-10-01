@@ -1,6 +1,6 @@
 # Live tracking and sharing plan — issue #130
 
-Status: **approved 2026-10-01. Not started.**
+Status: **approved 2026-10-01. Phase A done; phase B in progress.**
 
 Scope, from [issue #130](https://github.com/sjefferson99/simple-activity-tracker/issues/130):
 
@@ -60,9 +60,9 @@ Recommendations, not objected to, treated as decided:
 - `_insert_activity_with_gpx` returns the existing row unchanged for a repeated
   `client_activity_id`. D6 needs one exception: a row converted from live is
   replaced in place (§4).
-- Tags are per-user. In the Shared tab, the tag filter matches the **owner's**
-  tags on those activities; tag autocomplete there must only list tags on
-  activities the viewer can see, not the owner's full tag list.
+- Tags are per-user. In the Shared tab, the text search matches the
+  **owner's** tags on the activities the viewer can already see; nothing
+  lists an owner's full tag vocabulary.
 - "Cannot download" (D7) means no download/export affordance or endpoint. The
   map still needs track points in the viewer's browser, so this is a policy on
   what the server offers, not DRM. Say so in the UI help text, not as a promise.
@@ -193,7 +193,7 @@ current split index and its progress); unknown fields ignored.
   pause flag is set, after the owner is disabled or deleted; no data in the
   "finished" response.
 - A viewer can't reach GPX download, export, bulk export, track via
-  `/api/v1`, analysis via `/api/v1`, or tag autocomplete beyond what they can see.
+  `/api/v1`, or analysis via `/api/v1`.
 - Only the owner can create, change or delete shares; `PUT /me/live-sharing`
   can't touch another user's rows; sharing with yourself is rejected; unknown
   or disabled viewer ids are rejected.
@@ -222,10 +222,12 @@ current split index and its progress); unknown fields ignored.
 
 ## 5. Phases
 
-One branch and PR each, targeted at `main`, in order. The server workflow in
-CLAUDE.md applies (container check before sign-off).
+All phases go on **one branch, `server-130-live-tracking`, one commit per
+phase**, and **one PR at the end** (decided 2026-10-01). Work stops after each
+phase for the owner to test it, then code review. The server workflow in
+CLAUDE.md applies to each phase (container check before sign-off).
 
-### A — Shares and shared history (`server-130-shares`)
+### A — Shares and shared history
 
 - Do: `user_shares`, `activity_shares`; `app/sharing.py`; Settings → Sharing
   (History column only in this phase); per-activity "Also share with…"; Mine /
@@ -236,7 +238,7 @@ CLAUDE.md applies (container check before sign-off).
   sees no download/export/edit controls and the routes 404; container check
   with two real users.
 
-### B — Live sessions (`server-130-live`)
+### B — Live sessions
 
 - Do: `live_sessions`, `live_points`, `users.live_sharing_paused`; §2.3
   endpoints; Live column and pause switch in Settings; Live now strips; live
@@ -247,7 +249,7 @@ CLAUDE.md applies (container check before sign-off).
   limits, rate limit); §3 live tests; curl a simulated run in the container
   while a second user watches the live page; revoke mid-run.
 
-### C — Mobile live upload (`mobile-130-live`)
+### C — Mobile live upload
 
 - Do: §2.5. `ApiLevels.liveTracking = 2`; `FakeApiClient` support for the new
   calls.
@@ -257,7 +259,7 @@ CLAUDE.md applies (container check before sign-off).
   phone: real run, watched from the web, airplane mode mid-run then back,
   toggles changed mid-run.
 
-### D — Convert to activity (`server-130-convert`)
+### D — Convert to activity
 
 - Do: §4. `activities.recovered_from_live`.
 - Verify: convert then final upload replaces in place and keeps

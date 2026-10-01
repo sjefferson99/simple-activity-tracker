@@ -24,6 +24,8 @@ from app.web import devices as devices_web
 from app.web import login as login_web
 from app.web import register as register_web
 from app.web import settings as settings_web
+from app.web import shared_activities as shared_activities_web
+from app.web import sharing as sharing_web
 from app.web import split_configs as split_configs_web
 from app.web.paths import STATIC_DIR
 from app.web.templating import templates
@@ -73,6 +75,8 @@ def create_app() -> FastAPI:
     app.include_router(register_web.router)
     app.include_router(admin_web.router)
     app.include_router(split_configs_web.router)
+    app.include_router(sharing_web.router)
+    app.include_router(shared_activities_web.router)
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

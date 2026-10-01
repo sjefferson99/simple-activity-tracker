@@ -1,0 +1,37 @@
+{% if share_error %}<div class="error-banner">{{ share_error }}</div>{% endif %}
+{% if account_viewers %}
+<p class="muted">Already visible to everyone you share your history with
+({{ account_viewers | map(attribute="display_name") | join(", ") }}).
+Change that in <a href="/settings">Settings</a>.</p>
+{% endif %}
+{% if extra_viewers %}
+<ul class="share-list">
+  {% for viewer in extra_viewers %}
+  <li>
+    <span>{{ viewer.display_name }}</span>
+    <button class="secondary"
+            hx-delete="/activities/{{ share_activity_id }}/shares/{{ viewer.id }}"
+            hx-target="#activity-share-list"
+            hx-confirm="Stop sharing this activity with {{ viewer.display_name }}?">
+      Remove
+    </button>
+  </li>
+  {% endfor %}
+</ul>
+{% elif not account_viewers %}
+<p class="muted">Only you can see this activity.</p>
+{% endif %}
+{% if extra_candidates %}
+<form class="form-row" hx-post="/activities/{{ share_activity_id }}/shares" hx-target="#activity-share-list">
+  <div>
+    <label for="activity-share-viewer">Also share this activity with</label>
+    <select id="activity-share-viewer" name="viewer_id" required>
+      <option value="" selected disabled>Choose a user…</option>
+      {% for candidate in extra_candidates %}
+      <option value="{{ candidate.id }}">{{ candidate.display_name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit">Share</button>
+</form>
+{% endif %}

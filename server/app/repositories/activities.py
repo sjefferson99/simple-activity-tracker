@@ -13,6 +13,7 @@ from app.analysis.geo_math import equirectangular_scale
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis
 from app.models.tag import Tag, activity_tags
+from app.sharing import history_visible_clause
 
 ActivityListSort = Literal["date", "distance"]
 ActivityListDirection = Literal["asc", "desc"]
@@ -47,7 +48,9 @@ class ActivityListFilters:
     and/or finish coordinates (see ActivityAnalysis.start_lat etc., added in
     a companion PR) — only applied when both `lat` and `lon` are set.
     `activity_type` restricts to exactly one of running/cycling/walking
-    (issue #129) — None means "any type", not "none"."""
+    (issue #129) — None means "any type", not "none". `owner_id` narrows the
+    "Shared with me" list to one owner (issue #130); it's ignored on a user's
+    own list, which is already a single owner."""
 
     text: str | None = None
     min_m: float | None = None
@@ -57,6 +60,7 @@ class ActivityListFilters:
     radius_m: float | None = None
     geo: ActivityListGeoMode = "either"
     activity_type: ActivityListType | None = None
+    owner_id: str | None = None
 
     def is_active(self) -> bool:
         return (
@@ -65,6 +69,7 @@ class ActivityListFilters:
             or self.max_m is not None
             or (self.lat is not None and self.lon is not None)
             or self.activity_type is not None
+            or self.owner_id is not None
         )
 
 
@@ -122,6 +127,16 @@ class ActivityRepository(Protocol):
     def list_for_user_page(
         self,
         user_id: str,
+        *,
+        page: int,
+        per_page: int | None,
+        sort: ActivityListSort,
+        direction: ActivityListDirection,
+        filters: ActivityListFilters = _NO_FILTERS,
+    ) -> ActivityListPage: ...
+    def list_shared_with_user_page(
+        self,
+        viewer_id: str,
         *,
         page: int,
         per_page: int | None,
@@ -195,7 +210,51 @@ class SqlAlchemyActivityRepository:
         statement (`_filtered_base`) so they can never drift apart — a bug
         where the count ignored a filter the page query applied (or vice
         versa) would silently show the wrong total_pages/total."""
-        base = self._filtered_base(user_id, filters)
+        return self._list_page(
+            Activity.user_id == user_id,
+            page=page,
+            per_page=per_page,
+            sort=sort,
+            direction=direction,
+            filters=filters,
+        )
+
+    def list_shared_with_user_page(
+        self,
+        viewer_id: str,
+        *,
+        page: int,
+        per_page: int | None,
+        sort: ActivityListSort,
+        direction: ActivityListDirection,
+        filters: ActivityListFilters = _NO_FILTERS,
+    ) -> ActivityListPage:
+        """Same as list_for_user_page, over other users' activities that
+        `viewer_id` may see (issue #130, the "Shared with me" tab). The
+        visibility rule itself lives in app.sharing, not here."""
+        scope = history_visible_clause(viewer_id)
+        if filters.owner_id is not None:
+            scope = and_(scope, Activity.user_id == filters.owner_id)
+        return self._list_page(
+            scope,
+            page=page,
+            per_page=per_page,
+            sort=sort,
+            direction=direction,
+            filters=filters,
+        )
+
+    def _list_page(
+        self,
+        scope: Any,
+        *,
+        page: int,
+        per_page: int | None,
+        sort: ActivityListSort,
+        direction: ActivityListDirection,
+        filters: ActivityListFilters,
+    ) -> ActivityListPage:
+        base = self._filtered_base(scope, filters)
         base_subquery = base.subquery()
 
         total = self._session.execute(select(func.count()).select_from(base_subquery)).scalar_one()
@@ -236,8 +295,8 @@ class SqlAlchemyActivityRepository:
             total_pages=total_pages,
         )
 
-    def _filtered_base(self, user_id: str, filters: ActivityListFilters) -> Select[tuple[str]]:
-        """The set of activity ids matching `user_id` plus every active
+    def _filtered_base(self, scope: Any, filters: ActivityListFilters) -> Select[tuple[str]]:
+        """The set of activity ids matching `scope` (whose activities) plus every active
         filter — the single source of truth both the count and the page
         query in list_for_user_page build on, so they can't disagree about
         which rows match. Selects just `Activity.id`: the outer queries
@@ -246,7 +305,7 @@ class SqlAlchemyActivityRepository:
         stmt = (
             select(Activity.id)
             .outerjoin(ActivityAnalysis, ActivityAnalysis.activity_id == Activity.id)
-            .where(Activity.user_id == user_id)
+            .where(scope)
         )
 
         if filters.text:

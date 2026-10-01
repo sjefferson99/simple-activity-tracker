@@ -4,6 +4,7 @@
   <input type="hidden" name="sort" value="{{ list_query.sort }}">
   <input type="hidden" name="dir" value="{{ list_query.dir }}">
   <input type="hidden" name="per_page" value="{{ list_query.per_page }}">
+  {% if tab == "shared" %}<input type="hidden" name="tab" value="shared">{% endif %}
   <div class="toolbar activity-search-row">
     <div>
       <label for="activity-search-q">Search</label>
@@ -32,10 +33,22 @@
         <option value="cycling" {% if list_query.activity_type == "cycling" %}selected{% endif %}>Cycle</option>
       </select>
     </div>
+    {% if tab == "shared" %}
+    <div>
+      <label for="activity-search-owner">Owner</label>
+      <select id="activity-search-owner" name="owner" hx-trigger="change">
+        <option value="" {% if not list_query.owner %}selected{% endif %}>Anyone</option>
+        {% for o in owners %}
+        <option value="{{ o.id }}" {% if list_query.owner == o.id %}selected{% endif %}>{{ o.display_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
     <div class="activity-search-actions">
       <button type="submit">Search</button>
-      <a href="/" id="activity-search-clear"
-         hx-get="/" hx-target="#activity-list-region" hx-select="#activity-list-region"
+      {% set clear_url = "/?tab=shared" if tab == "shared" else "/" %}
+      <a href="{{ clear_url }}" id="activity-search-clear"
+         hx-get="{{ clear_url }}" hx-target="#activity-list-region" hx-select="#activity-list-region"
          hx-swap="outerHTML" hx-push-url="true" hx-indicator="#activity-list-spinner">Clear</a>
     </div>
   </div>

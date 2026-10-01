@@ -9,6 +9,15 @@
   </div>
 </div>
 <div class="card">
+  <h2>Sharing</h2>
+  <p class="muted">People who can see your activity history, read-only, under "Shared with me".
+  They can't edit, download or export anything. Removing someone takes effect immediately.
+  To share a single activity instead, use the Sharing section on that activity's page.</p>
+  <div id="share-list">
+    {% include "partials/share_list.html" %}
+  </div>
+</div>
+<div class="card">
   <h2>Sessions</h2>
   <p class="muted">Browsers currently signed in to your account.</p>
   <div id="session-list">

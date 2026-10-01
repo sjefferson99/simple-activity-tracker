@@ -69,6 +69,7 @@ from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
 from app.models.tag import Tag
 from app.repositories.activities import InvalidCursorError, SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
+from app.repositories.shares import SqlAlchemyShareRepository
 from app.repositories.tags import SqlAlchemyTagRepository
 from app.storage.blob_store import LocalFileBlobStore
 from app.validation import SUMMARY_MAX_BYTES, ValidationFailedError, validate_tag_name
@@ -466,6 +467,7 @@ def delete_activity(
     # on implicit ORM cascade ordering for anything security/data-integrity
     # relevant.
     activity.tags.clear()
+    SqlAlchemyShareRepository(session).delete_for_activity(activity.id)
     session.flush()
 
     blob_key = activity.gpx_blob_key
@@ -554,7 +556,15 @@ def get_track(
     activity = SqlAlchemyActivityRepository(session).get_by_id_for_user(user.id, activity_id)
     if activity is None:
         raise api_error(404, "not_found", "Activity not found")
+    return track_out(session, activity, max_points=max_points)
 
+
+def track_out(
+    session: Session, activity: Activity, *, max_points: int = DEFAULT_MAX_POINTS
+) -> TrackOut:
+    """The downsampled map track for an activity the caller has already
+    authorized. Shared with the web's read-only shared-activity page (issue
+    #130), which has its own visibility check."""
     if max_points == DEFAULT_MAX_POINTS:
         analysis = SqlAlchemyActivityAnalysisRepository(session).get_by_activity_id(activity.id)
         if analysis is not None and analysis.track is not None:

@@ -14,20 +14,28 @@
   <div class="card empty-state">
     <p>No activities match your search.</p>
     <p>
-      <a href="/" id="activity-search-clear"
-         hx-get="/" hx-target="#activity-list-region" hx-select="#activity-list-region"
+      {% set clear_url = "/?tab=shared" if tab == "shared" else "/" %}
+      <a href="{{ clear_url }}" id="activity-search-clear"
+         hx-get="{{ clear_url }}" hx-target="#activity-list-region" hx-select="#activity-list-region"
          hx-swap="outerHTML" hx-push-url="true" hx-indicator="#activity-list-spinner">Clear filters</a>
       to see every activity.
     </p>
+    {% if tab != "shared" %}
     <p><a class="button secondary" href="{{ export_filtered_url(list_query) }}">Export filtered</a></p>
+    {% endif %}
   </div>
 </div>
 {% else %}
 <div id="activity-list-region">
   <div class="card empty-state">
+    {% if tab == "shared" %}
+    <p>Nothing has been shared with you yet.</p>
+    <p>When someone on this server shares their activities with you, they'll show up here.</p>
+    {% else %}
     <p>No activities yet.</p>
     <p>Sign in to the Simple Activity Tracker phone app and finish a run or ride — it'll show up here
     automatically once uploaded.</p>
+    {% endif %}
   </div>
 </div>
 {% endif %}

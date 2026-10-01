@@ -13,6 +13,7 @@ from app.models.user import User
 from app.repositories.activities import SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
+from app.repositories.shares import SqlAlchemyShareRepository
 from app.repositories.tags import SqlAlchemyTagRepository
 from app.repositories.users import SqlAlchemyUserRepository
 from app.repositories.web_sessions import SqlAlchemyWebSessionRepository
@@ -277,6 +278,7 @@ def admin_delete_user(
     activities_repo = SqlAlchemyActivityRepository(session)
     analyses_repo = SqlAlchemyActivityAnalysisRepository(session)
     tags_repo = SqlAlchemyTagRepository(session)
+    shares_repo = SqlAlchemyShareRepository(session)
     blob_store = LocalFileBlobStore(Path(get_settings().data_dir))
 
     blob_keys: list[str] = []
@@ -293,6 +295,7 @@ def admin_delete_user(
             # user (e.g. from a Strava import) must be cleared/deleted before
             # repo.delete(target) below, or that delete fails its FK check.
             activity.tags.clear()
+            shares_repo.delete_for_activity(activity.id)
             blob_keys.append(activity.gpx_blob_key)
             activities_repo.delete(activity)
         if page.next_cursor is None:
@@ -302,6 +305,7 @@ def admin_delete_user(
     for tag in tags_repo.list_for_user(target.id):
         session.delete(tag)
 
+    shares_repo.delete_for_user(target.id)
     SqlAlchemyDeviceTokenRepository(session).delete_all_for_user(target.id)
     SqlAlchemyWebSessionRepository(session).delete_all_for_user(target.id)
     session.flush()

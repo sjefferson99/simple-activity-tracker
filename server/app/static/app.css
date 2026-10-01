@@ -451,3 +451,18 @@ button.secondary:hover, .button.secondary:hover { background: var(--bg); }
    no background tint (a table cell, not a tile). */
 .split-on-target { color: var(--ok); font-weight: 600; }
 .split-off-target { color: var(--danger); font-weight: 600; }
+
+/* Mine / Shared with me tabs on the activities page (issue #130). Plain
+   links (a full page load each), styled like the sort links. */
+.list-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+.list-tab {
+  padding: 0.5rem 0.9rem;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.list-tab:hover { color: var(--text); text-decoration: none; }
+.list-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.share-list { list-style: none; padding: 0; margin: 0 0 1rem; }
+.share-list li { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border); }
+.share-list li:last-child { border-bottom: none; }

@@ -20,6 +20,7 @@ _DEFAULT_PER_PAGE = "20"
 _DEFAULT_SORT: ActivityListSort = "date"
 _DEFAULT_DIR: ActivityListDirection = "desc"
 _DEFAULT_GEO = "either"
+_DEFAULT_TAB = "mine"
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,10 @@ class ActivityListQuery:
     radius_km: str = ""
     geo: str = _DEFAULT_GEO
     activity_type: str = ""
+    # "mine" | "shared" — the Mine / Shared with me tabs (issue #130). `owner`
+    # is the Shared tab's owner filter (a user id), empty on Mine.
+    tab: str = _DEFAULT_TAB
+    owner: str = ""
 
     def params(self, **overrides: Any) -> dict[str, str]:
         merged = replace(self, **overrides)
@@ -69,6 +74,10 @@ class ActivityListQuery:
             params["geo"] = merged.geo
         if merged.activity_type:
             params["activity_type"] = merged.activity_type
+        if merged.tab != _DEFAULT_TAB:
+            params["tab"] = merged.tab
+        if merged.owner:
+            params["owner"] = merged.owner
         return params
 
 

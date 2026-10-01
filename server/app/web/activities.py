@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -53,7 +54,9 @@ from app.repositories.activities import (
     SqlAlchemyActivityRepository,
 )
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
+from app.repositories.shares import SqlAlchemyShareRepository
 from app.repositories.tags import SqlAlchemyTagRepository
+from app.sharing import owners_visible_to
 from app.storage.blob_store import LocalFileBlobStore
 from app.validation import (
     NAME_MAX_LENGTH,
@@ -64,6 +67,7 @@ from app.validation import (
 )
 from app.web.deps import WebUser, require_htmx_header
 from app.web.list_query import ActivityListQuery
+from app.web.sharing import activity_share_context
 from app.web.templating import templates
 
 router = APIRouter(tags=["web"], include_in_schema=False)
@@ -100,7 +104,9 @@ def _activity_view(activity: Activity, analysis: ActivityAnalysis | None) -> dic
     }
 
 
-def _activity_list_view(activity: Activity, analysis: ActivityAnalysis | None) -> dict[str, Any]:
+def _activity_list_view(
+    activity: Activity, analysis: ActivityAnalysis | None, owner_name: str | None = None
+) -> dict[str, Any]:
     """Shapes an Activity + ActivityAnalysis pair for
     partials/activity_list_items.html — distance/duration come from the
     server's own GPX analysis (issue #75), not the phone-reported
@@ -115,6 +121,8 @@ def _activity_list_view(activity: Activity, analysis: ActivityAnalysis | None) -
         "tags": activity.tags,
         "distance_meters": analysis.distance_meters if analysis is not None else 0.0,
         "moving_seconds": analysis.moving_seconds if analysis is not None else 0.0,
+        # Set only on the "Shared with me" tab (issue #130).
+        "owner_name": owner_name,
     }
 
 
@@ -290,6 +298,8 @@ def activity_list(
     radius_km: str = "",
     geo: str = "",
     activity_type: str = "",
+    tab: str = "",
+    owner: str = "",
 ) -> Response:
     # Every param is read as a plain str and validated/defaulted here rather
     # than via FastAPI's own type/Literal coercion, so a tampered or stale
@@ -316,12 +326,26 @@ def activity_list(
     )
     geo_mode = filters.geo
 
+    # Mine / Shared with me (issue #130). Both tabs share every filter; the
+    # Shared tab adds an owner filter, limited to owners the viewer can
+    # actually see — an unknown or no-longer-visible id is just ignored.
+    tab_value = "shared" if tab == "shared" else "mine"
+    owners = owners_visible_to(session, user.id) if tab_value == "shared" else []
+    owner_names = {o.id: o.display_name for o in owners}
+    if owner in owner_names:
+        filters = replace(filters, owner_id=owner)
+
     activities_repo = SqlAlchemyActivityRepository(session)
     # list_for_user_page clamps page to [1, total_pages] itself, so a stale
     # page number (rows deleted since, activities deleted, or a filter that
     # now matches fewer rows) never needs a second query here — one call
     # always returns a valid page.
-    result = activities_repo.list_for_user_page(
+    list_page = (
+        activities_repo.list_shared_with_user_page
+        if tab_value == "shared"
+        else activities_repo.list_for_user_page
+    )
+    result = list_page(
         user.id,
         page=page_num,
         per_page=per_page_value,
@@ -343,12 +367,17 @@ def activity_list(
         radius_km=radius_km.strip(),
         geo=geo_mode,
         activity_type=filters.activity_type or "",
+        tab=tab_value,
+        owner=filters.owner_id or "",
     )
     context = {
         "user": user,
         "activities": [
-            _activity_list_view(activity, analysis) for activity, analysis in result.activities
+            _activity_list_view(activity, analysis, owner_names.get(activity.user_id))
+            for activity, analysis in result.activities
         ],
+        "tab": tab_value,
+        "owners": owners,
         "page": result.page,
         "per_page": "all" if result.per_page is None else str(result.per_page),
         "total_pages": result.total_pages,
@@ -460,7 +489,11 @@ def activity_detail(
     return templates.TemplateResponse(
         request,
         "activity_detail.html",
-        {"user": user, "activity": _activity_view(activity, analysis)},
+        {
+            "user": user,
+            "activity": _activity_view(activity, analysis),
+            **activity_share_context(session, user, activity.id),
+        },
     )
 
 
@@ -485,7 +518,15 @@ def activity_splits_fragment(
         return templates.TemplateResponse(
             request, "not_found.html", {"user": user}, status_code=404
         )
+    return splits_fragment_response(request, activity, split_type, split_value)
 
+
+def splits_fragment_response(
+    request: Request, activity: Activity, split_type: str, split_value: int
+) -> Response:
+    """The re-sliced splits table for an already-authorized activity —
+    shared by the owner's route above and the read-only shared-activity page
+    (issue #130). Recomputes only; nothing is saved."""
     data = LocalFileBlobStore(Path(get_settings().data_dir)).get(activity.gpx_blob_key)
     try:
         track = parse_gpx(data)
@@ -546,6 +587,12 @@ def activity_splits_reset(
         return templates.TemplateResponse(
             request, "not_found.html", {"user": user}, status_code=404
         )
+    return splits_reset_response(request, session, activity)
+
+
+def splits_reset_response(request: Request, session: Session, activity: Activity) -> Response:
+    """The activity's own stored splits table, for an already-authorized
+    activity — shared with the read-only shared-activity page (issue #130)."""
     analysis = SqlAlchemyActivityAnalysisRepository(session).get_by_activity_id(activity.id)
     result = None
     if analysis is not None and analysis.status == AnalysisStatus.done:
@@ -659,6 +706,7 @@ def activity_delete(
 
     # See app/api/v1/activities.py:delete_activity for why this is explicit.
     activity.tags.clear()
+    SqlAlchemyShareRepository(session).delete_for_activity(activity.id)
     session.flush()
 
     blob_key = activity.gpx_blob_key
@@ -711,6 +759,7 @@ def activities_bulk_delete(
         if analysis is not None:
             analyses_repo.delete(analysis)
         activity.tags.clear()
+        SqlAlchemyShareRepository(session).delete_for_activity(activity.id)
         # Single flush per activity: the FK-ordering requirement (see
         # activity_delete above) is only that the analysis delete lands
         # before the activity delete, which one flush covering both

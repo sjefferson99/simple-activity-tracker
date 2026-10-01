@@ -1,0 +1,32 @@
+{% if share_error %}<div class="error-banner">{{ share_error }}</div>{% endif %}
+{% if history_viewers %}
+<ul class="share-list">
+  {% for viewer in history_viewers %}
+  <li>
+    <span>{{ viewer.display_name }}</span>
+    <button class="secondary"
+            hx-delete="/settings/shares/{{ viewer.id }}"
+            hx-target="#share-list"
+            hx-confirm="Stop sharing your activity history with {{ viewer.display_name }}?">
+      Remove
+    </button>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">You aren't sharing your activity history with anyone.</p>
+{% endif %}
+{% if history_candidates %}
+<form class="form-row" hx-post="/settings/shares" hx-target="#share-list">
+  <div>
+    <label for="share-viewer">Share my history with</label>
+    <select id="share-viewer" name="viewer_id" required>
+      <option value="" selected disabled>Choose a user…</option>
+      {% for candidate in history_candidates %}
+      <option value="{{ candidate.id }}">{{ candidate.display_name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit">Share</button>
+</form>
+{% endif %}
