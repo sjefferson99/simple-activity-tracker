@@ -5,8 +5,10 @@ import '../../core/sync/live_sharing_store.dart';
 import '../../core/sync/live_upload_service.dart';
 
 /// The run screen's live-upload indicator (issue #130 §2.5): the runner
-/// always sees whether they're being watched. Hidden when live upload can't
-/// apply to this run at all (signed out, or a server too old for it).
+/// always sees whether their route is going up and how many people are
+/// allowed to watch it. It can't know whether anyone actually has the live
+/// page open. Hidden when live upload can't apply to this run at all (signed
+/// out, or a server too old for it).
 class LiveBadge extends ConsumerWidget {
   final double fontSize;
 

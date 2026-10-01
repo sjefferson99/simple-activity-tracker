@@ -70,8 +70,9 @@ the app checks the server's API level and only uses what that server supports (s
   Settings shows the queue, with retry and clear options.
 - **Live upload and sharing:** live upload is on by default and can be turned off to
   save mobile data. Choose who can watch you live, or tap "Don't live share". The run
-  screen shows whether you're being watched. Changes apply immediately, even mid-run,
-  and wait on the phone if you're offline.
+  screen shows how many people can currently watch (it can't tell whether anyone has
+  the live page open). Changes apply immediately, even mid-run, and wait on the phone
+  if you're offline.
 - **Activity history:** browse your activities from the server, with the server's
   analysis, splits and targets. Reopen a run recorded on this phone, even offline.
 - **Version check:** Settings shows the app and server versions and warns if either is
