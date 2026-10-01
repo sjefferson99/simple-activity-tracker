@@ -1,6 +1,6 @@
 # Live tracking and sharing plan — issue #130
 
-Status: **approved 2026-10-01. Phases A and B done; phase C in progress.**
+Status: **approved 2026-10-01. Phases A, B and C done; phase D in progress.**
 
 Scope, from [issue #130](https://github.com/sjefferson99/simple-activity-tracker/issues/130):
 

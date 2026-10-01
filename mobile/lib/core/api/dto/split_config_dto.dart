@@ -72,18 +72,20 @@ class SplitConfigSaveRequestDto {
 
   Map<String, dynamic> toJson() => {
     'name': name,
-    'plan': _planToJson(plan),
+    'plan': splitPlanWireJson(plan),
     if (overwrite) 'overwrite': true,
   };
-
-  static Map<String, dynamic> _planToJson(SplitPlan plan) => {
-    'split_type': plan.base.gpxSplitType,
-    'split_value': plan.base.value,
-    if (!plan.isCustom && plan.rollingTargetSpeedMps != null)
-      'rolling_target_mps': plan.rollingTargetSpeedMps,
-    'custom_splits': [
-      for (final split in plan.customSplits) [split.size, split.targetSpeedMps],
-    ],
-    'targets_as': plan.targetsAsPace ? 'pace' : 'speed',
-  };
 }
+
+/// [plan] in the server's SplitPlanIn wire shape — shared by saved split
+/// configs (issue #126) and a live session's metadata (issue #130).
+Map<String, dynamic> splitPlanWireJson(SplitPlan plan) => {
+  'split_type': plan.base.gpxSplitType,
+  'split_value': plan.base.value,
+  if (!plan.isCustom && plan.rollingTargetSpeedMps != null)
+    'rolling_target_mps': plan.rollingTargetSpeedMps,
+  'custom_splits': [
+    for (final split in plan.customSplits) [split.size, split.targetSpeedMps],
+  ],
+  'targets_as': plan.targetsAsPace ? 'pace' : 'speed',
+};

@@ -1,9 +1,11 @@
 import 'dart:io';
 
 import 'package:simple_activity_tracker/core/api/api_client.dart';
+import 'package:simple_activity_tracker/core/api/api_exception.dart';
 import 'package:simple_activity_tracker/core/api/dto/activity_list_item_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/analysis_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/device_dto.dart';
+import 'package:simple_activity_tracker/core/api/dto/live_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/login_response_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/run_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/server_info_dto.dart';
@@ -283,5 +285,129 @@ class FakeApiClient implements ApiClient {
       return handler(baseUrl: baseUrl, token: token, configId: configId);
     }
     return Future.value();
+  }
+
+  // --- live tracking (issue #130) ------------------------------------------
+  // A tiny in-memory server: it stores points per client activity id and
+  // answers with next_index exactly like the real one (a retry is a no-op, a
+  // gap reports where to resend from), so LiveUploadService tests exercise
+  // the real protocol. Set [liveFailure] to make every live call throw.
+
+  final Map<String, int> liveStoredPoints = {};
+  final Map<String, String> liveStates = {};
+  final List<LivePointsRequestDto> livePointCalls = [];
+  final List<LiveSessionRequestDto> livePutCalls = [];
+  final List<String> liveDeleteCalls = [];
+  final List<LiveSharingRequestDto> liveSharingCalls = [];
+  final Set<String> closedLiveSessions = {};
+
+  /// Every call made to a live/sharing endpoint, by name, in order — for
+  /// asserting that a queued sharing change goes before any points.
+  final List<String> liveCallLog = [];
+
+  ApiException? liveFailure;
+
+  List<UserDirectoryEntryDto> users = const [
+    UserDirectoryEntryDto(id: 'u-ann', displayName: 'Ann'),
+    UserDirectoryEntryDto(id: 'u-bob', displayName: 'Bob'),
+  ];
+  MySharesDto myShares = const MySharesDto(liveSharingPaused: false, shares: []);
+
+  void _liveCall(String name) {
+    liveCallLog.add(name);
+    final failure = liveFailure;
+    if (failure != null) throw failure;
+  }
+
+  @override
+  Future<LiveSessionStateDto> putLiveSession({
+    required String baseUrl,
+    required String token,
+    required String clientActivityId,
+    required LiveSessionRequestDto request,
+  }) async {
+    _liveCall('putLiveSession');
+    if (closedLiveSessions.contains(clientActivityId)) {
+      throw const ApiRejectedException('closed', statusCode: 410);
+    }
+    livePutCalls.add(request);
+    final stored = liveStoredPoints.putIfAbsent(clientActivityId, () => 0);
+    return LiveSessionStateDto(nextIndex: stored, state: liveStates[clientActivityId] ?? 'active');
+  }
+
+  @override
+  Future<LiveSessionStateDto> postLivePoints({
+    required String baseUrl,
+    required String token,
+    required String clientActivityId,
+    required LivePointsRequestDto request,
+  }) async {
+    _liveCall('postLivePoints');
+    if (closedLiveSessions.contains(clientActivityId)) {
+      throw const ApiRejectedException('closed', statusCode: 410);
+    }
+    final stored = liveStoredPoints[clientActivityId];
+    if (stored == null) throw const ApiRejectedException('no session', statusCode: 404);
+    livePointCalls.add(request);
+    if (request.fromIndex > stored) {
+      return LiveSessionStateDto(nextIndex: stored, state: 'active');
+    }
+    final end = request.fromIndex + request.points.length;
+    liveStoredPoints[clientActivityId] = end > stored ? end : stored;
+    liveStates[clientActivityId] = request.state;
+    return LiveSessionStateDto(
+      nextIndex: liveStoredPoints[clientActivityId]!,
+      state: request.state,
+    );
+  }
+
+  @override
+  Future<void> deleteLiveSession({
+    required String baseUrl,
+    required String token,
+    required String clientActivityId,
+  }) async {
+    _liveCall('deleteLiveSession');
+    liveDeleteCalls.add(clientActivityId);
+    liveStoredPoints.remove(clientActivityId);
+  }
+
+  @override
+  Future<List<UserDirectoryEntryDto>> listUsers({
+    required String baseUrl,
+    required String token,
+  }) async {
+    _liveCall('listUsers');
+    return users;
+  }
+
+  @override
+  Future<MySharesDto> getMyShares({required String baseUrl, required String token}) async {
+    _liveCall('getMyShares');
+    return myShares;
+  }
+
+  @override
+  Future<MySharesDto> putLiveSharing({
+    required String baseUrl,
+    required String token,
+    required LiveSharingRequestDto request,
+  }) async {
+    _liveCall('putLiveSharing');
+    liveSharingCalls.add(request);
+    final byId = {for (final user in users) user.id: user.displayName};
+    myShares = MySharesDto(
+      liveSharingPaused: request.liveSharingPaused,
+      shares: [
+        for (final id in request.liveViewerIds)
+          ShareDto(
+            viewerId: id,
+            displayName: byId[id] ?? id,
+            canViewLive: true,
+            canViewHistory: false,
+          ),
+      ],
+    );
+    return myShares;
   }
 }

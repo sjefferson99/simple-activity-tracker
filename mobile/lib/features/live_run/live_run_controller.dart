@@ -18,6 +18,7 @@ import '../../core/location/location_permission_state.dart';
 import '../../core/location/location_sample.dart';
 import '../../core/location/location_service.dart';
 import '../../core/sync/file_run_store.dart';
+import '../../core/sync/live_upload_service.dart';
 import '../../core/sync/sync_service.dart';
 import '../../core/tracking/activity_mode_controller.dart';
 import '../../core/tracking/split_plan_controller.dart';
@@ -181,6 +182,17 @@ class LiveRunController extends Notifier<LiveRunState> {
     // After _metricsEngine so the cue can read its freshly-constructed
     // initial split-1 state — see _playActivityStartedCue's own doc.
     _playActivityStartedCue();
+    // Live upload (issue #130): a separate, best-effort stream of the same
+    // points the GPX gets. It follows the Live upload setting on its own and
+    // does nothing on a server too old for it.
+    ref
+        .read(liveUploadServiceProvider)
+        .startRun(
+          clientRunId: _clientRunId!,
+          activityMode: _activityMode!,
+          startedAt: _startedAt!,
+          splitPlan: _splitPlan!,
+        );
     _currentGpxFile = await newRunGpxFile(DateTime.now());
     _gpxLog = RunGpxLog(_currentGpxFile!, _splitPlan!, _activityMode!);
     // A periodic flush that fails is not fatal: every flush rewrites the
@@ -226,6 +238,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     _displaySpeedWindow.reset();
     _runClock?.pause(DateTime.now().toUtc());
     _emitActive(RunPhase.paused, speedMps: null, accuracyMeters: null);
+    ref.read(liveUploadServiceProvider).pause();
   }
 
   void resume() {
@@ -234,6 +247,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     _runClock?.resume(DateTime.now().toUtc());
     _metricsEngine?.resetSegmentAnchor();
     _gpxLog?.startNewSegment();
+    ref.read(liveUploadServiceProvider).resume();
     _emitActive(RunPhase.tracking, speedMps: null, accuracyMeters: null);
   }
 
@@ -295,6 +309,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     // Fire-and-forget — a slow or failed upload must never delay the
     // summary screen, which is already showing by this point.
     ref.read(syncServiceProvider).runFinished();
+    unawaited(ref.read(liveUploadServiceProvider).finishRun(metrics));
 
     // Export after the state switch, not before — a slow or failed copy
     // must never delay showing the run summary. exportedTo starts null and
@@ -368,6 +383,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     // and filtering is a display/metrics concern a viewer can redo itself.
     _metricsEngine?.addPoint(point);
     _gpxLog?.addPoint(point);
+    ref.read(liveUploadServiceProvider).addPoint(point);
 
     // Display-only, position-derived speed (issue #50 follow-up): a
     // measured test found the GPS chip's own speed field reading ~13% low
@@ -429,6 +445,7 @@ class LiveRunController extends Notifier<LiveRunState> {
       distanceUnit: _splitPlan?.base.effectiveDistanceUnit ?? DistanceUnit.km,
       prefersPace: _splitPlan?.targetsAsPace ?? true,
     );
+    ref.read(liveUploadServiceProvider).updateMetrics(metrics, currentSpeedMps: speedMps);
 
     // Only while genuinely tracking (not paused/acquiring) — matches the
     // fact that _onSample already returns early on pause and _onTick only

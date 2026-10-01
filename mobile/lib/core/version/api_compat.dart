@@ -27,6 +27,10 @@ abstract final class ApiLevels {
   /// split `target_speed_mps`; `/server-info` exists; unknown request
   /// fields are ignored rather than rejected.
   static const uploadExtendedStats = 1;
+
+  /// Live tracking and sharing (issue #130): `/live/...`, `/users`,
+  /// `/me/shares`, `/me/live-sharing`.
+  static const liveTracking = 2;
 }
 
 enum ServerCompatibility {

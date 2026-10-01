@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/sync/file_run_store.dart';
+import '../../core/sync/live_upload_service.dart';
 import '../../domain/models/run_record.dart';
 import '../../domain/models/sync_status.dart';
 
@@ -46,6 +49,12 @@ Future<bool> confirmAndDeleteRunRecord(
   );
   if (confirmed == true) {
     await ref.read(runStoreProvider).deleteRecord(record.clientRunId);
+    // Never saved on the server: its live session (issue #130), if any, goes
+    // too. An uploaded run's session is part of the saved activity, which
+    // deleting here deliberately never touches (see above).
+    if (!isUploaded) {
+      unawaited(ref.read(liveUploadServiceProvider).discardRun(record.clientRunId));
+    }
     return true;
   }
   return false;

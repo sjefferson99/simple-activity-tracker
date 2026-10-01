@@ -3,18 +3,27 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/test/test_flutter_secure_storage_platform.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:package_info_plus_platform_interface/package_info_data.dart';
 import 'package:package_info_plus_platform_interface/package_info_platform_interface.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:simple_activity_tracker/core/api/dto/server_info_dto.dart';
+import 'package:simple_activity_tracker/core/auth/auth_service.dart';
+import 'package:simple_activity_tracker/core/auth/auth_state.dart';
 import 'package:simple_activity_tracker/core/location/location_permission_state.dart';
 import 'package:simple_activity_tracker/core/location/location_sample.dart';
 import 'package:simple_activity_tracker/core/location/location_service.dart';
+import 'package:simple_activity_tracker/core/sync/live_sharing_store.dart';
+import 'package:simple_activity_tracker/core/sync/live_upload_service.dart';
 import 'package:simple_activity_tracker/features/live_run/live_run_controller.dart';
 import 'package:simple_activity_tracker/features/live_run/live_run_state.dart';
 import 'package:wakelock_plus_platform_interface/messages.g.dart';
+
+import '../../fakes/fake_api_client.dart';
+import '../../fakes/fake_connectivity_monitor.dart';
 
 /// `LiveRunController.start()` writes the run's GPX file under the app
 /// documents directory (`newRunGpxFile`) — path_provider has no real
@@ -87,11 +96,25 @@ class _NeverEmittingLocationService implements LocationService {
   void emit(LocationSample sample) => _controller.add(sample);
 }
 
+/// Signed in for LiveUploadService only, without writing a token to secure
+/// storage — the run's real SyncService would otherwise see it and try to
+/// upload to a real server.
+class _SignedInAuthService extends AuthService {
+  _SignedInAuthService() : super(apiClient: FakeApiClient());
+
+  @override
+  Future<AuthState> currentState() async =>
+      const AuthState(serverUrl: 'https://runner.example.com', token: 't');
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   _installFakeWakelockPlatform();
 
-  ProviderContainer container(LocationService locationService) {
+  ProviderContainer container(
+    LocationService locationService, {
+    List<Override> extraOverrides = const [],
+  }) {
     FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(
       {},
     );
@@ -103,7 +126,10 @@ void main() {
     PackageInfoPlatform.instance = _FakePackageInfoPlatform();
 
     final c = ProviderContainer(
-      overrides: [locationServiceProvider.overrideWithValue(locationService)],
+      overrides: [
+        locationServiceProvider.overrideWithValue(locationService),
+        ...extraOverrides,
+      ],
     );
     addTearDown(c.dispose);
     return c;
@@ -219,5 +245,68 @@ void main() {
     final finished = c.read(liveRunControllerProvider) as LiveRunFinished;
     expect(finished.metrics.elapsedWallClock, greaterThan(atPause));
     expect(finished.metrics.elapsed, Duration.zero);
+  });
+
+  test('live upload gets the run: points, pause, a new segment, and the finish', () async {
+    final service = _NeverEmittingLocationService();
+    final api = FakeApiClient()
+      ..getServerInfoHandler = ({required baseUrl, required token}) async =>
+          const ServerInfoDto(version: '1.4.0', apiLevel: 2, minAppApiLevel: 0);
+    final live = LiveUploadService(
+      apiClient: api,
+      authService: _SignedInAuthService(),
+      connectivity: FakeConnectivityMonitor(),
+      sharingStore: LiveSharingStore(),
+      interval: null,
+    );
+    addTearDown(live.dispose);
+    final c2 = container(
+      service,
+      extraOverrides: [liveUploadServiceProvider.overrideWithValue(live)],
+    );
+    final controller = c2.read(liveRunControllerProvider.notifier)
+      ..acquiringTimeout = const Duration(seconds: 30);
+
+    // Pause/resume/start each kick off their own send; a sendNow() during
+    // it joins that pass and only queues another, so wait for both.
+    Future<void> settle() async {
+      await pumpEventQueue();
+      await live.sendNow();
+      await live.sendNow();
+    }
+
+    LocationSample at(double lat) => LocationSample(
+      latitude: lat,
+      longitude: -0.1,
+      accuracyMeters: 5,
+      hasAccuracy: true,
+      timestamp: DateTime.now(),
+    );
+
+    await controller.start();
+    service.emit(at(51.5));
+    service.emit(at(51.5001));
+    await settle();
+    final runId = api.liveStoredPoints.keys.single;
+    expect(api.liveStoredPoints[runId], 2);
+
+    controller.pause();
+    await settle();
+    expect(api.liveStates[runId], 'paused');
+
+    controller.resume();
+    service.emit(at(51.5002));
+    await settle();
+    expect(
+      api.livePointCalls.lastWhere((call) => call.points.isNotEmpty).points.single.segment,
+      1,
+    );
+
+    await controller.stop();
+    await settle();
+    expect(api.liveStoredPoints[runId], 3);
+    expect(api.liveStates[runId], 'finished');
+    final finished = c2.read(liveRunControllerProvider) as LiveRunFinished;
+    expect(finished.clientRunId, runId);
   });
 }
