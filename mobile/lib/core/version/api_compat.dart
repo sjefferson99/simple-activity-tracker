@@ -8,7 +8,7 @@ library;
 /// The server API level this app was built against. Always equal to the
 /// server's `API_LEVEL` in the same commit (`server/app/api_compat.py`) —
 /// test/core/version/api_compat_test.dart fails if they drift.
-const kAppApiLevel = 1;
+const kAppApiLevel = 2;
 
 /// The oldest server API level this app still supports. Raise it only when
 /// deliberately dropping support for older servers — every server release so

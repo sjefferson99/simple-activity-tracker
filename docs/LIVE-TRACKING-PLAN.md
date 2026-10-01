@@ -1,6 +1,6 @@
 # Live tracking and sharing plan — issue #130
 
-Status: **approved 2026-10-01. Phase A done; phase B in progress.**
+Status: **approved 2026-10-01. Phases A and B done; phase C in progress.**
 
 Scope, from [issue #130](https://github.com/sjefferson99/simple-activity-tracker/issues/130):
 
@@ -267,6 +267,15 @@ CLAUDE.md applies to each phase (container check before sign-off).
   → 410; analysis of a converted activity matches the same points uploaded as
   GPX; container check with a run whose phone "dies" (stop the simulated
   uploader) and later uploads.
+
+### Before the PR — README refresh (requested 2026-10-01)
+
+- Do: read through the code and every past PR to build a full picture of
+  what the app and server do, then rewrite `README.md` with a clear summary
+  of what the app is and how it works, plus a **full feature list** covering
+  every existing feature that still makes sense, as well as this issue's
+  sharing and live tracking.
+- Verify: the owner reviews the README as part of the PR review.
 
 ## 6. Out of scope
 

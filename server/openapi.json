@@ -648,6 +648,262 @@
         "title": "ImportResultItem",
         "type": "object"
       },
+      "LiveMetricsIn": {
+        "description": "What the phone currently shows, displayed verbatim on the live page.",
+        "properties": {
+          "avg_speed_mps": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Speed Mps"
+          },
+          "current_speed_mps": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Speed Mps"
+          },
+          "distance_meters": {
+            "minimum": 0.0,
+            "title": "Distance Meters",
+            "type": "number"
+          },
+          "elapsed_seconds": {
+            "minimum": 0.0,
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
+          "moving_seconds": {
+            "minimum": 0.0,
+            "title": "Moving Seconds",
+            "type": "number"
+          },
+          "splits": {
+            "items": {
+              "$ref": "#/components/schemas/SplitSummary"
+            },
+            "maxItems": 2000,
+            "title": "Splits",
+            "type": "array"
+          }
+        },
+        "required": [
+          "distance_meters",
+          "elapsed_seconds",
+          "moving_seconds"
+        ],
+        "title": "LiveMetricsIn",
+        "type": "object"
+      },
+      "LivePointIn": {
+        "properties": {
+          "accuracy": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "ele": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": -1000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ele"
+          },
+          "lat": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lon",
+            "type": "number"
+          },
+          "segment": {
+            "default": 0,
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Segment",
+            "type": "integer"
+          },
+          "speed": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed"
+          },
+          "t": {
+            "format": "date-time",
+            "title": "T",
+            "type": "string"
+          }
+        },
+        "required": [
+          "t",
+          "lat",
+          "lon"
+        ],
+        "title": "LivePointIn",
+        "type": "object"
+      },
+      "LivePointsIn": {
+        "properties": {
+          "from_index": {
+            "minimum": 0.0,
+            "title": "From Index",
+            "type": "integer"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LiveMetricsIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/LivePointIn"
+            },
+            "maxItems": 2000,
+            "title": "Points",
+            "type": "array"
+          },
+          "state": {
+            "default": "active",
+            "enum": [
+              "active",
+              "paused",
+              "finished"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_index"
+        ],
+        "title": "LivePointsIn",
+        "type": "object"
+      },
+      "LiveSessionIn": {
+        "properties": {
+          "activity_type": {
+            "enum": [
+              "running",
+              "cycling",
+              "walking"
+            ],
+            "title": "Activity Type",
+            "type": "string"
+          },
+          "split_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SplitPlanIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "activity_type",
+          "started_at"
+        ],
+        "title": "LiveSessionIn",
+        "type": "object"
+      },
+      "LiveSessionStateOut": {
+        "description": "`next_index` is the next point the server expects; the phone resends\nfrom there. `state` is the server's view of the session.",
+        "properties": {
+          "next_index": {
+            "title": "Next Index",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "paused",
+              "finished",
+              "converted"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "next_index",
+          "state"
+        ],
+        "title": "LiveSessionStateOut",
+        "type": "object"
+      },
+      "LiveSharingRequest": {
+        "description": "The phone's whole live-sharing setting in one idempotent document, so\na change queued while offline can be replayed as-is (last write wins).\nSets the Live grant for exactly `live_viewer_ids`; History is untouched.",
+        "properties": {
+          "live_sharing_paused": {
+            "title": "Live Sharing Paused",
+            "type": "boolean"
+          },
+          "live_viewer_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Live Viewer Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "live_sharing_paused"
+        ],
+        "title": "LiveSharingRequest",
+        "type": "object"
+      },
       "LoginRequest": {
         "properties": {
           "device_name": {
@@ -695,6 +951,27 @@
         "title": "LoginResponse",
         "type": "object"
       },
+      "MySharesResponse": {
+        "properties": {
+          "live_sharing_paused": {
+            "title": "Live Sharing Paused",
+            "type": "boolean"
+          },
+          "shares": {
+            "items": {
+              "$ref": "#/components/schemas/ShareOut"
+            },
+            "title": "Shares",
+            "type": "array"
+          }
+        },
+        "required": [
+          "live_sharing_paused",
+          "shares"
+        ],
+        "title": "MySharesResponse",
+        "type": "object"
+      },
       "ServerInfoOut": {
         "properties": {
           "api_level": {
@@ -716,6 +993,34 @@
           "min_app_api_level"
         ],
         "title": "ServerInfoOut",
+        "type": "object"
+      },
+      "ShareOut": {
+        "properties": {
+          "can_view_history": {
+            "title": "Can View History",
+            "type": "boolean"
+          },
+          "can_view_live": {
+            "title": "Can View Live",
+            "type": "boolean"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "viewer_id": {
+            "title": "Viewer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "viewer_id",
+          "display_name",
+          "can_view_live",
+          "can_view_history"
+        ],
+        "title": "ShareOut",
         "type": "object"
       },
       "SplitConfigCreateRequest": {
@@ -948,6 +1253,56 @@
         "title": "SplitPlanOut",
         "type": "object"
       },
+      "SplitSummary": {
+        "properties": {
+          "avg_speed_mps": {
+            "minimum": 0.0,
+            "title": "Avg Speed Mps",
+            "type": "number"
+          },
+          "distance_m": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance M"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "index": {
+            "minimum": 1.0,
+            "title": "Index",
+            "type": "integer"
+          },
+          "target_speed_mps": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Speed Mps"
+          }
+        },
+        "required": [
+          "index",
+          "duration_seconds",
+          "avg_speed_mps"
+        ],
+        "title": "SplitSummary",
+        "type": "object"
+      },
       "StravaImportJobCreated": {
         "description": "Returned by POST /activities/import/strava (202 Accepted): the client\npolls GET /activities/import/strava/{job_id}/status for progress/result,\nmirroring the web app's own background-job flow for the same import.",
         "properties": {
@@ -1089,6 +1444,41 @@
         "title": "TrackPointOut",
         "type": "object"
       },
+      "UserDirectoryEntry": {
+        "description": "Another user, as anyone signed in may see them: never their email.",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "display_name"
+        ],
+        "title": "UserDirectoryEntry",
+        "type": "object"
+      },
+      "UserDirectoryResponse": {
+        "properties": {
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/UserDirectoryEntry"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "users"
+        ],
+        "title": "UserDirectoryResponse",
+        "type": "object"
+      },
       "UserOut": {
         "properties": {
           "display_name": {
@@ -1161,7 +1551,7 @@
   },
   "info": {
     "title": "Simple Activity Tracker Server",
-    "version": "1"
+    "version": "2"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -2078,6 +2468,153 @@
         ]
       }
     },
+    "/api/v1/live/{client_activity_id}": {
+      "delete": {
+        "description": "The run was discarded on the phone: nothing of it stays on the server.\nA session already linked to an activity is left alone (deleting the\nactivity is a separate, explicit action).",
+        "operationId": "delete_live_session_api_v1_live__client_activity_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_activity_id",
+            "required": true,
+            "schema": {
+              "maxLength": 36,
+              "minLength": 1,
+              "pattern": "^[0-9A-Fa-f-]+$",
+              "title": "Client Activity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Live Session",
+        "tags": [
+          "live"
+        ]
+      },
+      "put": {
+        "operationId": "put_live_session_api_v1_live__client_activity_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_activity_id",
+            "required": true,
+            "schema": {
+              "maxLength": 36,
+              "minLength": 1,
+              "pattern": "^[0-9A-Fa-f-]+$",
+              "title": "Client Activity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveSessionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveSessionStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Live Session",
+        "tags": [
+          "live"
+        ]
+      }
+    },
+    "/api/v1/live/{client_activity_id}/points": {
+      "post": {
+        "operationId": "post_live_points_api_v1_live__client_activity_id__points_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_activity_id",
+            "required": true,
+            "schema": {
+              "maxLength": 36,
+              "minLength": 1,
+              "pattern": "^[0-9A-Fa-f-]+$",
+              "title": "Client Activity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LivePointsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveSessionStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Live Points",
+        "tags": [
+          "live"
+        ]
+      }
+    },
     "/api/v1/me": {
       "get": {
         "operationId": "get_me_api_v1_me_get",
@@ -2159,6 +2696,47 @@
         ]
       }
     },
+    "/api/v1/me/live-sharing": {
+      "put": {
+        "operationId": "put_live_sharing_api_v1_me_live_sharing_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveSharingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MySharesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Live Sharing",
+        "tags": [
+          "sharing"
+        ]
+      }
+    },
     "/api/v1/me/password": {
       "put": {
         "operationId": "change_password_api_v1_me_password_put",
@@ -2190,6 +2768,27 @@
         "summary": "Change Password",
         "tags": [
           "me"
+        ]
+      }
+    },
+    "/api/v1/me/shares": {
+      "get": {
+        "operationId": "get_my_shares_api_v1_me_shares_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MySharesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get My Shares",
+        "tags": [
+          "sharing"
         ]
       }
     },
@@ -2398,6 +2997,28 @@
         "summary": "Patch Split Config",
         "tags": [
           "split-configs"
+        ]
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "description": "Every other enabled user, by display name only (plan D5).",
+        "operationId": "list_users_api_v1_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDirectoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Users",
+        "tags": [
+          "sharing"
         ]
       }
     },

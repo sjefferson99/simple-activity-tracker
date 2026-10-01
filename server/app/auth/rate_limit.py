@@ -59,3 +59,9 @@ login_rate_limiter = InMemoryRateLimiter(max_events=10, window_seconds=60)
 # docs/SERVER-PRODUCTION-PLAN.md S6). Keyed by IP only (no email/account
 # concept for a not-yet-existing registration).
 account_action_rate_limiter = InMemoryRateLimiter(max_events=5, window_seconds=60)
+
+# Live tracking uploads (issue #130), keyed by user. The phone sends about one
+# batch a minute, but backfilling a whole run after live upload is switched on
+# mid-run takes up to LIVE_POINTS_MAX_PER_SESSION / LIVE_POINTS_MAX_PER_REQUEST
+# (100) requests, so this is roomy for that and still stops a runaway client.
+live_upload_rate_limiter = InMemoryRateLimiter(max_events=120, window_seconds=60)

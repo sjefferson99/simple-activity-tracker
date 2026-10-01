@@ -11,7 +11,9 @@ from pydantic import ValidationError
 from app.api.v1 import activities as activities_api
 from app.api.v1 import admin as admin_api
 from app.api.v1 import auth as auth_api
+from app.api.v1 import live as live_api
 from app.api.v1 import server_info as server_info_api
+from app.api.v1 import sharing as sharing_api
 from app.api.v1 import split_configs as split_configs_api
 from app.api_compat import API_LEVEL
 from app.config import get_settings
@@ -21,6 +23,7 @@ from app.version import APP_VERSION
 from app.web import activities as activities_web
 from app.web import admin as admin_web
 from app.web import devices as devices_web
+from app.web import live as live_web
 from app.web import login as login_web
 from app.web import register as register_web
 from app.web import settings as settings_web
@@ -67,6 +70,9 @@ def create_app() -> FastAPI:
     app.include_router(activities_api.router)
     app.include_router(admin_api.router)
     app.include_router(split_configs_api.router)
+    app.include_router(live_api.router)
+    app.include_router(sharing_api.users_router)
+    app.include_router(sharing_api.me_router)
 
     app.include_router(login_web.router)
     app.include_router(activities_web.router)
@@ -77,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(split_configs_web.router)
     app.include_router(sharing_web.router)
     app.include_router(shared_activities_web.router)
+    app.include_router(live_web.router)
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

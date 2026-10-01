@@ -40,6 +40,7 @@ from app.api.v1.activities import (
     _NewActivity,
 )
 from app.audit import log_audit_event
+from app.cascades import delete_activity_dependents
 from app.config import get_settings
 from app.deps import db_session
 from app.models.activity import Activity
@@ -54,9 +55,9 @@ from app.repositories.activities import (
     SqlAlchemyActivityRepository,
 )
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
-from app.repositories.shares import SqlAlchemyShareRepository
+from app.repositories.live import SqlAlchemyLiveSessionRepository
 from app.repositories.tags import SqlAlchemyTagRepository
-from app.sharing import owners_visible_to
+from app.sharing import live_sessions_visible_to, owners_visible_to
 from app.storage.blob_store import LocalFileBlobStore
 from app.validation import (
     NAME_MAX_LENGTH,
@@ -401,7 +402,58 @@ def activity_list(
     # skipped on every sort/page/search click, which is by far the more
     # common request.
     context["map_default_center"] = activities_repo.most_recent_start_point(user.id)
+    context["live_sessions"] = _live_now(session, user, tab_value)
     return templates.TemplateResponse(request, "activities_list.html", context)
+
+
+@router.get("/live-now")
+def live_now_fragment(
+    request: Request,
+    user: WebUser,
+    session: Annotated[Session, Depends(db_session)],
+    tab: str = "",
+) -> Response:
+    """The Live now list on its own, polled by the activities page every 30 s
+    (partials/live_now.html) so runs appear and drop off without a reload."""
+    tab_value = "shared" if tab == "shared" else "mine"
+    return templates.TemplateResponse(
+        request,
+        "partials/live_now.html",
+        {"user": user, "tab": tab_value, "live_sessions": _live_now(session, user, tab_value)},
+    )
+
+
+_TYPE_NOUNS = {"cycling": "ride", "walking": "walk"}
+
+
+def _live_now(session: Session, user: User, tab: str) -> list[dict[str, Any]]:
+    """The Live now list above the activity list (issue #130): on Mine, the
+    owner's sessions not yet saved as an activity; on Shared, the sessions
+    this user may watch right now (app.sharing decides which)."""
+    if tab == "shared":
+        return [
+            {
+                "id": live.id,
+                "title": f"{owner.display_name}'s {_TYPE_NOUNS.get(live.activity_type, 'run')}",
+                "state": live.state,
+                "state_label": "Paused" if live.state == "paused" else "Live",
+                "started_at": live.started_at,
+                "last_update_at": live.last_update_at,
+            }
+            for live, owner in live_sessions_visible_to(session, user.id)
+        ]
+    labels = {"active": "Live", "paused": "Paused", "finished": "Finished, not uploaded yet"}
+    return [
+        {
+            "id": live.id,
+            "title": f"Your {_TYPE_NOUNS.get(live.activity_type, 'run')}",
+            "state": live.state,
+            "state_label": labels.get(live.state, live.state),
+            "started_at": live.started_at,
+            "last_update_at": live.last_update_at,
+        }
+        for live in SqlAlchemyLiveSessionRepository(session).list_open_for_owner(user.id)
+    ]
 
 
 @router.post("/upload", dependencies=[Depends(require_htmx_header)])
@@ -706,7 +758,7 @@ def activity_delete(
 
     # See app/api/v1/activities.py:delete_activity for why this is explicit.
     activity.tags.clear()
-    SqlAlchemyShareRepository(session).delete_for_activity(activity.id)
+    delete_activity_dependents(session, activity.id)
     session.flush()
 
     blob_key = activity.gpx_blob_key
@@ -759,7 +811,7 @@ def activities_bulk_delete(
         if analysis is not None:
             analyses_repo.delete(analysis)
         activity.tags.clear()
-        SqlAlchemyShareRepository(session).delete_for_activity(activity.id)
+        delete_activity_dependents(session, activity.id)
         # Single flush per activity: the FK-ordering requirement (see
         # activity_delete above) is only that the analysis delete lands
         # before the activity delete, which one flush covering both

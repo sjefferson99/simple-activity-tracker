@@ -22,16 +22,14 @@ Change that in <a href="/settings">Settings</a>.</p>
 <p class="muted">Only you can see this activity.</p>
 {% endif %}
 {% if extra_candidates %}
-<form class="form-row" hx-post="/activities/{{ share_activity_id }}/shares" hx-target="#activity-share-list">
-  <div>
-    <label for="activity-share-viewer">Also share this activity with</label>
-    <select id="activity-share-viewer" name="viewer_id" required>
-      <option value="" selected disabled>Choose a user…</option>
-      {% for candidate in extra_candidates %}
-      <option value="{{ candidate.id }}">{{ candidate.display_name }}</option>
-      {% endfor %}
-    </select>
-  </div>
+<form class="form-row share-add" hx-post="/activities/{{ share_activity_id }}/shares" hx-target="#activity-share-list">
+  <label for="activity-share-viewer">Also share this activity with</label>
+  <select id="activity-share-viewer" name="viewer_id" required>
+    <option value="" selected disabled>Choose a user…</option>
+    {% for candidate in extra_candidates %}
+    <option value="{{ candidate.id }}">{{ candidate.display_name }}</option>
+    {% endfor %}
+  </select>
   <button type="submit">Share</button>
 </form>
 {% endif %}

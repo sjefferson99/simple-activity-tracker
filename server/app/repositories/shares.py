@@ -27,41 +27,63 @@ class SqlAlchemyShareRepository:
         )
         return list(self._session.execute(stmt).scalars())
 
+    def list_shares(self, owner_id: str) -> list[tuple[User, UserShare]]:
+        """Every user the owner has granted anything to, with the grant."""
+        stmt = (
+            select(User, UserShare)
+            .join(UserShare, UserShare.viewer_id == User.id)
+            .where(UserShare.owner_id == owner_id)
+            .order_by(User.display_name, User.id)
+        )
+        return [(user, share) for user, share in self._session.execute(stmt).all()]
+
     def get(self, owner_id: str, viewer_id: str) -> UserShare | None:
         return self._session.get(UserShare, (owner_id, viewer_id))
 
-    def grant_history(self, owner_id: str, viewer_id: str) -> None:
+    def set_flags(self, owner_id: str, viewer_id: str, *, live: bool, history: bool) -> None:
+        """Creates, updates or (both flags false) deletes the grant."""
         now = datetime.now(UTC)
         share = self.get(owner_id, viewer_id)
-        if share is None:
+        if not live and not history:
+            if share is not None:
+                self._session.delete(share)
+        elif share is None:
             self._session.add(
                 UserShare(
                     owner_id=owner_id,
                     viewer_id=viewer_id,
-                    can_view_live=False,
-                    can_view_history=True,
+                    can_view_live=live,
+                    can_view_history=history,
                     created_at=now,
                     updated_at=now,
                 )
             )
         else:
-            share.can_view_history = True
+            share.can_view_live = live
+            share.can_view_history = history
             share.updated_at = now
         self._session.flush()
 
-    def revoke_history(self, owner_id: str, viewer_id: str) -> bool:
-        """Returns whether anything was revoked."""
+    def delete_share(self, owner_id: str, viewer_id: str) -> bool:
         share = self.get(owner_id, viewer_id)
-        if share is None or not share.can_view_history:
+        if share is None:
             return False
-        if share.can_view_live:
-            share.can_view_history = False
-            share.updated_at = datetime.now(UTC)
-        else:
-            # Both flags false: delete rather than keep an empty grant.
-            self._session.delete(share)
+        self._session.delete(share)
         self._session.flush()
         return True
+
+    def set_live_viewers(self, owner_id: str, viewer_ids: set[str]) -> None:
+        """The phone's "live share with" list (issue #130 D4): exactly these
+        users get Live; History flags are left as they are."""
+        existing = {share.viewer_id: share for _, share in self.list_shares(owner_id)}
+        for viewer_id in existing.keys() | viewer_ids:
+            share = existing.get(viewer_id)
+            self.set_flags(
+                owner_id,
+                viewer_id,
+                live=viewer_id in viewer_ids,
+                history=share.can_view_history if share is not None else False,
+            )
 
     # --- per-activity extras ---------------------------------------------
 

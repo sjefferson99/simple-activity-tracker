@@ -11,6 +11,8 @@
   <a href="/?tab=shared" class="list-tab{% if tab == 'shared' %} active{% endif %}"{% if tab == 'shared' %} aria-current="page"{% endif %}>Shared with me</a>
 </nav>
 
+{% include "partials/live_now.html" %}
+
 {% if tab == "mine" %}
 <form id="export-form" action="/export" method="get">
   <input type="hidden" name="selection" value="1">

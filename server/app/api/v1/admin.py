@@ -15,13 +15,13 @@ from app.api.v1.schemas import (
 from app.audit import log_audit_event
 from app.auth.current_user import CurrentAdmin
 from app.auth.passwords import hash_password
+from app.cascades import delete_activity_dependents, delete_user_dependents
 from app.config import get_settings
 from app.deps import db_session
 from app.models.user import User
 from app.repositories.activities import SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.repositories.device_tokens import SqlAlchemyDeviceTokenRepository
-from app.repositories.shares import SqlAlchemyShareRepository
 from app.repositories.tags import SqlAlchemyTagRepository
 from app.repositories.users import SqlAlchemyUserRepository
 from app.repositories.web_sessions import SqlAlchemyWebSessionRepository
@@ -190,7 +190,6 @@ def delete_user(
     activities_repo = SqlAlchemyActivityRepository(session)
     analyses_repo = SqlAlchemyActivityAnalysisRepository(session)
     tags_repo = SqlAlchemyTagRepository(session)
-    shares_repo = SqlAlchemyShareRepository(session)
     blob_store = LocalFileBlobStore(Path(get_settings().data_dir))
 
     blob_keys: list[str] = []
@@ -215,7 +214,7 @@ def delete_user(
             # FK constraint for any user who has ever tagged an activity
             # (every Strava import creates a "Strava" tag).
             activity.tags.clear()
-            shares_repo.delete_for_activity(activity.id)
+            delete_activity_dependents(session, activity.id)
             blob_keys.append(activity.gpx_blob_key)
             activities_repo.delete(activity)
         if page.next_cursor is None:
@@ -225,7 +224,7 @@ def delete_user(
     for tag in tags_repo.list_for_user(target.id):
         session.delete(tag)
 
-    shares_repo.delete_for_user(target.id)
+    delete_user_dependents(session, target.id)
     SqlAlchemyDeviceTokenRepository(session).delete_all_for_user(target.id)
     SqlAlchemyWebSessionRepository(session).delete_all_for_user(target.id)
     session.flush()

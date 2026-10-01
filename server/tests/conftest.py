@@ -35,7 +35,11 @@ def app_client(tmp_path, monkeypatch) -> Generator:
     before anything reads them — otherwise a DB/engine created by an earlier
     test (or import) would leak into this one.
     """
-    from app.auth.rate_limit import account_action_rate_limiter, login_rate_limiter
+    from app.auth.rate_limit import (
+        account_action_rate_limiter,
+        live_upload_rate_limiter,
+        login_rate_limiter,
+    )
     from app.config import get_settings
     from app.db import get_engine
 
@@ -58,6 +62,7 @@ def app_client(tmp_path, monkeypatch) -> Generator:
     # don't count against the next test's budget.
     login_rate_limiter.reset()
     account_action_rate_limiter.reset()
+    live_upload_rate_limiter.reset()
 
     from fastapi.testclient import TestClient
 
@@ -150,3 +155,49 @@ def upload_sample_activity(
         data={"summary": json.dumps(make_summary(client_activity_id, activity_type))},
         files={"gpx": ("activity.gpx", sample_gpx_bytes, "application/gpx+xml")},
     )
+
+
+# --- multi-user helpers (issue #130 sharing and live tests) -------------------
+
+HTMX = {"X-Requested-With": "htmx"}
+OTHER_USER_PASSWORD = "viewer-password-123"
+
+
+def create_user(email: str, display_name: str, *, disabled: bool = False) -> str:
+    """Adds a non-admin user (password OTHER_USER_PASSWORD) and returns its id."""
+    from datetime import datetime
+
+    from app.auth.passwords import hash_password
+    from app.db import get_session_factory
+    from app.models.user import User
+    from app.repositories.users import SqlAlchemyUserRepository
+
+    with get_session_factory()() as session:
+        now = datetime.now(UTC)
+        user = User(
+            email=email,
+            password_hash=hash_password(OTHER_USER_PASSWORD),
+            display_name=display_name,
+            is_admin=False,
+            disabled_at=now if disabled else None,
+            sessions_invalidated_at=now,
+            created_at=now,
+        )
+        SqlAlchemyUserRepository(session).add(user)
+        session.commit()
+        return user.id
+
+
+def web_login(client, email: str, password: str) -> None:
+    """Signs the client's cookie jar in as this user, replacing any session."""
+    client.cookies.clear()
+    response = client.post("/login", headers=HTMX, data={"email": email, "password": password})
+    assert response.status_code == 200
+
+
+def bearer_headers(client, email: str, password: str) -> dict[str, str]:
+    response = client.post(
+        "/api/v1/auth/login", json={"email": email, "password": password, "device_name": "t"}
+    )
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['token']}"}

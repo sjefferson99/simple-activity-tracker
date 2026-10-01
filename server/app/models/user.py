@@ -25,3 +25,6 @@ class User(Base):
     # issued before this timestamp is treated as invalid — see app/auth/.
     sessions_invalidated_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
+    # "Don't live share" (issue #130 D4): hides every live session from every
+    # viewer while set, without forgetting who has a Live grant.
+    live_sharing_paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

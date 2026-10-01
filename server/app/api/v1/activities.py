@@ -62,6 +62,7 @@ from app.api.v1.schemas import (
 )
 from app.audit import log_audit_event
 from app.auth.current_user import CurrentDeviceName, CurrentUser
+from app.cascades import delete_activity_dependents
 from app.config import get_settings
 from app.deps import db_session
 from app.models.activity import Activity
@@ -69,7 +70,7 @@ from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
 from app.models.tag import Tag
 from app.repositories.activities import InvalidCursorError, SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
-from app.repositories.shares import SqlAlchemyShareRepository
+from app.repositories.live import SqlAlchemyLiveSessionRepository
 from app.repositories.tags import SqlAlchemyTagRepository
 from app.storage.blob_store import LocalFileBlobStore
 from app.validation import SUMMARY_MAX_BYTES, ValidationFailedError, validate_tag_name
@@ -402,6 +403,13 @@ def upload_activity(
         ),
         gpx_bytes,
     )
+    # The phone's live session for this activity (issue #130), if any, is now
+    # finished and points at the real activity; its points are dropped. Runs
+    # on a retried upload too, so a link missed by an interrupted request
+    # still happens. Idempotent.
+    SqlAlchemyLiveSessionRepository(session).link_to_activity(
+        user.id, summary_model.client_activity_id, activity.id
+    )
     if not created:
         response.status_code = 200
     return _activity_out(activity, analysis)
@@ -467,7 +475,7 @@ def delete_activity(
     # on implicit ORM cascade ordering for anything security/data-integrity
     # relevant.
     activity.tags.clear()
-    SqlAlchemyShareRepository(session).delete_for_activity(activity.id)
+    delete_activity_dependents(session, activity.id)
     session.flush()
 
     blob_key = activity.gpx_blob_key

@@ -10,47 +10,17 @@ from datetime import UTC, datetime
 
 import pytest
 
-from tests.conftest import upload_sample_activity
+from tests.conftest import (
+    HTMX,
+    OTHER_USER_PASSWORD,
+    upload_sample_activity,
+)
+from tests.conftest import bearer_headers as _bearer
+from tests.conftest import create_user as _create_user
+from tests.conftest import web_login as _web_login
 
-HTMX = {"X-Requested-With": "htmx"}
 OWNER_EMAIL, OWNER_PASSWORD = "admin@example.com", "admin-password-123"
-VIEWER_PASSWORD = "viewer-password-123"
-
-
-def _create_user(email: str, display_name: str, *, disabled: bool = False) -> str:
-    from app.auth.passwords import hash_password
-    from app.db import get_session_factory
-    from app.models.user import User
-    from app.repositories.users import SqlAlchemyUserRepository
-
-    with get_session_factory()() as session:
-        now = datetime.now(UTC)
-        user = User(
-            email=email,
-            password_hash=hash_password(VIEWER_PASSWORD),
-            display_name=display_name,
-            is_admin=False,
-            disabled_at=now if disabled else None,
-            sessions_invalidated_at=now,
-            created_at=now,
-        )
-        SqlAlchemyUserRepository(session).add(user)
-        session.commit()
-        return user.id
-
-
-def _web_login(client, email: str, password: str) -> None:
-    client.cookies.clear()
-    response = client.post("/login", headers=HTMX, data={"email": email, "password": password})
-    assert response.status_code == 200
-
-
-def _bearer(client, email: str, password: str) -> dict[str, str]:
-    response = client.post(
-        "/api/v1/auth/login", json={"email": email, "password": password, "device_name": "t"}
-    )
-    assert response.status_code == 200
-    return {"Authorization": f"Bearer {response.json()['token']}"}
+VIEWER_PASSWORD = OTHER_USER_PASSWORD
 
 
 def _set_title(activity_id: str, title: str) -> None:
@@ -84,7 +54,9 @@ def shared_setup(app_client, auth_headers, sample_gpx_bytes):
 
 def _grant_history(client, viewer_id: str) -> None:
     _web_login(client, OWNER_EMAIL, OWNER_PASSWORD)
-    response = client.post("/settings/shares", headers=HTMX, data={"viewer_id": viewer_id})
+    response = client.post(
+        "/settings/shares", headers=HTMX, data={"viewer_id": viewer_id, "history": "on"}
+    )
     assert response.status_code == 200
 
 
@@ -108,7 +80,9 @@ def test_settings_lists_enabled_other_users_in_the_dropdown(app_client, shared_s
 
 def test_grant_then_revoke_history(app_client, shared_setup):
     viewer_id = shared_setup["viewer_id"]
-    granted = app_client.post("/settings/shares", headers=HTMX, data={"viewer_id": viewer_id})
+    granted = app_client.post(
+        "/settings/shares", headers=HTMX, data={"viewer_id": viewer_id, "history": "on"}
+    )
     assert granted.status_code == 200
     assert f'hx-delete="/settings/shares/{viewer_id}"' in granted.text
 
@@ -140,7 +114,9 @@ def test_cannot_share_with_self_disabled_or_unknown_users(app_client, shared_set
         "": "",
     }[bad_viewer]
 
-    response = app_client.post("/settings/shares", headers=HTMX, data={"viewer_id": viewer_id})
+    response = app_client.post(
+        "/settings/shares", headers=HTMX, data={"viewer_id": viewer_id, "history": "on"}
+    )
     assert response.status_code == 400
     activity_response = app_client.post(
         f"/activities/{shared_setup['activities'][0]}/shares",
@@ -170,7 +146,9 @@ def test_sharing_changes_are_audited(app_client, shared_setup, caplog):
     viewer_id = shared_setup["viewer_id"]
     activity_id = shared_setup["activities"][0]
     with caplog.at_level(logging.INFO, logger="app.audit"):
-        app_client.post("/settings/shares", headers=HTMX, data={"viewer_id": viewer_id})
+        app_client.post(
+            "/settings/shares", headers=HTMX, data={"viewer_id": viewer_id, "history": "on"}
+        )
         app_client.delete(f"/settings/shares/{viewer_id}", headers=HTMX)
         app_client.post(
             f"/activities/{activity_id}/shares", headers=HTMX, data={"viewer_id": viewer_id}
@@ -178,8 +156,8 @@ def test_sharing_changes_are_audited(app_client, shared_setup, caplog):
         app_client.delete(f"/activities/{activity_id}/shares/{viewer_id}", headers=HTMX)
     messages = " ".join(r.message for r in caplog.records if r.name == "app.audit")
     for event in (
-        "share.history_granted",
-        "share.history_revoked",
+        "share.granted",
+        "share.revoked",
         "activity_share.added",
         "activity_share.removed",
     ):
@@ -513,7 +491,7 @@ def test_admin_can_delete_users_with_shares_both_ways(app_client, shared_setup, 
     with get_session_factory()() as session:
         admin = SqlAlchemyUserRepository(session).get_by_email(OWNER_EMAIL)
         assert admin is not None
-        SqlAlchemyShareRepository(session).grant_history(viewer_id, admin.id)
+        SqlAlchemyShareRepository(session).set_flags(viewer_id, admin.id, live=True, history=True)
         session.commit()
 
     if via == "api":
@@ -529,26 +507,35 @@ def test_admin_can_delete_users_with_shares_both_ways(app_client, shared_setup, 
         assert session.query(ActivityShare).count() == 0
 
 
-def test_revoking_history_keeps_a_live_grant(app_client, shared_setup):
+def test_unticking_one_flag_keeps_the_other_and_both_removes_the_grant(app_client, shared_setup):
     """A row with only Live left is kept; one with neither flag is deleted."""
     from app.db import get_session_factory
-    from app.repositories.shares import SqlAlchemyShareRepository
-    from app.repositories.users import SqlAlchemyUserRepository
+    from app.models.share import UserShare
 
     viewer_id = shared_setup["viewer_id"]
-    with get_session_factory()() as session:
-        owner = SqlAlchemyUserRepository(session).get_by_email(OWNER_EMAIL)
-        assert owner is not None
-        shares = SqlAlchemyShareRepository(session)
-        shares.grant_history(owner.id, viewer_id)
-        share = shares.get(owner.id, viewer_id)
-        assert share is not None
-        share.can_view_live = True
-        session.flush()
+    added = app_client.post(
+        "/settings/shares",
+        headers=HTMX,
+        data={"viewer_id": viewer_id, "live": "on", "history": "on"},
+    )
+    assert added.status_code == 200
 
-        assert shares.revoke_history(owner.id, viewer_id) is True
-        kept = shares.get(owner.id, viewer_id)
-        assert kept is not None
-        assert kept.can_view_live is True
-        assert kept.can_view_history is False
-        assert shares.revoke_history(owner.id, viewer_id) is False
+    live_only = app_client.patch(f"/settings/shares/{viewer_id}", headers=HTMX, data={"live": "on"})
+    assert live_only.status_code == 200
+    with get_session_factory()() as session:
+        share = session.query(UserShare).one()
+        assert (share.can_view_live, share.can_view_history) == (True, False)
+
+    assert app_client.patch(f"/settings/shares/{viewer_id}", headers=HTMX).status_code == 200
+    with get_session_factory()() as session:
+        assert session.query(UserShare).count() == 0
+    # Nothing left to update.
+    assert app_client.patch(f"/settings/shares/{viewer_id}", headers=HTMX).status_code == 404
+
+
+def test_adding_a_share_needs_live_or_history(app_client, shared_setup):
+    response = app_client.post(
+        "/settings/shares", headers=HTMX, data={"viewer_id": shared_setup["viewer_id"]}
+    )
+    assert response.status_code == 400
+    assert "Choose Live, History or both." in response.text
