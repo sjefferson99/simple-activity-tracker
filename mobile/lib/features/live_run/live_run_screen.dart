@@ -16,6 +16,7 @@ import '../activity_history/activity_list_screen.dart';
 import '../export_help/export_help_screen.dart';
 import '../settings/settings_screen.dart';
 import '../splits/splits_screen.dart';
+import 'live_badge.dart';
 import 'live_run_controller.dart';
 import 'live_run_state.dart';
 import 'metric_spec.dart';
@@ -339,6 +340,8 @@ class LiveRunScreen extends ConsumerWidget {
                         else
                           const Spacer(),
                         _StatusLine(state: state, unit: unit),
+                        if (state is LiveRunActive || state is LiveRunAcquiring)
+                          LiveBadge(fontSize: unit * 2.4),
                         if (metrics != null)
                           Expanded(
                             flex: 5,

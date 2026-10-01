@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+{% set type_label = {"cycling": "Ride", "walking": "Walk"}.get(live.activity_type, "Run") %}
+{% block title %}{{ "Your" if is_owner else owner_name ~ "'s" }} live {{ type_label | lower }} — Simple Activity Tracker{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+{% endblock %}
+{% block content %}
+{# The live page (issue #130, app/web/live.py). Everything below the header
+   is filled in by polling /live/<id>/poll; when the activity finishes or the
+   viewer loses access, the data sections are removed and a notice replaces
+   them (plan D8). #}
+<div class="card">
+  <p class="muted"><a href="/{{ '' if is_owner else '?tab=shared' }}">{{ "Mine" if is_owner else "Shared with me" }}</a></p>
+  <h1>{{ "Your" if is_owner else owner_name ~ "'s" }} live {{ type_label | lower }}
+    <span class="badge type-{{ live.activity_type }}">{{ type_label }}</span>
+    <span id="live-state" class="badge live-badge">{{ "Live" if status == "live" else "Finished" }}</span></h1>
+  <p class="muted">Started <time datetime="{{ live.started_at.isoformat() }}" class="local-time" data-format="date-time">{{ live.started_at.isoformat() }}</time>
+    {% if status == "live" %}· <span id="live-last-update" class="live-last-update">Waiting for the first update…</span>{% endif %}</p>
+  {% if is_owner %}
+  <p class="muted">
+    {% if live_sharing_paused %}Live sharing is off, so only you can see this. Change it in <a href="/settings">Settings</a>.
+    {% elif live_viewers %}Visible live to {{ live_viewers | map(attribute="display_name") | join(", ") }}.
+    {% else %}Nobody has Live access, so only you can see this. Change it in <a href="/settings">Settings</a>.{% endif %}
+  </p>
+  {% endif %}
+</div>
+
+<div id="live-ended" class="card empty-state" {% if status == "live" %}hidden{% endif %}>
+  <p id="live-ended-message">{% if is_owner and activity_url %}This activity has finished and been saved.{% elif is_owner %}This activity has finished. It'll be saved here once the phone uploads it.{% else %}This activity has finished.{% endif %}</p>
+  <p id="live-ended-link" {% if not activity_url %}hidden{% endif %}><a class="button" href="{{ activity_url or '#' }}">View the activity</a></p>
+</div>
+
+{% if status == "live" or is_owner %}
+<div id="live-data">
+  <div class="card">
+    <div class="stat-grid">
+      <div class="stat"><div class="value" id="m-distance">—</div><div class="label">Distance</div></div>
+      <div class="stat"><div class="value" id="m-elapsed">—</div><div class="label">Time</div></div>
+      <div class="stat"><div class="value" id="m-moving">—</div><div class="label">Moving time</div></div>
+      <div class="stat"><div class="value" id="m-avg">—</div><div class="label">{{ "Avg speed" if live.activity_type == "cycling" else "Avg pace" }}</div></div>
+      <div class="stat"><div class="value" id="m-current">—</div><div class="label">{{ "Speed" if live.activity_type == "cycling" else "Pace" }}</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Map</h2>
+    <div id="map"></div>
+  </div>
+  <div class="card" id="live-splits-card" hidden>
+    <h2>Splits so far</h2>
+    <table>
+      <thead><tr><th>#</th><th>Distance</th><th>Time</th><th>{{ "Speed" if live.activity_type == "cycling" else "Pace" }}</th></tr></thead>
+      <tbody id="live-splits"></tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if is_owner and not live.activity_id %}
+<div class="card">
+  {% if can_convert %}
+  <h2>Save as an activity</h2>
+  <p class="muted">If the phone can't upload this activity (a flat battery, say), save what the server
+  received as a normal activity. If the phone's own upload arrives later, it replaces this one
+  automatically and keeps any title, notes, tags and sharing you've added.</p>
+  {% if recent_update_minutes %}
+  <p class="warning-banner">This updated {{ recent_update_minutes }} minute{{ "s" if recent_update_minutes != 1 else "" }} ago, so the
+  phone may just be out of signal. Saving now stops it adding any more to this live activity.</p>
+  {% endif %}
+  <form hx-post="/live/{{ live.id }}/convert"
+        hx-confirm="{{ 'The phone may still be recording. ' if recent_update_minutes else '' }}Save this live activity as an activity?">
+    <button type="submit">Convert to activity</button>
+  </form>
+  <hr style="border-color: var(--border); margin: 1.25rem 0;">
+  {% endif %}
+  <p class="muted">Deleting removes this live activity from the server. It doesn't touch the phone.</p>
+  <form hx-delete="/live/{{ live.id }}" hx-confirm="Delete this live activity? This cannot be undone.">
+    <button type="submit" class="danger">Delete live activity</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if status == "live" or is_owner %}
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script nonce="{{ csp_nonce(request) }}">
+  (function () {
+    const pollUrl = {{ ("/live/" ~ live.id ~ "/poll") | tojson }};
+    const pollMs = {{ poll_seconds * 1000 }};
+    const isCycling = {{ (live.activity_type == "cycling") | tojson }};
+    const isOwner = {{ is_owner | tojson }};
+
+    const map = L.map("map");
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap contributors",
+      maxZoom: 19,
+    }).addTo(map);
+    map.setView([0, 0], 2);
+    const lines = {};  // segment -> polyline
+    let marker = null;
+    let fitted = false;
+    let nextIndex = 0;
+    let timer = null;
+    let lastUpdate = null;
+    let clockSkewMs = 0;  // server clock minus browser clock
+
+    function fmtDistance(m) {
+      return m == null ? "—" : (m / 1000).toFixed(2) + " km";
+    }
+    function fmtDuration(s) {
+      if (s == null) return "—";
+      s = Math.round(s);
+      const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+      const mm = String(m).padStart(h > 0 ? 2 : 1, "0"), ss = String(sec).padStart(2, "0");
+      return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+    }
+    // Pace for runs and walks (min/km), speed for rides (km/h): the same
+    // choice the phone makes.
+    function fmtPaceOrSpeed(mps) {
+      if (mps == null || !(mps > 0)) return "—";
+      if (isCycling) return (mps * 3.6).toFixed(1) + " km/h";
+      const secPerKm = 1000 / mps;
+      if (secPerKm > 3600) return "—";
+      return fmtDuration(secPerKm) + " /km";
+    }
+    function fmtAgo(ms) {
+      const s = Math.max(0, Math.round(ms / 1000));
+      if (s < 60) return "just now";
+      const m = Math.round(s / 60);
+      if (m < 60) return `${m} min ago`;
+      const h = Math.floor(m / 60);
+      return `${h} h ${m % 60} min ago`;
+    }
+
+    function setText(id, text) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    }
+
+    // Older than 3 poll intervals reads as "the phone may have lost signal";
+    // the most useful thing on the page for the safety use case (plan §2.4).
+    function renderLastUpdate() {
+      const el = document.getElementById("live-last-update");
+      if (!el || !lastUpdate) return;
+      const age = Date.now() + clockSkewMs - lastUpdate.getTime();
+      el.textContent = "Last update " + fmtAgo(age);
+      el.classList.toggle("stale", age > 3 * 60 * 1000);
+    }
+
+    function renderMetrics(m) {
+      if (!m) return;
+      setText("m-distance", fmtDistance(m.distance_meters));
+      setText("m-elapsed", fmtDuration(m.elapsed_seconds));
+      setText("m-moving", fmtDuration(m.moving_seconds));
+      setText("m-avg", fmtPaceOrSpeed(m.avg_speed_mps));
+      setText("m-current", fmtPaceOrSpeed(m.current_speed_mps));
+      const splits = m.splits || [];
+      const card = document.getElementById("live-splits-card");
+      const body = document.getElementById("live-splits");
+      card.hidden = splits.length === 0;
+      body.replaceChildren(...splits.map((s) => {
+        const row = document.createElement("tr");
+        for (const value of [
+          String(s.index),
+          s.distance_m != null ? fmtDistance(s.distance_m) : "—",
+          fmtDuration(s.duration_seconds),
+          fmtPaceOrSpeed(s.avg_speed_mps),
+        ]) {
+          const cell = document.createElement("td");
+          cell.textContent = value;
+          row.appendChild(cell);
+        }
+        return row;
+      }));
+    }
+
+    function addPoints(points) {
+      for (const p of points) {
+        const latLng = [p.lat, p.lon];
+        if (!lines[p.segment]) {
+          lines[p.segment] = L.polyline([], { color: "#0f766e", weight: 3 }).addTo(map);
+        }
+        lines[p.segment].addLatLng(latLng);
+      }
+      if (points.length === 0) return;
+      const last = points[points.length - 1];
+      if (!marker) {
+        marker = L.circleMarker([last.lat, last.lon], {
+          radius: 8, color: "#fff", weight: 2, fillColor: "#dc2626", fillOpacity: 1,
+        }).addTo(map);
+      } else {
+        marker.setLatLng([last.lat, last.lon]);
+      }
+      const all = Object.values(lines).flatMap((line) => line.getLatLngs());
+      if (!fitted && all.length > 0) {
+        map.fitBounds(all, { padding: [16, 16], maxZoom: 16 });
+        fitted = true;
+      } else if (!map.getBounds().contains([last.lat, last.lon])) {
+        map.panTo([last.lat, last.lon]);
+      }
+    }
+
+    // A viewer who has lost access (or sees the finish) must not keep the
+    // route on screen: remove the data, not just hide it.
+    function endView(message, activityUrl) {
+      clearInterval(timer);
+      timer = null;
+      const data = document.getElementById("live-data");
+      if (data && !isOwner) {
+        map.remove();
+        data.remove();
+      }
+      document.getElementById("live-ended").hidden = false;
+      if (message) setText("live-ended-message", message);
+      const link = document.getElementById("live-ended-link");
+      if (activityUrl) {
+        link.querySelector("a").href = activityUrl;
+        link.hidden = false;
+      }
+      const lastUpdateEl = document.getElementById("live-last-update");
+      if (lastUpdateEl) lastUpdateEl.remove();
+      setText("live-state", "Finished");
+    }
+
+    async function poll() {
+      let response;
+      try {
+        response = await fetch(`${pollUrl}?from=${nextIndex}`, { headers: { Accept: "application/json" } });
+      } catch (e) {
+        return;  // Our own network blip: try again next tick.
+      }
+      if (response.status === 404) {
+        setText("live-state", "Unavailable");
+        endView("This live activity is no longer shared with you.", null);
+        return;
+      }
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.status === "finished" && !data.points) {
+        endView("This activity has finished.", data.activity_url);
+        return;
+      }
+      if (data.server_now) clockSkewMs = new Date(data.server_now).getTime() - Date.now();
+      lastUpdate = new Date(data.last_update_at);
+      setText("live-state", data.state === "paused" ? "Paused" : (data.status === "finished" ? "Finished" : "Live"));
+      addPoints(data.points);
+      nextIndex = data.next_index;
+      renderMetrics(data.metrics);
+      renderLastUpdate();
+      if (data.more) return poll();
+      if (data.status === "finished") {
+        const msg = data.activity_url
+          ? "This activity has finished and been saved."
+          : "This activity has finished. It'll be saved here once the phone uploads it.";
+        endView(msg, data.activity_url);
+      }
+    }
+
+    poll();
+    {% if status == "live" %}
+    timer = setInterval(poll, pollMs);
+    setInterval(renderLastUpdate, 15000);
+    {% endif %}
+  })();
+</script>
+{% endif %}
+{% endblock %}

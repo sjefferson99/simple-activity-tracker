@@ -6,12 +6,22 @@
 {% block content %}
 <h1>Activities</h1>
 
+<nav class="list-tabs" aria-label="Whose activities">
+  <a href="/" class="list-tab{% if tab == 'mine' %} active{% endif %}"{% if tab == 'mine' %} aria-current="page"{% endif %}>Mine</a>
+  <a href="/?tab=shared" class="list-tab{% if tab == 'shared' %} active{% endif %}"{% if tab == 'shared' %} aria-current="page"{% endif %}>Shared with me</a>
+</nav>
+
+{% include "partials/live_now.html" %}
+
+{% if tab == "mine" %}
 <form id="export-form" action="/export" method="get">
   <input type="hidden" name="selection" value="1">
 </form>
+{% endif %}
 {% include "partials/activity_search_form.html" %}
 {% include "partials/activity_list_or_empty.html" %}
 
+{% if tab == "mine" %}
 <div class="card">
   <h2>Upload a GPX</h2>
   <p class="muted">Have a GPS track from another device (a Garmin, another app, etc.)? Upload the .gpx
@@ -66,6 +76,7 @@
   </form>
   <div id="import-strava-result"></div>
 </div>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script src="/static/vendor/leaflet/leaflet.js"></script>
@@ -81,7 +92,7 @@
   // whatever was last typed, not what the restored URL actually reflects.
   const SEARCH_FIELD_DEFAULTS = {
     q: "", min_km: "", max_km: "", lat: "", lon: "", radius_km: "",
-    sort: "date", dir: "desc", per_page: "20", geo: "either",
+    sort: "date", dir: "desc", per_page: "20", geo: "either", owner: "",
   };
 
   function syncSearchFormFromUrl() {

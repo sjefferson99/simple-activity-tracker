@@ -2,10 +2,19 @@ import math
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from app.validation import (
     EMAIL_MAX_LENGTH,
+    LIVE_POINTS_MAX_PER_REQUEST,
+    LIVE_VIEWERS_MAX,
     NAME_MAX_LENGTH,
     NOTES_MAX_LENGTH,
     PASSWORD_MAX_LENGTH,
@@ -487,6 +496,96 @@ class ServerInfoOut(BaseModel):
     version: str
     api_level: int
     min_app_api_level: int
+
+
+# --- live tracking and sharing (issue #130, API level 2) -------------------
+
+
+class UserDirectoryEntry(BaseModel):
+    """Another user, as anyone signed in may see them: never their email."""
+
+    id: str
+    display_name: str
+
+
+class UserDirectoryResponse(BaseModel):
+    users: list[UserDirectoryEntry]
+
+
+class ShareOut(BaseModel):
+    viewer_id: str
+    display_name: str
+    can_view_live: bool
+    can_view_history: bool
+
+
+class MySharesResponse(BaseModel):
+    live_sharing_paused: bool
+    shares: list[ShareOut]
+
+
+class LiveSharingRequest(BaseModel):
+    """The phone's whole live-sharing setting in one idempotent document, so
+    a change queued while offline can be replayed as-is (last write wins).
+    Sets the Live grant for exactly `live_viewer_ids`; History is untouched."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    live_sharing_paused: bool
+    live_viewer_ids: list[str] = Field(default_factory=list, max_length=LIVE_VIEWERS_MAX)
+
+
+class LiveSessionIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    activity_type: Literal["running", "cycling", "walking"]
+    # Aware only: a naive time can't be stored (TZDateTime), and must be a 422
+    # here rather than a failure at commit time, after the response is sent.
+    started_at: AwareDatetime
+    split_plan: SplitPlanIn | None = None
+
+
+class LivePointIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    t: AwareDatetime  # see LiveSessionIn.started_at
+    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
+    ele: float | None = Field(default=None, ge=-1000, le=10000, allow_inf_nan=False)
+    accuracy: float | None = Field(default=None, ge=0, le=100_000, allow_inf_nan=False)
+    speed: float | None = Field(default=None, ge=0, le=1000, allow_inf_nan=False)
+    # Increments on each resume after a pause.
+    segment: int = Field(default=0, ge=0, le=10_000)
+
+
+class LiveMetricsIn(BaseModel):
+    """What the phone currently shows, displayed verbatim on the live page."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    distance_meters: float = Field(ge=0, allow_inf_nan=False)
+    elapsed_seconds: float = Field(ge=0, allow_inf_nan=False)
+    moving_seconds: float = Field(ge=0, allow_inf_nan=False)
+    avg_speed_mps: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    current_speed_mps: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    splits: list[SplitSummary] = Field(default_factory=list, max_length=SPLITS_MAX_COUNT)
+
+
+class LivePointsIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    from_index: int = Field(ge=0)
+    points: list[LivePointIn] = Field(default_factory=list, max_length=LIVE_POINTS_MAX_PER_REQUEST)
+    metrics: LiveMetricsIn | None = None
+    state: Literal["active", "paused", "finished"] = "active"
+
+
+class LiveSessionStateOut(BaseModel):
+    """`next_index` is the next point the server expects; the phone resends
+    from there. `state` is the server's view of the session."""
+
+    next_index: int
+    state: Literal["active", "paused", "finished", "converted"]
 
 
 class ErrorDetail(BaseModel):

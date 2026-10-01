@@ -9,6 +9,17 @@
   </div>
 </div>
 <div class="card">
+  <h2>Sharing</h2>
+  <p class="muted"><strong>Live</strong> lets someone follow an activity while you record it; it ends
+  when you finish. <strong>History</strong> lets them see your finished activities under "Shared with
+  me". Either way it's read-only: they can't edit, download or export anything, and any change here
+  takes effect immediately. To share a single finished activity instead, use the Sharing section on
+  that activity's page.</p>
+  <div id="share-list">
+    {% include "partials/share_list.html" %}
+  </div>
+</div>
+<div class="card">
   <h2>Sessions</h2>
   <p class="muted">Browsers currently signed in to your account.</p>
   <div id="session-list">

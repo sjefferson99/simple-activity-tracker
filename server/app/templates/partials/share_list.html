@@ -1,0 +1,57 @@
+{% if share_error %}<div class="error-banner">{{ share_error }}</div>{% endif %}
+<label class="radio-label share-pause">
+  <input type="checkbox" name="paused" {% if live_sharing_paused %}checked{% endif %}
+         hx-put="/settings/live-sharing" hx-include="this" hx-target="#share-list" hx-trigger="change">
+  Don't live share
+</label>
+<p class="muted">{% if live_sharing_paused %}Nobody can watch your activities live, including the people
+ticked under Live below. Your list is kept for when you turn this off.{% else %}People ticked under Live
+can watch your activities while you record them, as soon as the phone uploads them.{% endif %}</p>
+{% if shares %}
+<table class="share-table">
+  <thead><tr><th>Person</th><th>Live</th><th>History</th><th></th></tr></thead>
+  <tbody>
+    {% for viewer, share in shares %}
+    <tr>
+      <td>{{ viewer.display_name }}</td>
+      <td>
+        <input type="checkbox" name="live" aria-label="{{ viewer.display_name }} can watch live"
+               {% if share.can_view_live %}checked{% endif %}
+               hx-patch="/settings/shares/{{ viewer.id }}" hx-include="closest tr"
+               hx-target="#share-list" hx-trigger="change">
+      </td>
+      <td>
+        <input type="checkbox" name="history" aria-label="{{ viewer.display_name }} can see history"
+               {% if share.can_view_history %}checked{% endif %}
+               hx-patch="/settings/shares/{{ viewer.id }}" hx-include="closest tr"
+               hx-target="#share-list" hx-trigger="change">
+      </td>
+      <td class="text-right">
+        <button class="secondary"
+                hx-delete="/settings/shares/{{ viewer.id }}"
+                hx-target="#share-list"
+                hx-confirm="Stop sharing with {{ viewer.display_name }}?">
+          Remove
+        </button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">You aren't sharing with anyone.</p>
+{% endif %}
+{% if share_candidates %}
+<form class="form-row share-add" hx-post="/settings/shares" hx-target="#share-list">
+  <label for="share-viewer">Share with</label>
+  <select id="share-viewer" name="viewer_id" required>
+    <option value="" selected disabled>Choose a user…</option>
+    {% for candidate in share_candidates %}
+    <option value="{{ candidate.id }}">{{ candidate.display_name }}</option>
+    {% endfor %}
+  </select>
+  <label class="radio-label"><input type="checkbox" name="live" checked>Live</label>
+  <label class="radio-label"><input type="checkbox" name="history" checked>History</label>
+  <button type="submit">Share</button>
+</form>
+{% endif %}

@@ -1,12 +1,14 @@
 {% for activity in activities %}
 <div class="activity-list-item">
   <div class="activity-select-row">
+    {% if tab != "shared" %}
     <input type="checkbox" class="activity-select" name="activity_ids" value="{{ activity.id }}" form="export-form">
+    {% endif %}
     <div>
-      <a href="/activities/{{ activity.id }}">{{ activity.title or activity.started_at.isoformat() }}</a>
+      <a href="{{ '/shared/activities/' if tab == 'shared' else '/activities/' }}{{ activity.id }}">{{ activity.title or activity.started_at.isoformat() }}</a>
       <span class="badge type-{{ activity.activity_type }}">{{ {"cycling": "Cycle", "walking": "Walk"}.get(activity.activity_type, "Run") }}</span>
       {% for tag in activity.tags %}<span class="badge">{{ tag.name }}</span>{% endfor %}
-      <div class="muted"><time datetime="{{ activity.started_at.isoformat() }}" class="local-time" data-format="date-time">{{ activity.started_at.isoformat() }}</time>{% if activity.device_name %} · {{ activity.device_name }}{% endif %}</div>
+      <div class="muted"><time datetime="{{ activity.started_at.isoformat() }}" class="local-time" data-format="date-time">{{ activity.started_at.isoformat() }}</time>{% if activity.owner_name %} · {{ activity.owner_name }}{% endif %}{% if activity.device_name %} · {{ activity.device_name }}{% endif %}</div>
     </div>
   </div>
   <div class="text-right">

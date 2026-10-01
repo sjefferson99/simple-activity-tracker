@@ -1,0 +1,31 @@
+{# Live sessions above the activity list (issue #130). Mine: the owner's own
+   sessions that haven't become an activity yet. Shared: sessions the viewer
+   may watch right now. On Shared the card is always shown, with a message
+   when empty, so it's clear where live runs appear; on Mine it only appears
+   when there's something in it. The wrapper refreshes itself either way, so
+   a run that starts or ends while the page is open shows up without a
+   reload. #}
+<div id="live-now" hx-get="/live-now?tab={{ tab }}" hx-trigger="every 30s" hx-select="#live-now" hx-swap="outerHTML">
+{% if live_sessions or tab == "shared" %}
+<div class="card live-now">
+  <h2>{{ "Live and unsaved" if tab == "mine" else "Live now" }}</h2>
+  {% if live_sessions %}
+  <ul class="share-list">
+    {% for item in live_sessions %}
+    <li>
+      <span>
+        <a href="/live/{{ item.id }}">{{ item.title }}</a>
+        <span class="badge {{ 'live-badge' if item.state == 'active' else '' }}">{{ item.state_label }}</span>
+        <span class="muted">· started <time datetime="{{ item.started_at.isoformat() }}" class="local-time" data-format="date-time">{{ item.started_at.isoformat() }}</time>,
+          last update <time datetime="{{ item.last_update_at.isoformat() }}" class="local-time" data-format="date-time">{{ item.last_update_at.isoformat() }}</time></span>
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted live-now-empty">Nobody is sharing a live activity with you right now. When someone
+  does, it shows here and updates on its own.</p>
+  {% endif %}
+</div>
+{% endif %}
+</div>

@@ -580,7 +580,7 @@ def test_activity_search_resets_to_page_one(app_client, sample_gpx_bytes, auth_h
     response = app_client.get("/", params={"q": "sunrise", "per_page": "20"})
     assert response.status_code == 200
     assert "Sunrise Loop" in response.text
-    assert 'aria-current="page"' not in response.text  # only 1 match: no pagination at all
+    assert 'class="pagination"' not in response.text  # only 1 match: no pagination at all
 
 
 def test_activity_distance_filter_min_only(app_client, sample_gpx_bytes, auth_headers):

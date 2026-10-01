@@ -13,6 +13,7 @@ import 'api_exception.dart';
 import 'cert_trust_store.dart';
 import 'dto/activity_list_item_dto.dart';
 import 'dto/analysis_dto.dart';
+import 'dto/live_dto.dart';
 import 'dto/login_response_dto.dart';
 import 'dto/run_dto.dart';
 import 'dto/server_info_dto.dart';
@@ -357,6 +358,113 @@ class HttpApiClient implements ApiClient {
     );
   }
 
+  @override
+  Future<LiveSessionStateDto> putLiveSession({
+    required String baseUrl,
+    required String token,
+    required String clientActivityId,
+    required LiveSessionRequestDto request,
+  }) async {
+    final response = await _send(
+      () => _client
+          .put(
+            _uri(baseUrl, '/api/v1/live/$clientActivityId'),
+            headers: {..._authHeaders(token), 'Content-Type': 'application/json'},
+            body: jsonEncode(request.toJson()),
+          )
+          .timeout(_requestTimeout),
+    );
+    return LiveSessionStateDto.fromJson(_decodeJson(response));
+  }
+
+  @override
+  Future<LiveSessionStateDto> postLivePoints({
+    required String baseUrl,
+    required String token,
+    required String clientActivityId,
+    required LivePointsRequestDto request,
+  }) async {
+    try {
+      final response = await _send(
+        () => _client
+            .post(
+              _uri(baseUrl, '/api/v1/live/$clientActivityId/points'),
+              headers: {..._authHeaders(token), 'Content-Type': 'application/json'},
+              body: jsonEncode(request.toJson()),
+            )
+            .timeout(_requestTimeout),
+      );
+      return LiveSessionStateDto.fromJson(_decodeJson(response));
+    } on ApiRejectedException catch (e) {
+      // 409 = a gap: the server expects points from an earlier index and
+      // says which in error.next_index. That's an answer, not a failure.
+      final nextIndex = e.statusCode == 409 ? e.errorField('next_index') : null;
+      if (nextIndex is int) return LiveSessionStateDto(nextIndex: nextIndex, state: 'active');
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> deleteLiveSession({
+    required String baseUrl,
+    required String token,
+    required String clientActivityId,
+  }) async {
+    try {
+      await _send(
+        () => _client
+            .delete(
+              _uri(baseUrl, '/api/v1/live/$clientActivityId'),
+              headers: _authHeaders(token),
+            )
+            .timeout(_requestTimeout),
+      );
+    } on ApiRejectedException catch (e) {
+      if (e.statusCode != 404) rethrow;
+    }
+  }
+
+  @override
+  Future<List<UserDirectoryEntryDto>> listUsers({
+    required String baseUrl,
+    required String token,
+  }) async {
+    final response = await _send(
+      () => _client
+          .get(_uri(baseUrl, '/api/v1/users'), headers: _authHeaders(token))
+          .timeout(_requestTimeout),
+    );
+    return UserDirectoryEntryDto.listFromJson(_decodeJson(response));
+  }
+
+  @override
+  Future<MySharesDto> getMyShares({required String baseUrl, required String token}) async {
+    final response = await _send(
+      () => _client
+          .get(_uri(baseUrl, '/api/v1/me/shares'), headers: _authHeaders(token))
+          .timeout(_requestTimeout),
+    );
+    return MySharesDto.fromJson(_decodeJson(response));
+  }
+
+  @override
+  Future<MySharesDto> putLiveSharing({
+    required String baseUrl,
+    required String token,
+    required LiveSharingRequestDto request,
+  }) async {
+    final response = await _send(
+      () => _client
+          .put(
+            _uri(baseUrl, '/api/v1/me/live-sharing'),
+            headers: {..._authHeaders(token), 'Content-Type': 'application/json'},
+            body: jsonEncode(request.toJson()),
+          )
+          .timeout(_requestTimeout),
+    );
+    return MySharesDto.fromJson(_decodeJson(response));
+  }
+
   Map<String, dynamic> _decodeJson(http.Response response) =>
       jsonDecode(response.body) as Map<String, dynamic>;
 
@@ -408,7 +516,21 @@ class HttpApiClient implements ApiClient {
         statusCode: status,
       );
     }
-    throw ApiRejectedException(_errorMessage(response), statusCode: status);
+    throw ApiRejectedException(
+      _errorMessage(response),
+      statusCode: status,
+      errorBody: _errorObject(response),
+    );
+  }
+
+  /// The `error` object of a `{"error": {...}}` body, or null.
+  Map<String, dynamic>? _errorObject(http.Response response) {
+    try {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      return body['error'] as Map<String, dynamic>?;
+    } on Object {
+      return null;
+    }
   }
 
   /// The server's error shape is `{"error": {"code", "message"}}` (§5.2) —

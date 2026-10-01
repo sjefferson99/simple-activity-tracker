@@ -10,5 +10,5 @@ older app sends or reads — CI requires it for any change oasdiff classes as
 breaking. Prefer making the change non-breaking instead.
 """
 
-API_LEVEL = 1
+API_LEVEL = 2
 MIN_APP_API_LEVEL = 0

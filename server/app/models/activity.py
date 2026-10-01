@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -59,6 +59,10 @@ class Activity(Base):
     # Set once at upload/import time, never backfilled or touched by
     # reanalysis — same rule as split_type/split_value above.
     split_plan: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # Saved from a live session (issue #130 D6) because the phone's own upload
+    # hadn't arrived. That upload, if it ever does, replaces this activity's
+    # GPX/summary/analysis in place and clears the flag.
+    recovered_from_live: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
     # selectin avoids N+1 on the activity list page, which renders every

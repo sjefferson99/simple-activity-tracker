@@ -15,6 +15,7 @@ from app.api.v1.schemas import (
 from app.audit import log_audit_event
 from app.auth.current_user import CurrentAdmin
 from app.auth.passwords import hash_password
+from app.cascades import delete_activity_dependents, delete_user_dependents
 from app.config import get_settings
 from app.deps import db_session
 from app.models.user import User
@@ -213,6 +214,7 @@ def delete_user(
             # FK constraint for any user who has ever tagged an activity
             # (every Strava import creates a "Strava" tag).
             activity.tags.clear()
+            delete_activity_dependents(session, activity.id)
             blob_keys.append(activity.gpx_blob_key)
             activities_repo.delete(activity)
         if page.next_cursor is None:
@@ -222,6 +224,7 @@ def delete_user(
     for tag in tags_repo.list_for_user(target.id):
         session.delete(tag)
 
+    delete_user_dependents(session, target.id)
     SqlAlchemyDeviceTokenRepository(session).delete_all_for_user(target.id)
     SqlAlchemyWebSessionRepository(session).delete_all_for_user(target.id)
     session.flush()

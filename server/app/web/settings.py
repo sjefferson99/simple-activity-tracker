@@ -13,6 +13,7 @@ from app.repositories.web_sessions import SqlAlchemyWebSessionRepository
 from app.validation import ValidationFailedError, validate_password
 from app.web.deps import CurrentWebSessionId, WebUser, require_htmx_header
 from app.web.login import set_session_cookie
+from app.web.sharing import settings_share_context
 from app.web.templating import templates
 
 router = APIRouter(tags=["web"], include_in_schema=False)
@@ -34,7 +35,11 @@ def settings_page(
     session: Annotated[Session, Depends(db_session)],
     current_session_id: CurrentWebSessionId,
 ) -> Response:
-    context = {"user": user, **_session_list_context(session, user.id, current_session_id)}
+    context = {
+        "user": user,
+        **_session_list_context(session, user.id, current_session_id),
+        **settings_share_context(session, user),
+    }
     return templates.TemplateResponse(request, "settings.html", context)
 
 

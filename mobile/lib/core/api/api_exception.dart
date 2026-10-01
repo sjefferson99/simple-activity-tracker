@@ -42,7 +42,14 @@ class ApiServerException extends ApiException {
 class ApiRejectedException extends ApiException {
   final int statusCode;
 
-  const ApiRejectedException(super.message, {required this.statusCode});
+  /// The server's `error` object, when the body had one — for the few
+  /// endpoints whose errors carry more than a message (a live upload's 409
+  /// says which point index to resend from).
+  final Map<String, dynamic>? errorBody;
+
+  const ApiRejectedException(super.message, {required this.statusCode, this.errorBody});
+
+  Object? errorField(String key) => errorBody?[key];
 }
 
 /// TLS handshake failed because the server presented a certificate the

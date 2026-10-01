@@ -8,6 +8,7 @@ import '../version/app_version.dart';
 import 'cert_trust_store.dart';
 import 'dto/activity_list_item_dto.dart';
 import 'dto/analysis_dto.dart';
+import 'dto/live_dto.dart';
 import 'dto/login_response_dto.dart';
 import 'dto/run_dto.dart';
 import 'dto/server_info_dto.dart';
@@ -110,5 +111,55 @@ abstract class ApiClient {
     required String baseUrl,
     required String token,
     required String configId,
+  });
+
+  // --- live tracking and sharing (issue #130, API level 2) -----------------
+  // Only call these when the server's API level is at least
+  // ApiLevels.liveTracking (docs/VERSIONING.md §3.2).
+
+  /// Creates (or updates the metadata of) the caller's live session for
+  /// [clientActivityId]. Idempotent. Throws [ApiRejectedException] with
+  /// `statusCode == 410` once the session has become an activity.
+  Future<LiveSessionStateDto> putLiveSession({
+    required String baseUrl,
+    required String token,
+    required String clientActivityId,
+    required LiveSessionRequestDto request,
+  });
+
+  /// Uploads a batch of points. A gap (the server expects an earlier index)
+  /// is not an error: the returned [LiveSessionStateDto.nextIndex] is where
+  /// to resend from. Throws [ApiRejectedException] with `statusCode == 410`
+  /// once the session has become an activity (stop uploading), or 404 if the
+  /// server has no such session (PUT it again).
+  Future<LiveSessionStateDto> postLivePoints({
+    required String baseUrl,
+    required String token,
+    required String clientActivityId,
+    required LivePointsRequestDto request,
+  });
+
+  /// Deletes a live session for a run discarded on the phone. A session the
+  /// server doesn't have (or that's already an activity) is not an error.
+  Future<void> deleteLiveSession({
+    required String baseUrl,
+    required String token,
+    required String clientActivityId,
+  });
+
+  /// Every other enabled user on the server, by display name.
+  Future<List<UserDirectoryEntryDto>> listUsers({
+    required String baseUrl,
+    required String token,
+  });
+
+  Future<MySharesDto> getMyShares({required String baseUrl, required String token});
+
+  /// Sets exactly which users get Live access, and the "Don't live share"
+  /// pause. History grants are left alone.
+  Future<MySharesDto> putLiveSharing({
+    required String baseUrl,
+    required String token,
+    required LiveSharingRequestDto request,
   });
 }

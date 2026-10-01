@@ -18,7 +18,7 @@
     <span class="muted">Sort by:</span>
     {{ sort_link("Date", "date") }}
     {{ sort_link("Distance", "distance") }}
-    {% if filters_active %}
+    {% if filters_active and tab != "shared" %}
     <a class="button secondary" href="{{ export_filtered_url(list_query) }}">Export filtered</a>
     {% endif %}
   </div>

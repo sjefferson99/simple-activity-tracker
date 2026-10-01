@@ -54,6 +54,7 @@ in, but it always knows whether it changed the API.
 |---|---|---|
 | 0 | v1.0.0 – v1.2.4 (no `/server-info`) | Upload accepts only the v1.0.0 fields: no `max_speed_mps`, no `elevation_gain_meters`, no split `target_speed_mps`. `walking` and `/split-configs` exist only on v1.2.4, so the app must cope with them being missing (§3). Unknown fields → **422** |
 | 1 | from #141 | Everything v1.2.4 accepts, plus `/server-info`. **Unknown request fields are ignored, not rejected** |
+| 2 | from #130 | Live tracking and sharing: `PUT/DELETE /live/{client_activity_id}`, `POST /live/{client_activity_id}/points`, `GET /users`, `GET /me/shares`, `PUT /me/live-sharing`. Upload payload unchanged ([LIVE-TRACKING-PLAN.md](LIVE-TRACKING-PLAN.md) §2.3) |
 
 Add a row here whenever `API_LEVEL` goes up.
 

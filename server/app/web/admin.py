@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import log_audit_event
 from app.auth.passwords import hash_password
+from app.cascades import delete_activity_dependents, delete_user_dependents
 from app.config import get_settings
 from app.deps import db_session
 from app.models.user import User
@@ -293,6 +294,7 @@ def admin_delete_user(
             # user (e.g. from a Strava import) must be cleared/deleted before
             # repo.delete(target) below, or that delete fails its FK check.
             activity.tags.clear()
+            delete_activity_dependents(session, activity.id)
             blob_keys.append(activity.gpx_blob_key)
             activities_repo.delete(activity)
         if page.next_cursor is None:
@@ -302,6 +304,7 @@ def admin_delete_user(
     for tag in tags_repo.list_for_user(target.id):
         session.delete(tag)
 
+    delete_user_dependents(session, target.id)
     SqlAlchemyDeviceTokenRepository(session).delete_all_for_user(target.id)
     SqlAlchemyWebSessionRepository(session).delete_all_for_user(target.id)
     session.flush()
