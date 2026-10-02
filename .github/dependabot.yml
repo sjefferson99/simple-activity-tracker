@@ -20,12 +20,12 @@ updates:
     schedule:
       interval: "weekly"
 
-  - package-ecosystem: "docker"
+  - package-ecosystem: "docker-compose"
     directory: "/deploy"
     schedule:
       interval: "weekly"
 
-  - package-ecosystem: "docker"
+  - package-ecosystem: "docker-compose"
     directory: "/deploy/standalone-tls"
     schedule:
       interval: "weekly"
