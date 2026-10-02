@@ -42,7 +42,7 @@ services:
     # Healthcheck is baked into the image (server/Dockerfile) — no override needed here.
 
   proxy:
-    image: nginx:1.27-alpine
+    image: nginx:1.31-alpine
     ports:
       - "443:443"
       - "80:80"                 # plain-http → https redirect only, see nginx.conf
