@@ -95,6 +95,21 @@ Applies to any server change of more than trivial size. One plan item (or tightl
 - A review fix that spans open branches goes on **one** branch (the earliest affected) and flows downstream by rebase, never re-applied by hand (that creates real conflicts).
 - Before merging, check `gh pr view <N> --json mergeable,mergeStateStatus` is `MERGEABLE`/`CLEAN`. CI green is not the same as merge-clean. A bare "merge commit cannot be cleanly created" needs that query (or `git merge-tree`) to diagnose, not a retry.
 
+## New machine setup
+
+Check first (`Get-Command uv, gh, flutter, docker`); a fresh Windows machine typically has only Docker Desktop. The `python` on PATH may be just the Microsoft Store stub, so don't rely on it.
+
+- **uv** (server): `winget install --id astral-sh.uv -e` from a normal (non-admin) PowerShell, then restart the terminal/VS Code. uv is a standalone binary: no system Python needed. `uv sync` in `server/` creates `server/.venv` and downloads Python 3.12 itself.
+- **gh** (PRs, Dependabot, CI status): `winget install --id GitHub.cli -e`, then `gh auth login`.
+- **Flutter** (mobile only): see docs/PLAN.md §1.
+- Agent-side installs may be blocked by the permission classifier; then give the user the commands above rather than retrying.
+- **Fallback without uv:** run the server suite in a throwaway container. Mount the **repo root**, not just `server/`: the contract tests read `../contract/`.
+  ```bash
+  MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/src:ro" -e UV_PROJECT_ENVIRONMENT=/venv -e UV_LINK_MODE=copy python:3.12-slim sh -c '
+  pip install -q --root-user-action=ignore uv==0.5.11; mkdir /w && cp -r /src/server /src/contract /w/ && cd /w/server && rm -rf .venv
+  uv sync --locked -q && uv run ruff check . && uv run ruff format --check . && uv run mypy app && uv run pytest -q'
+  ```
+
 ## Gotchas worth knowing (general, any branch)
 
 ### Windows, shells, tooling
