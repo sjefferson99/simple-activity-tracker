@@ -52,7 +52,7 @@ jobs:
       - name: Detect breaking API changes (oasdiff)
         if: github.event_name == 'pull_request'
         id: oasdiff
-        uses: oasdiff/oasdiff-action/breaking@5e81b5c380accc6b523f9d32a637ca630e33620b # v0.1.17
+        uses: oasdiff/oasdiff-action/breaking@9ce3a29eb0e6478dd0140932a678c7fb59d08f22 # v0.1.20
         with:
           base: .api-base/openapi.json
           revision: server/openapi.json
