@@ -73,7 +73,13 @@ class FileRunStore implements RunStore {
     final all = await listAll();
     return all.where((record) {
       final status = record.syncStatus;
+      // A persisted `uploading` means the attempt never finished (the app
+      // was killed mid-upload): SyncService runs one pass at a time and
+      // reads the queue only at the start of a pass, so no live upload is
+      // ever in this state when this is called. Re-queue it, or it would
+      // never be retried.
       return status is SyncStatusPending ||
+          status is SyncStatusUploading ||
           (status is SyncStatusFailed && status.retryable);
     }).toList();
   }

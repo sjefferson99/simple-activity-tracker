@@ -249,7 +249,9 @@ class HttpApiClient implements ApiClient {
             ..fields['summary'] = jsonEncode(summaryJson)
             ..files.add(await http.MultipartFile.fromPath('gpx', gpxFile.path));
       final streamed = await _client.send(request).timeout(_requestTimeout);
-      return http.Response.fromStream(streamed);
+      // send() completes once the headers arrive; a body that then stalls
+      // would otherwise hang the sync pass (and every retry queued behind it).
+      return http.Response.fromStream(streamed).timeout(_requestTimeout);
     });
     return RunDto.fromJson(_decodeJson(response));
   }

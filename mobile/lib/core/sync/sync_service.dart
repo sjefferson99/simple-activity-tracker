@@ -390,6 +390,30 @@ class SyncService {
         SyncStatusFailed(error: e.message, attempts: attempts, retryable: true),
       );
       return true;
+    } on FileSystemException catch (e) {
+      // The GPX file is gone or unreadable: retrying can't help.
+      await _setStatus(
+        record.clientRunId,
+        SyncStatusFailed(
+          error: 'Could not read the GPX file: ${e.message}',
+          attempts: _bumpAttempts(record.clientRunId),
+          retryable: false,
+        ),
+      );
+      return true;
+    } on Object catch (e) {
+      // Anything else (e.g. a 2xx whose body isn't the expected JSON) must
+      // still leave `uploading`, or the record sits there for good. Retrying
+      // is safe: the server dedupes on the client run id.
+      await _setStatus(
+        record.clientRunId,
+        SyncStatusFailed(
+          error: 'Upload failed: $e',
+          attempts: _bumpAttempts(record.clientRunId),
+          retryable: true,
+        ),
+      );
+      return true;
     }
   }
 

@@ -11,7 +11,8 @@ abstract class RunStore {
   Future<List<RunRecord>> listAll();
 
   /// Convenience for SyncService: records whose upload isn't finished —
-  /// `pending`, or `failed` with `retryable: true`. Ordered oldest-first by
+  /// `pending`, `failed` with `retryable: true`, or a stale `uploading` left
+  /// behind by an attempt that never completed. Ordered oldest-first by
   /// `summary.startedAt` (a directory listing has no reliable order of its
   /// own), so a queue of several runs uploads in the order they happened.
   Future<List<RunRecord>> listPendingOrRetryable();

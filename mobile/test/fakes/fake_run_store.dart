@@ -27,6 +27,7 @@ class FakeRunStore implements RunStore {
     return all.where((record) {
       final status = record.syncStatus;
       return status is SyncStatusPending ||
+          status is SyncStatusUploading ||
           (status is SyncStatusFailed && status.retryable);
     }).toList();
   }
