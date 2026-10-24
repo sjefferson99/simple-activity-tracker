@@ -98,7 +98,7 @@ void main() {
   );
 
   test(
-    'listPendingOrRetryable excludes uploaded and non-retryable-failed records',
+    'listPendingOrRetryable excludes uploaded and non-retryable-failed records, re-queues stale uploading',
     () async {
       final store = FileRunStore(runsDirPathOverride: tempDir.path);
       await store.save(_record('${tempDir.path}/pending.gpx'));
@@ -129,11 +129,20 @@ void main() {
         ),
       );
 
+      // Stale: an upload interrupted before it could record an outcome.
+      await store.save(
+        _record(
+          '${tempDir.path}/uploading.gpx',
+          syncStatus: const SyncStatusUploading(),
+        ),
+      );
+
       final queue = await store.listPendingOrRetryable();
 
       expect(queue.map((r) => r.gpxPath.split('/').last).toSet(), {
         'pending.gpx',
         'failed_retryable.gpx',
+        'uploading.gpx',
       });
     },
   );

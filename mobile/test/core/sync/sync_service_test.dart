@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage/test/test_flutter_secure_storage_platform.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
@@ -419,6 +421,84 @@ void main() {
       'earlier',
       'later',
     ]);
+  });
+
+  group('a record never stays stuck in uploading', () {
+    Future<SyncService> serviceFor(FakeApiClient api, FakeRunStore store) async {
+      final auth = await _signedInAuthService(api);
+      final connectivity = FakeConnectivityMonitor();
+      final service = SyncService(
+        apiClient: api,
+        runStore: store,
+        authService: auth,
+        connectivity: connectivity,
+      );
+      addTearDown(service.dispose);
+      addTearDown(connectivity.dispose);
+      return service;
+    }
+
+    test(
+      'a persisted uploading (app killed mid-upload) is uploaded again',
+      () async {
+        final api = FakeApiClient();
+        final store = FakeRunStore()
+          ..seed(_record(syncStatus: const SyncStatusUploading()));
+        final service = await serviceFor(api, store);
+
+        service.onAppResumed();
+        await pumpEventQueue();
+
+        expect(api.uploadCallCount, 1);
+        expect(
+          (await store.listAll()).single.syncStatus,
+          isA<SyncStatusUploaded>(),
+        );
+      },
+    );
+
+    test('a non-API error (bad 2xx body) becomes a retryable failure', () async {
+      final api = FakeApiClient()
+        ..uploadRunHandler = ({
+          required baseUrl,
+          required token,
+          required summary,
+          required gpxFile,
+        }) async => throw const FormatException('Unexpected character');
+      final store = FakeRunStore()..seed(_record());
+      final service = await serviceFor(api, store);
+
+      service.runFinished();
+      await pumpEventQueue();
+
+      final status =
+          (await store.listAll()).single.syncStatus as SyncStatusFailed;
+      expect(status.retryable, isTrue);
+      expect(status.error, contains('Unexpected character'));
+    });
+
+    test('a missing GPX file becomes a permanent failure', () async {
+      final api = FakeApiClient()
+        ..uploadRunHandler = ({
+          required baseUrl,
+          required token,
+          required summary,
+          required gpxFile,
+        }) async => throw PathNotFoundException(
+          gpxFile.path,
+          const OSError('No such file or directory', 2),
+          'Cannot open file',
+        );
+      final store = FakeRunStore()..seed(_record());
+      final service = await serviceFor(api, store);
+
+      service.runFinished();
+      await pumpEventQueue();
+
+      final status =
+          (await store.listAll()).single.syncStatus as SyncStatusFailed;
+      expect(status.retryable, isFalse);
+    });
   });
 
   group('periodic retry (found via on-device testing: a same-medium '
