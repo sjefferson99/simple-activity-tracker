@@ -1,3 +1,4 @@
+import '../tracking/split_target.dart';
 import 'current_split_info.dart';
 import 'split.dart';
 
@@ -42,6 +43,13 @@ class LiveMetrics {
   /// same as [distanceMeters].
   final double elevationGainMeters;
 
+  /// The split in progress's live on/off-target verdict, with hysteresis
+  /// (issue #154; see LiveSplitVerdictTracker). Stamped in by the
+  /// controller, not [MetricsEngine], because it depends on the previous
+  /// tick's verdict. Null with no target, within the grace period, or
+  /// wherever no tracker ran (e.g. a reopened run).
+  final SplitVerdict? currentSplitVerdict;
+
   const LiveMetrics({
     required this.elapsed,
     required this.distanceMeters,
@@ -53,6 +61,7 @@ class LiveMetrics {
     this.maxSpeedMps,
     this.elevationGainMeters = 0,
     this.elapsedWallClock = Duration.zero,
+    this.currentSplitVerdict,
   });
 
   LiveMetrics copyWith({Duration? elapsedWallClock}) => LiveMetrics(
@@ -66,6 +75,23 @@ class LiveMetrics {
     currentSplit: currentSplit,
     maxSpeedMps: maxSpeedMps,
     elevationGainMeters: elevationGainMeters,
+    currentSplitVerdict: currentSplitVerdict,
+  );
+
+  /// A copy with [currentSplitVerdict] replaced (null included, which
+  /// [copyWith]'s `??` style can't express).
+  LiveMetrics withCurrentSplitVerdict(SplitVerdict? verdict) => LiveMetrics(
+    elapsed: elapsed,
+    elapsedWallClock: elapsedWallClock,
+    distanceMeters: distanceMeters,
+    avgSpeedMps: avgSpeedMps,
+    completedSplits: completedSplits,
+    currentSplitElapsed: currentSplitElapsed,
+    currentSplitDistanceMeters: currentSplitDistanceMeters,
+    currentSplit: currentSplit,
+    maxSpeedMps: maxSpeedMps,
+    elevationGainMeters: elevationGainMeters,
+    currentSplitVerdict: verdict,
   );
 
   static const zero = LiveMetrics(

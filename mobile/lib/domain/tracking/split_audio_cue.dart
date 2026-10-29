@@ -1,5 +1,6 @@
 import '../models/current_split_info.dart';
 import '../models/live_metrics.dart';
+import 'live_split_verdict.dart';
 import 'split_target.dart';
 
 /// The two kinds of audio cue issue #125 defines — "a new split has
@@ -77,18 +78,13 @@ class SplitAudioCue {
       'rolledOntoRollingSplits: $rolledOntoRollingSplits)';
 }
 
-double? _avgSpeedMps(LiveMetrics metrics) {
-  final elapsedSeconds = metrics.currentSplitElapsed.inMilliseconds / 1000;
-  return elapsedSeconds <= 0
-      ? null
-      : metrics.currentSplitDistanceMeters / elapsedSeconds;
-}
-
-SplitVerdict? _verdictOf(LiveMetrics metrics) => splitVerdict(
-  avgSpeedMps: _avgSpeedMps(metrics),
-  targetSpeedMps: metrics.currentSplit.targetSpeedMps,
-  elapsedInSplit: metrics.currentSplitElapsed,
-);
+/// No verdict *cue* (beep or spoken correction) until a split has this much
+/// moving time — the tile's colour still shows from [splitVerdictGrace]
+/// (issue #154 follow-up). With the ±1.3% band, a split's average flips
+/// most in its first 20-30 s; replaying 112 real completed targeted splits,
+/// 30 s cut verdict cues from 279 (2.5/split) to 184 (1.6/split), while
+/// waiting 60 s only saved ~30 more and silenced a third of short splits.
+const Duration splitVerdictAudioGrace = Duration(seconds: 30);
 
 /// True iff [split] is the exact roll-on tick — see
 /// [SplitAudioCue.rolledOntoRollingSplits].
@@ -110,6 +106,10 @@ bool _isRollOnTick(CurrentSplitInfo split) =>
 /// sounds. The verdict beep for the new split can still fire on a later tick
 /// once that split's own grace period elapses.
 ///
+/// Verdict cues are held until [splitVerdictAudioGrace]; the tick that
+/// crosses it announces the verdict in force then (even if it was already
+/// showing on screen), and only genuine transitions after that.
+///
 /// [previous] being null (the very first tick of a run) never itself
 /// produces a cue — split 1's start is announced separately and immediately
 /// on Start, by [LiveRunController]'s own start-of-activity cue (which
@@ -128,15 +128,22 @@ SplitAudioCue? detectSplitAudioCue({
     );
   }
 
-  final previousVerdict = _verdictOf(previous);
-  final currentVerdict = _verdictOf(current);
-  if (currentVerdict == null || currentVerdict == previousVerdict) {
+  // The live verdict, hysteresis included (issue #154) — the same one the
+  // Split tile shows, so a beep always matches the tile's colour change.
+  final currentVerdict = current.currentSplitVerdict;
+  if (currentVerdict == null) return null;
+  if (current.currentSplitElapsed < splitVerdictAudioGrace) return null;
+
+  // On the tick that crosses the audio grace, nothing has been announced
+  // for this split yet, so the verdict in force is news whatever it was.
+  final crossedAudioGrace = previous.currentSplitElapsed < splitVerdictAudioGrace;
+  if (!crossedAudioGrace && currentVerdict == previous.currentSplitVerdict) {
     return null;
   }
 
   return SplitAudioCue.verdict(
     verdict: currentVerdict,
     split: current.currentSplit,
-    avgSpeedMps: _avgSpeedMps(current),
+    avgSpeedMps: currentSplitAvgSpeedMps(current),
   );
 }

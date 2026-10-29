@@ -6,6 +6,9 @@ from app.analysis.geo_math import haversine_distance_meters, speed_mps_between
 from app.analysis.gpx_parser import SplitPlanData
 from app.analysis.track import Point, Track, drop_inaccurate_points
 
+# 11: split target verdicts use a ±1.3% band instead of ±5% (issue #152),
+# matching mobile's splitTargetTolerance. Stored history is re-judged by the
+# startup auto-reanalyze.
 # 10: moving-time now uses the phone's tuned hysteresis instead of being
 # independently (and, it turns out, inconsistently) derived — issue #50.
 # _StationaryDetector mirrors mobile's own (metrics_engine.dart): entering
@@ -31,16 +34,18 @@ from app.analysis.track import Point, Track, drop_inaccurate_points
 # Bump this whenever the result shape or algorithm changes, then run
 # `simple-activity-tracker-server reanalyze --all` on each deployment so
 # stored analyses catch up — the web UI reads stored results as-is.
-ANALYSIS_VERSION = 10
+ANALYSIS_VERSION = 11
 
-# Green within ±5% of target speed, red outside in either direction — same
+# Green within ±1.3% of target speed (about ±4 s/km at 5:00/km), red outside
+# in either direction — one relative band for pace and speed targets alike
+# (issue #152; see README "How split targets are judged"). Same
 # rule and tolerance as mobile's splitTargetTolerance
 # (mobile/lib/domain/tracking/split_target.dart), so a split judged on the
 # live screen is judged identically once the activity is analyzed here.
 # Unlike the live tile, a finished split's verdict has no grace period: the
 # live grace only exists to avoid tinting a split that has barely started,
 # which is not a concept a completed split has.
-_SPLIT_TARGET_TOLERANCE = 0.05
+_SPLIT_TARGET_TOLERANCE = 0.013
 
 # ~2:08 min/km for running; a cyclist routinely exceeds that, so use a higher
 # cap for cycling — mirrors mobile MetricsEngine's per-ActivityMode

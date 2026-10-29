@@ -152,7 +152,7 @@ String _paceSuffix(SpeedUnit unit) => unit == SpeedUnit.minMi ? 'mi' : 'km';
 /// `domain/tracking/split_target.dart`, which this deliberately does not
 /// depend on (units.dart has no dependents in `domain/`, only the reverse).
 String formatSpeedDelta(double avgMps, double targetMps, SpeedUnit unit) {
-  const tolerance = 0.05; // mirrors splitTargetTolerance; duplicated to keep
+  const tolerance = 0.013; // mirrors splitTargetTolerance; duplicated to keep
   // units.dart dependency-free of domain/tracking — see doc above.
   final ratio = avgMps / targetMps;
   if (ratio >= 1 - tolerance && ratio <= 1 + tolerance) return 'on target';
@@ -348,7 +348,7 @@ String? speakSpeedOrPace(double? mps, SpeedUnit unit) {
 /// [formatSpeedDelta]'s direction/tolerance logic exactly, phrased for
 /// speech instead of a compact tile string.
 String speakSpeedDelta(double avgMps, double targetMps, SpeedUnit unit) {
-  const tolerance = 0.05; // mirrors splitTargetTolerance — see formatSpeedDelta.
+  const tolerance = 0.013; // mirrors splitTargetTolerance — see formatSpeedDelta.
   final ratio = avgMps / targetMps;
   if (ratio >= 1 - tolerance && ratio <= 1 + tolerance) return 'back on target';
 

@@ -50,7 +50,7 @@ void main() {
       );
     });
 
-    test('returns onTarget just inside the +5% boundary', () {
+    test('returns onTarget just inside the +tolerance boundary', () {
       expect(
         splitVerdict(
           avgSpeedMps: target * (1 + splitTargetTolerance) - 0.0001,
@@ -61,7 +61,7 @@ void main() {
       );
     });
 
-    test('returns tooFast just outside the +5% boundary', () {
+    test('returns tooFast just outside the +tolerance boundary', () {
       expect(
         splitVerdict(
           avgSpeedMps: target * (1 + splitTargetTolerance) + 0.0001,
@@ -72,7 +72,7 @@ void main() {
       );
     });
 
-    test('returns onTarget just inside the -5% boundary', () {
+    test('returns onTarget just inside the -tolerance boundary', () {
       expect(
         splitVerdict(
           avgSpeedMps: target * (1 - splitTargetTolerance) + 0.0001,
@@ -83,7 +83,7 @@ void main() {
       );
     });
 
-    test('returns tooSlow just outside the -5% boundary', () {
+    test('returns tooSlow just outside the -tolerance boundary', () {
       expect(
         splitVerdict(
           avgSpeedMps: target * (1 - splitTargetTolerance) - 0.0001,

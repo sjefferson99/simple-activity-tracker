@@ -180,10 +180,15 @@ void main() {
 
     test('reports "on target" within tolerance', () {
       expect(formatSpeedDelta(targetMps, targetMps, SpeedUnit.minKm), 'on target');
-      // 4% faster is still within the 5% band.
+      // 1.2% faster is still within the ±1.3% band (issue #152)...
       expect(
-        formatSpeedDelta(targetMps * 1.04, targetMps, SpeedUnit.minKm),
+        formatSpeedDelta(targetMps * 1.012, targetMps, SpeedUnit.minKm),
         'on target',
+      );
+      // ...1.5% faster is not.
+      expect(
+        formatSpeedDelta(targetMps * 1.015, targetMps, SpeedUnit.minKm),
+        isNot('on target'),
       );
     });
 

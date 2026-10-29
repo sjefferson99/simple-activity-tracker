@@ -34,6 +34,7 @@ import '../../domain/tracking/metrics_engine.dart';
 import '../../domain/tracking/display_speed_window.dart';
 import '../../domain/tracking/run_clock.dart';
 import '../../domain/tracking/run_phase.dart';
+import '../../domain/tracking/live_split_verdict.dart';
 import '../../domain/tracking/split_audio_cue.dart';
 import '../../domain/tracking/split_audio_settings.dart';
 import '../../domain/tracking/split_plan.dart';
@@ -94,6 +95,11 @@ class LiveRunController extends Notifier<LiveRunState> {
   // a cue can never fire comparing across two different runs.
   LiveMetrics? _previousMetricsForAudio;
   SplitAudioSettings? _audioSettings;
+
+  // The split in progress's live verdict, with hysteresis (issue #154) —
+  // stamped onto every LiveMetrics this controller hands out, so the Split
+  // tile and the audio cues share one verdict. Reset with the audio state.
+  final _splitVerdictTracker = LiveSplitVerdictTracker();
 
   // Bumped every time a run starts. stop() closes over the token for the
   // run it's finishing, so a slow export that resolves after the user has
@@ -175,6 +181,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     await ref.read(splitAudioSettingsControllerProvider.notifier).ensureLoaded();
     _audioSettings = ref.read(splitAudioSettingsControllerProvider);
     _previousMetricsForAudio = null;
+    _splitVerdictTracker.reset();
     _metricsEngine = MetricsEngine(
       mode: _activityMode!,
       splitPlan: _splitPlan!,
@@ -298,6 +305,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     _splitPlan = null;
     _audioSettings = null;
     _previousMetricsForAudio = null;
+    _splitVerdictTracker.reset();
 
     state = LiveRunFinished(
       metrics: metrics,
@@ -413,14 +421,15 @@ class LiveRunController extends Notifier<LiveRunState> {
     return version;
   }
 
-  /// The engine's point-driven metrics with the wall-clock Time stamped in.
+  /// The engine's point-driven metrics with the wall-clock Time and the
+  /// live split verdict stamped in.
   LiveMetrics _currentMetrics() {
     final base = _metricsEngine?.metrics ?? LiveMetrics.zero;
     final clock = _runClock;
-    if (clock == null) return base;
-    return base.copyWith(
-      elapsedWallClock: clock.elapsed(DateTime.now().toUtc()),
-    );
+    final timed = clock == null
+        ? base
+        : base.copyWith(elapsedWallClock: clock.elapsed(DateTime.now().toUtc()));
+    return timed.withCurrentSplitVerdict(_splitVerdictTracker.update(timed));
   }
 
   void _emitActive(

@@ -449,7 +449,7 @@ button.secondary:hover, .button.secondary:hover { background: var(--bg); }
 .filter-errors p:first-child { margin-top: 0; }
 .filter-errors p:last-child { margin-bottom: 0; }
 
-/* Split target verdict (issue #100) — same ±5% on/off-target rule as
+/* Split target verdict (issue #100) — same ±1.3% on/off-target rule as
    mobile's live tile (docs/SPLIT-TARGETS-PLAN.md D7), just colour + text,
    no background tint (a table cell, not a tile). */
 .split-on-target { color: var(--ok); font-weight: 600; }

@@ -48,11 +48,11 @@ def format_split_target(target_speed_mps: float | None, targets_as: str | None) 
 # Mirrors splitVerdict's tolerance (app/analysis/v1.py's
 # _SPLIT_TARGET_TOLERANCE, mobile's splitTargetTolerance) — duplicated here
 # rather than imported so the on/off-target decision below uses the exact
-# same ±5% ratio the cell's own colour class (verdict) was computed with.
+# same ±1.3% ratio the cell's own colour class (verdict) was computed with.
 # Using a separate near-zero absolute threshold (the original version of
-# this function) let the two disagree: a split well inside the 5% band
+# this function) let the two disagree: a split well inside the band
 # would render green (on target) but still show a nonzero correction arrow.
-_SPEED_DELTA_TOLERANCE = 0.05
+_SPEED_DELTA_TOLERANCE = 0.013
 
 
 _SPLIT_TYPE_LABELS = {

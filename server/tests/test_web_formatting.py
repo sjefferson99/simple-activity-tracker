@@ -21,30 +21,30 @@ def test_format_split_target_none_is_a_dash() -> None:
 
 def test_speed_delta_on_target_matches_verdicts_tolerance_in_speed_mode() -> None:
     """Regression: format_speed_delta used to decide "on target" via a
-    near-zero absolute threshold instead of the same ±5% ratio _verdict
+    near-zero absolute threshold instead of the same ±1.3% ratio _verdict
     (and the cell's colour class) uses — so a split _verdict called
     "on_target" could still render a nonzero correction arrow. Every case
     here is chosen to sit just inside/outside _verdict's own band."""
-    assert _verdict(5.249, 5.0) == "on_target"
-    assert format_speed_delta(5.249, 5.0, "speed") == "on target"
+    assert _verdict(5.064, 5.0) == "on_target"
+    assert format_speed_delta(5.064, 5.0, "speed") == "on target"
 
-    assert _verdict(4.751, 5.0) == "on_target"
-    assert format_speed_delta(4.751, 5.0, "speed") == "on target"
+    assert _verdict(4.936, 5.0) == "on_target"
+    assert format_speed_delta(4.936, 5.0, "speed") == "on target"
 
-    assert _verdict(5.251, 5.0) == "too_fast"
-    assert format_speed_delta(5.251, 5.0, "speed") != "on target"
+    assert _verdict(5.066, 5.0) == "too_fast"
+    assert format_speed_delta(5.066, 5.0, "speed") != "on target"
 
-    assert _verdict(4.749, 5.0) == "too_slow"
-    assert format_speed_delta(4.749, 5.0, "speed") != "on target"
+    assert _verdict(4.934, 5.0) == "too_slow"
+    assert format_speed_delta(4.934, 5.0, "speed") != "on target"
 
 
 def test_speed_delta_on_target_matches_verdicts_tolerance_in_pace_mode() -> None:
     """Same regression as above, pace-formatted branch."""
-    assert _verdict(5.249, 5.0) == "on_target"
-    assert format_speed_delta(5.249, 5.0, "pace") == "on target"
+    assert _verdict(5.064, 5.0) == "on_target"
+    assert format_speed_delta(5.064, 5.0, "pace") == "on target"
 
-    assert _verdict(5.251, 5.0) == "too_fast"
-    assert format_speed_delta(5.251, 5.0, "pace") != "on target"
+    assert _verdict(5.066, 5.0) == "too_fast"
+    assert format_speed_delta(5.066, 5.0, "pace") != "on target"
 
 
 def test_speed_delta_arrow_and_direction_in_speed_mode() -> None:
