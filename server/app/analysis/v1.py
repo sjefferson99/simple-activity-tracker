@@ -5,6 +5,7 @@ from app.analysis.analyzer import AnalysisResult
 from app.analysis.elevation import gain_and_loss, is_phone_gps_track, smooth_profile
 from app.analysis.geo_math import haversine_distance_meters, speed_mps_between
 from app.analysis.gpx_parser import SplitPlanData
+from app.analysis.terrain import TerrainCorrection
 from app.analysis.track import Point, Track, drop_inaccurate_points
 
 # 12: elevation gain/loss on phone-recorded tracks uses a time-based EMA plus
@@ -688,7 +689,11 @@ class AnalyzerV1:
         split_value: int = _DEFAULT_SPLIT_VALUE,
         activity_type: str = "running",
         split_plan: SplitPlanData | None = None,
+        terrain: TerrainCorrection | None = None,
     ) -> AnalysisResult:
+        """`terrain` is what app.terrain.terrain_correct did to `track` before
+        it got here (issue #5), recorded as elevation.terrain for the web page
+        and for the next re-analysis to reuse."""
         all_points = [p for segment in track.segments for p in segment.points]
         if not all_points:
             raise ValueError("Track has no points")
@@ -718,6 +723,9 @@ class AnalyzerV1:
         else:
             smoothed = _smoothed_elevations(all_points)
             elevation = dict(_elevation_stats(smoothed))
+
+        if terrain is not None:
+            elevation["terrain"] = terrain
 
         max_implied_speed_mps = _MAX_IMPLIED_SPEED_MPS_BY_ACTIVITY_TYPE.get(
             activity_type, _DEFAULT_MAX_IMPLIED_SPEED_MPS

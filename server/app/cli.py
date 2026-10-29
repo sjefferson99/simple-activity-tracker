@@ -93,6 +93,7 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
     from app.models.activity import Activity
     from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
     from app.storage.blob_store import LocalFileBlobStore
+    from app.terrain import terrain_correct
 
     blob_store = LocalFileBlobStore(Path(get_settings().data_dir))
     analyzer = AnalyzerV1()
@@ -105,13 +106,18 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
                 sys.exit(f"No activity found with id {activity_id}")
         else:
             assert all_activities  # noqa: S101 -- enforced by main()'s mutually-exclusive group
+            stale = (ActivityAnalysis.activity_id.is_(None)) | (
+                ActivityAnalysis.analysis_version < ANALYSIS_VERSION
+            )
+            if get_settings().terrain_correction:
+                # Issue #5: retry a correction whose tile couldn't be fetched
+                # last time, and correct what was analysed while it was off.
+                terrain_status = ActivityAnalysis.result["elevation"]["terrain"]["status"]
+                stale = stale | terrain_status.as_string().in_(("pending", "disabled"))
             stmt = (
                 select(Activity)
                 .outerjoin(ActivityAnalysis, ActivityAnalysis.activity_id == Activity.id)
-                .where(
-                    (ActivityAnalysis.activity_id.is_(None))
-                    | (ActivityAnalysis.analysis_version < ANALYSIS_VERSION)
-                )
+                .where(stale)
             )
             activities = list(session.execute(stmt).scalars())
 
@@ -140,16 +146,23 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
                 split_plan = parse_split_plan(gpx_bytes)
                 if split_plan is not None and activity.split_plan is None:
                     activity.split_plan = _split_plan_to_json(split_plan)
+                previous = session.get(ActivityAnalysis, activity.id)
+                corrected, terrain = terrain_correct(
+                    track, previous.result if previous is not None else None
+                )
                 result = (
                     analyzer.analyze(
-                        track,
+                        corrected,
                         split_plan.split_type,
                         split_plan.split_value,
                         activity_type=activity.activity_type,
                         split_plan=split_plan,
+                        terrain=terrain,
                     )
                     if split_plan
-                    else analyzer.analyze(track, activity_type=activity.activity_type)
+                    else analyzer.analyze(
+                        corrected, activity_type=activity.activity_type, terrain=terrain
+                    )
                 )
                 cached_track = sample_track(track, max_points=DEFAULT_MAX_POINTS)
                 status = AnalysisStatus.done
