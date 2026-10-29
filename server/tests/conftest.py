@@ -42,6 +42,7 @@ def app_client(tmp_path, monkeypatch) -> Generator:
     )
     from app.config import get_settings
     from app.db import get_engine
+    from app.terrain import get_tile_cache
 
     db_path = tmp_path / "test.db"
     data_dir = tmp_path / "data"
@@ -57,6 +58,7 @@ def app_client(tmp_path, monkeypatch) -> Generator:
     monkeypatch.setenv("SR_SECURE_COOKIES", "false")
     get_settings.cache_clear()
     get_engine.cache_clear()
+    get_tile_cache.cache_clear()
     # Both are module-level singletons (see app/auth/rate_limit.py) shared
     # across the whole test process — reset them so one test's attempts
     # don't count against the next test's budget.
@@ -75,6 +77,7 @@ def app_client(tmp_path, monkeypatch) -> Generator:
 
     get_settings.cache_clear()
     get_engine.cache_clear()
+    get_tile_cache.cache_clear()
 
 
 @pytest.fixture

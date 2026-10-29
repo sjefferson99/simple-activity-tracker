@@ -4,6 +4,7 @@ import '../models/live_metrics.dart';
 import '../models/split.dart';
 import '../models/track_point.dart';
 import 'activity_mode.dart';
+import 'elevation_accumulator.dart';
 import 'split_plan.dart';
 import 'split_preference.dart';
 
@@ -213,7 +214,7 @@ class MetricsEngine {
   final List<Split> _completedSplits = [];
 
   double? _maxSpeedMps;
-  double _elevationGainMeters = 0;
+  final ElevationAccumulator _elevation = ElevationAccumulator();
 
   LiveMetrics _metrics = LiveMetrics.zero;
   LiveMetrics get metrics => _metrics;
@@ -227,6 +228,12 @@ class MetricsEngine {
   void addPoint(TrackPoint point) {
     if (!point.hasAccuracy) return;
     if (point.accuracyMeters > _maxAcceptableAccuracyMeters) return;
+
+    // Every accuracy-accepted fix, moving or not — the same fixes the GPX
+    // log holds and the server's analysis replays, so the two agree
+    // (ElevationAccumulator's doc). Stationary jitter is what the
+    // accumulator's dead-band is for.
+    _elevation.add(point.timestamp, point.elevationMeters);
 
     final previous = _lastAccepted;
 
@@ -346,13 +353,6 @@ class MetricsEngine {
       _maxSpeedMps = segmentSpeedMps;
     }
 
-    final previousElevation = previous.elevationMeters;
-    final currentElevation = point.elevationMeters;
-    if (previousElevation != null && currentElevation != null) {
-      final delta = currentElevation - previousElevation;
-      if (delta > 0) _elevationGainMeters += delta;
-    }
-
     _applySegment(segmentDistance, segmentDuration);
     _metrics = _buildMetrics();
   }
@@ -363,6 +363,7 @@ class MetricsEngine {
     _lastAccepted = null;
     _pendingCandidate = null;
     _stationaryDetector.reset();
+    _elevation.resetAnchor();
   }
 
   void _applySegment(double segmentDistance, Duration segmentDuration) {
@@ -518,7 +519,7 @@ class MetricsEngine {
         targetSpeedMps: _plan.targetOf(splitIndex),
       ),
       maxSpeedMps: _maxSpeedMps,
-      elevationGainMeters: _elevationGainMeters,
+      elevationGainMeters: _elevation.gainMeters,
     );
   }
 }

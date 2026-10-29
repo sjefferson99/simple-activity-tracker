@@ -74,6 +74,7 @@ from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisReposit
 from app.repositories.live import SqlAlchemyLiveSessionRepository
 from app.repositories.tags import SqlAlchemyTagRepository
 from app.storage.blob_store import LocalFileBlobStore
+from app.terrain import terrain_correct
 from app.validation import SUMMARY_MAX_BYTES, ValidationFailedError, validate_tag_name
 
 router = APIRouter(prefix="/api/v1/activities", tags=["activities"])
@@ -188,16 +189,18 @@ def _build_analysis(
     activity's GPX (issue #130)."""
     try:
         analyzer = AnalyzerV1()
+        corrected, terrain = terrain_correct(track)
         result = (
             analyzer.analyze(
-                track,
+                corrected,
                 split_plan.split_type,
                 split_plan.split_value,
                 activity_type=activity_type,
                 split_plan=split_plan,
+                terrain=terrain,
             )
             if split_plan
-            else analyzer.analyze(track, activity_type=activity_type)
+            else analyzer.analyze(corrected, activity_type=activity_type, terrain=terrain)
         )
         distance_meters, moving_seconds = distance_and_duration_from_result(result)
         start_lat, start_lon, end_lat, end_lon = endpoints_from_result(result)
@@ -622,8 +625,14 @@ def get_analysis(
             track = parse_gpx(data)
         except GpxParseError as exc:
             raise api_error(400, "invalid_gpx", str(exc)) from exc
+        stored = SqlAlchemyActivityAnalysisRepository(session).get_by_activity_id(activity.id)
+        corrected, terrain = terrain_correct(track, stored.result if stored else None)
         result = AnalyzerV1().analyze(
-            track, split_type, split_value, activity_type=activity.activity_type
+            corrected,
+            split_type,
+            split_value,
+            activity_type=activity.activity_type,
+            terrain=terrain,
         )
         return AnalysisOut(status="done", result=result)
 

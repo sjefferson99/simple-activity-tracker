@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:simple_activity_tracker/domain/models/current_split_info.dart';
 import 'package:simple_activity_tracker/domain/tracking/activity_mode.dart';
+import 'package:simple_activity_tracker/domain/tracking/elevation_accumulator.dart';
 import 'package:simple_activity_tracker/domain/tracking/metrics_engine.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_plan.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_preference.dart';
@@ -1117,71 +1118,48 @@ void main() {
   });
 
   group('elevationGainMeters', () {
+    // The algorithm itself is covered by elevation_accumulator_test.dart
+    // (including the contract replay shared with the server); these check
+    // how the engine feeds it.
+    final start = DateTime(2026, 1, 1, 0, 0, 0);
+
+    /// 1 Hz fixes moving 3 m/s, altitude from [eleAt] (seconds -> metres).
+    void feed(
+      MetricsEngine engine,
+      int seconds,
+      double? Function(int) eleAt, {
+      int fromSecond = 0,
+    }) {
+      for (var t = fromSecond; t < fromSecond + seconds; t++) {
+        engine.addPoint(
+          _pointAtMeters(
+            t * 3.0,
+            start.add(Duration(seconds: t)),
+            elevationMeters: eleAt(t),
+          ),
+        );
+      }
+    }
+
     test('is zero when no points carry elevation', () {
       final engine = MetricsEngine();
-      final start = DateTime(2026, 1, 1, 0, 0, 0);
-      engine.addPoint(_pointAtMeters(0, start));
-      engine.addPoint(
-        _pointAtMeters(100, start.add(const Duration(seconds: 20))),
-      );
-
+      feed(engine, 60, (_) => null);
       expect(engine.metrics.elevationGainMeters, 0);
     });
 
-    test(
-      'accumulates only positive altitude changes between accepted points',
-      () {
-        final engine = MetricsEngine();
-        final start = DateTime(2026, 1, 1, 0, 0, 0);
-        engine.addPoint(_pointAtMeters(0, start, elevationMeters: 100));
-        // +10m climb.
-        engine.addPoint(
-          _pointAtMeters(
-            100,
-            start.add(const Duration(seconds: 20)),
-            elevationMeters: 110,
-          ),
-        );
-        // -5m descent - ignored, not subtracted.
-        engine.addPoint(
-          _pointAtMeters(
-            200,
-            start.add(const Duration(seconds: 40)),
-            elevationMeters: 105,
-          ),
-        );
-        // +8m climb.
-        engine.addPoint(
-          _pointAtMeters(
-            300,
-            start.add(const Duration(seconds: 60)),
-            elevationMeters: 113,
-          ),
-        );
-
-        expect(engine.metrics.elevationGainMeters, closeTo(18, 0.01));
-      },
-    );
-
-    test('a leg with a null elevation reading contributes no gain', () {
+    test('counts a steady climb, less at most the dead-band', () {
       final engine = MetricsEngine();
-      final start = DateTime(2026, 1, 1, 0, 0, 0);
-      engine.addPoint(_pointAtMeters(0, start, elevationMeters: 100));
-      // No elevation reading on this fix.
-      engine.addPoint(
-        _pointAtMeters(100, start.add(const Duration(seconds: 20))),
+      // 20 m over 100 s, then 30 s level so the average catches up.
+      feed(engine, 130, (t) => 100 + 0.2 * (t < 100 ? t : 100));
+      expect(
+        engine.metrics.elevationGainMeters,
+        inInclusiveRange(20 - elevationHysteresisMeters, 20),
       );
-      // Elevation resumes, but the gap across the null-elevation leg isn't
-      // bridged - only point-to-point deltas where both ends have a reading
-      // count.
-      engine.addPoint(
-        _pointAtMeters(
-          200,
-          start.add(const Duration(seconds: 40)),
-          elevationMeters: 130,
-        ),
-      );
+    });
 
+    test('GPS altitude jitter on the flat is not counted as climb', () {
+      final engine = MetricsEngine();
+      feed(engine, 600, (t) => t.isEven ? 98.0 : 102.0);
       expect(engine.metrics.elevationGainMeters, 0);
     });
 
@@ -1189,46 +1167,33 @@ void main() {
       'a rejected implausible jump does not count toward elevation gain',
       () {
         final engine = MetricsEngine();
-        final start = DateTime(2026, 1, 1, 0, 0, 0);
-        engine.addPoint(_pointAtMeters(0, start, elevationMeters: 100));
-        // 65km jump with a huge elevation spike - rejected as implausible.
+        feed(engine, 30, (_) => 100);
+        // 65 km jump with a huge altitude spike — rejected as implausible, and
+        // the shared vertical-rate limit keeps its altitude out of the total.
         engine.addPoint(
           _pointAtMeters(
             65000,
-            start.add(const Duration(seconds: 19)),
+            start.add(const Duration(seconds: 30)),
             elevationMeters: 5000,
           ),
         );
-
+        feed(engine, 30, (_) => 100, fromSecond: 31);
         expect(engine.metrics.elevationGainMeters, 0);
       },
     );
 
-    test('is unaffected by resetSegmentAnchor (pause/resume)', () {
+    test('keeps its total across pause/resume but ignores the climb while '
+        'paused', () {
       final engine = MetricsEngine();
-      final start = DateTime(2026, 1, 1, 0, 0, 0);
-      engine.addPoint(_pointAtMeters(0, start, elevationMeters: 100));
-      engine.addPoint(
-        _pointAtMeters(
-          100,
-          start.add(const Duration(seconds: 20)),
-          elevationMeters: 110,
-        ),
-      );
+      feed(engine, 130, (t) => 100 + 0.2 * (t < 100 ? t : 100));
+      final beforePause = engine.metrics.elevationGainMeters;
+      expect(beforePause, greaterThan(15));
 
       engine.resetSegmentAnchor();
+      // Resumes 50 m higher (e.g. paused for a lift up the hill).
+      feed(engine, 60, (_) => 170, fromSecond: 400);
 
-      final resumeTime = start.add(const Duration(minutes: 5));
-      engine.addPoint(_pointAtMeters(100, resumeTime, elevationMeters: 110));
-      engine.addPoint(
-        _pointAtMeters(
-          150,
-          resumeTime.add(const Duration(seconds: 10)),
-          elevationMeters: 115,
-        ),
-      );
-
-      expect(engine.metrics.elevationGainMeters, closeTo(15, 0.01));
+      expect(engine.metrics.elevationGainMeters, beforePause);
     });
   });
 

@@ -95,6 +95,21 @@
       <div class="label">Elevation loss</div>
     </div>
   </div>
+  {# Issue #5: say whether heights were corrected to the terrain model. #}
+  {% set terrain = result.elevation.get('terrain') or {} %}
+  <p class="muted" data-testid="terrain-note">
+    {% if terrain.get('status') == 'applied' and terrain.get('method') == 'offset' %}
+    Heights corrected to terrain data: recorded altitude was {{ "%+.0f"|format(terrain.offset_m) }} m off. Gain and loss come from the recorded altitude and are unaffected.
+    {% elif terrain.get('status') == 'applied' %}
+    No altitude was recorded; heights are from terrain data.
+    {% elif terrain.get('status') == 'pending' %}
+    Heights are as recorded: terrain correction couldn't download its data yet and will retry when the server next starts.
+    {% elif terrain.get('status') == 'no_data' %}
+    Heights are as recorded: terrain data doesn't cover this route.
+    {% else %}
+    Heights are as recorded, not corrected to terrain data (correction is off on this server).
+    {% endif %}
+  </p>
 
   {% if result.best_efforts %}
   <h2 style="margin-top:1.5rem;">Best efforts</h2>

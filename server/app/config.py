@@ -73,6 +73,14 @@ class Settings(BaseSettings):
     # activities without the user having to run the CLI by hand or re-upload
     # from the phone.
     auto_reanalyze: bool = True
+    # Corrects each activity's absolute elevation (min/max, the chart) to a
+    # terrain model — issue #5, app/analysis/terrain.py. Off by default: it
+    # downloads tiles from terrain_tile_url (outbound HTTPS), revealing to
+    # that host which ~1°x1° areas activities were in. See .env.example.
+    terrain_correction: bool = False
+    terrain_tile_url: str = (
+        "https://s3.amazonaws.com/elevation-tiles-prod/skadi/{lat_dir}/{name}.hgt.gz"
+    )
 
     @field_validator("secret_key")
     @classmethod

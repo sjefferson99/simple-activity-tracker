@@ -22,3 +22,10 @@ requires that the server didn't silently ignore any field.
   writer (golden files, `mobile/test/core/files/gpx_contract_test.dart`, same
   `UPDATE_CONTRACT` flag) and what the app means by it. The server's parser
   must extract exactly that (`server/tests/test_gpx_contract.py`).
+- `elevation/gps-noise.json`: a replay of GPS altitude fixes and the
+  elevation gain/loss they must produce. The app's live tile
+  (`mobile/test/domain/tracking/elevation_accumulator_test.dart`) and the
+  server's analysis (`server/tests/test_elevation.py`) both check it, so the
+  two filters can't drift apart (issue #181). Regenerate after a deliberate
+  algorithm change, on both sides at once, with
+  `uv run python -m tests.fixtures.generate_elevation_contract` from `server/`.

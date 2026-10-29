@@ -36,11 +36,11 @@ class LiveMetrics {
   /// [distanceMeters].
   final double? maxSpeedMps;
 
-  /// Cumulative positive elevation change across accepted points (sum of
-  /// each accepted-point-to-next-accepted-point altitude increase, ignoring
-  /// decreases and points with no elevation reading) — a rough live
-  /// indicator, not the server's smoothed figure. Unaffected by pause/resume,
-  /// same as [distanceMeters].
+  /// Cumulative climb from GPS altitude, smoothed and dead-banded by
+  /// `ElevationAccumulator` — the same algorithm the server's analysis uses,
+  /// so this matches its `elevation.gain_m` for the same fixes. Kept across
+  /// pause/resume, same as [distanceMeters]; a height change while paused
+  /// isn't counted.
   final double elevationGainMeters;
 
   /// The split in progress's live on/off-target verdict, with hysteresis
