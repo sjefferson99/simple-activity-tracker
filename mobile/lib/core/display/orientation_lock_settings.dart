@@ -27,9 +27,8 @@ class PortraitLockController extends Notifier<bool> {
   }
 
   Future<void> _load() async {
-    final stored = await _storage.read(key: _portraitLockKey);
+    final enabled = await _readStoredPortraitLock();
     if (_userHasChanged) return;
-    final enabled = stored == 'true';
     if (enabled != state) state = enabled;
   }
 
@@ -39,6 +38,14 @@ class PortraitLockController extends Notifier<bool> {
     await _storage.write(key: _portraitLockKey, value: '$enabled');
   }
 }
+
+Future<bool> _readStoredPortraitLock() async =>
+    await const FlutterSecureStorage().read(key: _portraitLockKey) == 'true';
+
+/// Applies the saved setting before the first frame, so a locked app held
+/// sideways at launch never draws in landscape while the provider's async
+/// load catches up. From then on the app root applies changes as they happen.
+Future<void> applyStoredPortraitLock() async => applyPortraitLock(await _readStoredPortraitLock());
 
 /// Applies [locked] to the running app. An empty list hands control back to
 /// the platform, i.e. the manifest/Info.plist default of following the

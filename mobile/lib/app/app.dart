@@ -21,11 +21,12 @@ class _SimpleActivityTrackerAppState
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     // Re-applied on every change, so flipping the Settings switch takes
-    // effect at once, including mid-run (issue #150).
+    // effect at once, including mid-run (issue #150). Not fireImmediately:
+    // main() already applied the saved value, and the provider's initial
+    // `false` (before its load completes) would briefly undo that.
     ref.listenManual(
       portraitLockProvider,
       (_, locked) => applyPortraitLock(locked),
-      fireImmediately: true,
     );
   }
 

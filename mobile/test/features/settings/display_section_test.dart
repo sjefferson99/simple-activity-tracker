@@ -28,7 +28,8 @@ List<List<String>> _captureOrientationCalls() {
 }
 
 /// The settings section plus the same listener SimpleActivityTrackerApp
-/// installs, without the rest of the app's providers.
+/// installs, without the rest of the app's providers. _pump applies the
+/// saved value first, as main() does.
 class _Host extends ConsumerStatefulWidget {
   const _Host();
 
@@ -40,7 +41,7 @@ class _HostState extends ConsumerState<_Host> {
   @override
   void initState() {
     super.initState();
-    ref.listenManual(portraitLockProvider, (_, locked) => applyPortraitLock(locked), fireImmediately: true);
+    ref.listenManual(portraitLockProvider, (_, locked) => applyPortraitLock(locked));
   }
 
   @override
@@ -49,6 +50,7 @@ class _HostState extends ConsumerState<_Host> {
 
 Future<void> _pump(WidgetTester tester, {Map<String, String> storage = const {}}) async {
   FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform({...storage});
+  await applyStoredPortraitLock();
   await tester.pumpWidget(const ProviderScope(child: _Host()));
   await tester.pumpAndSettle();
 }
@@ -76,7 +78,10 @@ void main() {
     final calls = _captureOrientationCalls();
     await _pump(tester, storage: {'portrait_lock_enabled': 'true'});
     expect(_switchValue(tester), isTrue);
-    expect(calls.last, ['DeviceOrientation.portraitUp']);
+    // Never a momentary "follow the phone" while the provider loads, which
+    // would let a phone held sideways at launch draw in landscape.
+    expect(calls, isNotEmpty);
+    expect(calls, everyElement(['DeviceOrientation.portraitUp']));
   });
 
   testWidgets('turning it off hands rotation back to the phone', (tester) async {
