@@ -115,7 +115,7 @@ def parse_gpx(data: bytes) -> Track:
             if points:
                 segments.append(Segment(points=points))
 
-    track = Track(segments=segments)
+    track = Track(segments=segments, creator=(gpx.creator or "").strip() or None)
     if track.point_count == 0:
         raise GpxNoTrackPointsError("GPX file has no timestamped track points")
     return track

@@ -34,6 +34,10 @@ class Track:
     vs geolocator in the mobile app)."""
 
     segments: list[Segment]
+    # The GPX root's creator attribute — tells our own app's raw phone-GPS
+    # altitude apart from imports (see elevation.is_phone_gps_track). None
+    # for FIT/TCX parses and hand-built tracks.
+    creator: str | None = None
 
     @property
     def point_count(self) -> int:

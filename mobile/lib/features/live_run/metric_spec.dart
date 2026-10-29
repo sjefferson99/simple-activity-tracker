@@ -253,8 +253,8 @@ final MetricSpec _elevationGainSpec = MetricSpec(
       ? 'Elevation gain (ft)'
       : 'Elevation gain (m)',
   description:
-      'Total climb from GPS altitude between accepted fixes — a rough live '
-      'figure; the server computes a smoothed one after upload.',
+      'Total climb from GPS altitude, smoothed so GPS jitter isn\'t counted '
+      'as climbing — the same calculation the server uses after upload.',
   valueOf: (metrics, currentSpeedMps, unit) =>
       unit.distanceUnit == DistanceUnit.mi
       ? formatFeet(metrics.elevationGainMeters)

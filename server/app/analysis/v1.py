@@ -2,10 +2,17 @@ import itertools
 from dataclasses import dataclass, field
 
 from app.analysis.analyzer import AnalysisResult
+from app.analysis.elevation import gain_and_loss, is_phone_gps_track, smooth_profile
 from app.analysis.geo_math import haversine_distance_meters, speed_mps_between
 from app.analysis.gpx_parser import SplitPlanData
 from app.analysis.track import Point, Track, drop_inaccurate_points
 
+# 12: elevation gain/loss on phone-recorded tracks uses a time-based EMA plus
+# a 3 m dead-band (app/analysis/elevation.py, issue #181), the same filter the
+# phone now runs live — the old 3-point average left nearly all GPS altitude
+# jitter in and overstated climb up to ~2.5x. The chart, min/max and per-split
+# elevation deltas use the zero-lag version of the same smoothing. Imported
+# tracks (not written by our app) are unchanged.
 # 11: split target verdicts use a ±1.3% band instead of ±5% (issue #152),
 # matching mobile's splitTargetTolerance. Stored history is re-judged by the
 # startup auto-reanalyze.
@@ -34,7 +41,7 @@ from app.analysis.track import Point, Track, drop_inaccurate_points
 # Bump this whenever the result shape or algorithm changes, then run
 # `simple-activity-tracker-server reanalyze --all` on each deployment so
 # stored analyses catch up — the web UI reads stored results as-is.
-ANALYSIS_VERSION = 11
+ANALYSIS_VERSION = 12
 
 # Green within ±1.3% of target speed (about ±4 s/km at 5:00/km), red outside
 # in either direction — one relative band for pace and speed targets alike
@@ -697,11 +704,25 @@ class AnalyzerV1:
         ]
         all_points = [p for points in filtered_segments for p in points]
 
+        if is_phone_gps_track(track.creator):
+            # Gain/loss from the raw altitude through the live-matching
+            # filter; everything downstream (steps, splits, series, min/max)
+            # then sees the zero-lag smoothed profile in place of raw <ele>.
+            gain_m, loss_m = gain_and_loss(filtered_segments)
+            filtered_segments = [smooth_profile(points) for points in filtered_segments]
+            all_points = [p for points in filtered_segments for p in points]
+            smoothed = [p.ele for p in all_points]
+            elevation: dict[str, object] = dict(_elevation_stats(smoothed))
+            if elevation["gain_m"] is not None:
+                elevation["gain_m"], elevation["loss_m"] = gain_m, loss_m
+        else:
+            smoothed = _smoothed_elevations(all_points)
+            elevation = dict(_elevation_stats(smoothed))
+
         max_implied_speed_mps = _MAX_IMPLIED_SPEED_MPS_BY_ACTIVITY_TYPE.get(
             activity_type, _DEFAULT_MAX_IMPLIED_SPEED_MPS
         )
         steps = _build_steps(filtered_segments, max_implied_speed_mps)
-        smoothed = _smoothed_elevations(all_points)
         windowed_speeds = _windowed_speeds(steps, all_points[0])
 
         total_distance_m = steps[-1].cum_distance_m if steps else 0.0
@@ -720,7 +741,7 @@ class AnalyzerV1:
             "elapsed_seconds": elapsed_s,
             "moving_seconds": moving_s,
             "avg_moving_speed_mps": avg_moving_speed_mps,
-            "elevation": _elevation_stats(smoothed),
+            "elevation": elevation,
             "split_type": split_type,
             "split_value": split_value,
             "split_targets_as": split_plan.targets_as if split_plan else None,

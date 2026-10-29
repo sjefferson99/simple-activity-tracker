@@ -238,8 +238,10 @@ controller (§6.3).
   - distance (haversine, with a per-step implied-speed sanity filter: drop a step implying
     > 12.5 m/s, documented as v1 behaviour), elapsed (wall clock) and moving time (steps
     with speed ≥ 0.5 m/s), average moving speed
-  - elevation gain / loss / min / max (with 3-point smoothing on `ele` before summing —
-    raw GPS elevation is noisy and inflates gain badly)
+  - elevation gain / loss / min / max. Raw GPS elevation is noisy and inflates gain
+    badly; phone-recorded tracks go through `app/analysis/elevation.py` (time-based
+    EMA, 5 m/s vertical-rate limit, 3 m dead-band — the same filter the app runs live,
+    issue #181), imports keep 3-point smoothing
   - 1 km splits with `duration_seconds`, `avg_speed_mps`, `elevation_delta_m`
   - best efforts: fastest 1 km, 5 km, 10 km windows (only those ≤ total distance)
   - `series`: ≤ 300 evenly spaced samples of `{t_s, dist_m, speed_mps, ele_m}` for charts
