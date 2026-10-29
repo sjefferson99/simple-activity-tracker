@@ -387,11 +387,34 @@ void main() {
         currentSplitElapsed: const Duration(seconds: 15),
         currentSplitDistanceMeters: 15 * (1000 / 250), // 4:10/km pace
         currentSplit: withTarget,
+        currentSplitVerdict: SplitVerdict.tooFast,
       );
       final detail = spec.detail!(metrics, SpeedUnit.minKm);
       expect(detail, contains('Split 3/6 · 1 km'));
       expect(detail, contains('▲')); // pace faster => arrow up (slow down)
       expect(spec.verdict!(metrics), SplitVerdict.tooFast);
+    });
+
+    test('verdict is the controller\'s live (hysteresis) verdict, not recomputed', () {
+      // Issue #154: just outside the band, but the controller's tracker is
+      // still holding on target — the tile must agree with it (and so with
+      // the audio cues), not judge the plain band itself.
+      final spec = _specFor('current_split', ActivityMode.running);
+      final metrics = LiveMetrics(
+        elapsed: Duration.zero,
+        distanceMeters: 0,
+        avgSpeedMps: null,
+        completedSplits: const [],
+        currentSplitElapsed: const Duration(seconds: 15),
+        currentSplitDistanceMeters: 15 * (1000 / 296), // 1.35% fast of 5:00/km
+        currentSplit: withTarget,
+        currentSplitVerdict: SplitVerdict.onTarget,
+      );
+      expect(spec.verdict!(metrics), SplitVerdict.onTarget);
+      // And the detail line agrees with the green colour, no arrow.
+      final detail = spec.detail!(metrics, SpeedUnit.minKm)!;
+      expect(detail, endsWith('on target'));
+      expect(detail, isNot(contains('▲')));
     });
 
     test(

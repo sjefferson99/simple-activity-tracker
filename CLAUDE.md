@@ -73,6 +73,29 @@ Release version for the current checkout: `scripts/release-version.sh`.
   - **Release versions are display-only.** Never compare them in code. `pubspec.yaml` (`0.0.0`) and `pyproject.toml` versions are placeholders; the `vX.Y.Z` tag is the only source.
   - **Test against the previous level too**, not only the current server (FakeApiClient's `getServerInfoHandler` / `ServerInfoDto.legacy`).
 
+## PR labels and release notes
+
+Release notes are generated from PR labels by [.github/release.yml](.github/release.yml). **Label every PR when opening it**, with at least one label from this table. A PR appears once in the notes, under the first matching section in this order:
+
+| Release notes section | Label(s) | Use for |
+|---|---|---|
+| ⚠️ Breaking changes | `breaking-change` | An older app or server stops working with this one: `MIN_APP_API_LEVEL` bumped, an endpoint/field removed or narrowed, a GPX `sat:` or `analysis.result` contract broken |
+| ⚠️ Upgrade notes | `upgrade-note` | Admins or users should check or act on this when upgrading: new or changed `.env`/compose settings, migrations needing a step, an `ANALYSIS_VERSION` bump that re-judges stored history, the app and server needing updating together, an app reinstall |
+| Performance | `performance` | Faster or lighter: speed, memory, battery, payload size |
+| Enhancements | `enhancement` | New features or improvements |
+| Bug fixes | `bug` | Fixes for incorrect behaviour |
+| Security | `security` | Security fixes and hardening, including Snyk upgrade PRs |
+| Dependencies | `dependencies` | Dependency bumps (Dependabot adds this label automatically) |
+| Housekeeping | `documentation`, `maintenance`, `tests`, `CI/CD` | Docs, agent guidance, tooling, tests and CI |
+| Excluded | `skip-release-notes` | Changes not worth listing, such as reverts of unreleased work |
+
+- Add `breaking-change` or `upgrade-note` alongside the normal category label (e.g. `upgrade-note` + `enhancement`); the PR is then listed under the warning section only. Descriptive labels (`UI/UX`, `docker`, `dart`, …) can be added too; they don't affect grouping. Default the category from the closed issue's own label.
+- A PR with `breaking-change` or `upgrade-note` must have a **Release notes** section in its description: what changed, who is affected (server admins, app users, or both) and exactly what they need to do. Generated notes only show PR titles, so this is what the release write-up expands from.
+- **Drafting release notes** (without creating a release):
+  1. Check every PR merged since the last tag has a category label: `gh pr list --state merged --search "merged:>YYYY-MM-DD" --json number,title,labels`. The search can miss PRs, so cross-check with `git log <last tag>..origin/main --merges`.
+  2. Generate the grouped list: `gh api repos/sjefferson99/simple-activity-tracker/releases/generate-notes -f tag_name=<new tag> -f previous_tag_name=<last tag> -q .body`.
+  3. Rewrite each line in plain language, in the style of earlier releases. Expand `breaking-change`/`upgrade-note` entries from each PR's Release notes section. A PR that is both a feature and an upgrade risk is grouped only under Upgrade notes, so also mention it in the feature section where relevant.
+
 ## Server dev/test workflow (use every time we work on `server/`)
 
 Applies to any server change of more than trivial size. One plan item (or tightly related group) = one branch = one PR.
@@ -85,7 +108,7 @@ Applies to any server change of more than trivial size. One plan item (or tightl
    - `cd deploy/standalone-tls && docker compose up -d`; confirm clean logs (`docker logs standalone-tls-app-1`, no tracebacks), `(healthy)`, and `curl -sk https://127.0.0.1/healthz`.
    - Exercise the changed behavior with `curl` (bearer via `/api/v1/auth/login`; web login needs a cookie jar + `X-Requested-With: htmx` on POSTs). `deploy/standalone-tls/.env` on this dev machine is not sensitive; read admin credentials from it rather than asking. Clean up any test data you create in a real account.
 4. **Hand off to the user and STOP.** Report what was verified (each probe, pass/fail, test counts, Snyk) and ask the user to confirm in the running stack. Don't commit, push or open a PR before that sign-off. A bug report or "yes, fix it that way" approves the *design* of a fix, not its commit/push/PR/merge.
-5. **On confirmation: commit, push, open the PR, stop again.** PR body = summary + test plan (automated checks and what was verified in the container), with the issue-closing keyword. Don't merge unless the current request says so.
+5. **On confirmation: commit, push, open the PR, stop again.** PR body = summary + test plan (automated checks and what was verified in the container), with the issue-closing keyword, labelled per "PR labels and release notes" above. Don't merge unless the current request says so.
 6. **After merge:** confirm CI green, confirm the `Container` workflow pushed to GHCR, `docker pull` the image, restart the dev stack on it, confirm healthy, and `git checkout main && git pull`.
 
 ### Multi-step features

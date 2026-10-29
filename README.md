@@ -37,6 +37,47 @@ Raspberry Pi on your home network.
    per person or per activity. Viewers get read-only access, and you can change or
    revoke it at any time.
 
+### How split targets are judged
+
+A split is judged on its **average speed so far, by moving time**, never on the
+instantaneous reading, which is too noisy. The rules (issues #99, #152, #154):
+
+- **On target means within ±1.3% of the target speed.** That's about ±4 s/km at
+  5:00/km, ±6 s/mi at 8:00/mi, or ±0.16 km/h at 12 km/h.
+- **The same band applies to pace and speed targets.** Pace is 1 ÷ speed, so a
+  percentage is the same physical band whichever unit you display: the same run at the
+  same effort gets the same verdict either way.
+- **The band is relative, not a fixed number of seconds.** GPS error in a split's
+  average is roughly (metres of error ÷ distance covered), which is itself a
+  percentage. A fixed ±4 s/km would be 1.7% at 4:00/km but 0.95% at 7:00/km, stricter
+  on slower runs than the measurement can support.
+- **No verdict for the first 10 s of moving time** in each split, while the average
+  is meaningless.
+- **Hysteresis while a split is in progress.** Once a split reads on target, it stays
+  on target until its average leaves the band by an extra margin too; off target
+  re-enters at the plain band edge. The margin follows the same error curve: twice the
+  band (so ±3.9% in total) for the first 15% of the split, shrinking as 1 ÷ progress to
+  half the band (±1.95% in total, about ±6 s/km at 5:00/km) from 60% onwards. This stops
+  an average hovering at the band edge from beeping back and forth: replaying 17 real
+  targeted activities, it cut verdict beeps from 408 to 287. The screen colour and the
+  beeps share this one verdict, so they always agree. To re-tune, replay GPX files with
+  `dart run tool/replay_split_audio.dart --quiet <files>` from `mobile/`.
+- **Beeps wait 30 s into each split; the colour doesn't.** The colour shows from 10 s,
+  but verdict beeps and spoken corrections start at 30 s of moving time, with one cue
+  for where you stand then and only real changes after that. Replaying real splits,
+  about 30% of all verdict changes happen in a split's first 20–30 s while the
+  average settles; holding the audio until 30 s cut verdict cues from 2.5 to 1.6 per
+  split, while 60 s saved little more and silenced a third of short splits. The
+  new-split beep and target announcement are unaffected.
+- **Finished splits use the plain band** with no grace period or hysteresis: their
+  average is final. The phone (finished and reopened runs) and the server (analysis
+  and web history) apply the identical rule, and the server re-judges stored
+  activities automatically when it's upgraded to a new rule.
+
+The constants live in `mobile/lib/domain/tracking/split_target.dart` and
+`live_split_verdict.dart`, and in `server/app/analysis/v1.py`. Change the band in both
+places together, and bump `ANALYSIS_VERSION` so history is re-judged.
+
 The phone and server are updated independently and stay compatible either way round:
 the app checks the server's API level and only uses what that server supports (see
 [docs/VERSIONING.md](docs/VERSIONING.md)).
@@ -258,6 +299,13 @@ git push origin vX.Y.Z
 # tag "vX.Y.Z" targeting main → write release notes → Publish. Either way, publishing
 # the tag is what triggers both workflows above.
 ```
+
+**Release notes** are generated from PR labels: "Generate release notes" on the release
+page (or `gh release create --generate-notes`) groups every merged PR under ⚠️ Breaking
+changes, ⚠️ Upgrade notes, Enhancements, Bug fixes and so on, per
+[.github/release.yml](.github/release.yml). Rewrite the generated lines in plain
+language, and expand the warning sections from each PR's "Release notes" section. The
+labelling rules are in [CLAUDE.md](CLAUDE.md) ("PR labels and release notes").
 
 The mobile build takes a few minutes, so the APK asset typically appears on the release
 a little after the release itself goes live — not a sign anything failed.

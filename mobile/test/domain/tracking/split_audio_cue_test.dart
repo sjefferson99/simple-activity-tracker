@@ -19,25 +19,36 @@ CurrentSplitInfo _split({
 
 /// Builds a [LiveMetrics] with just the fields [detectSplitAudioCue] and its
 /// helpers actually read — everything else is a fixed, otherwise-irrelevant
-/// value.
+/// value. [LiveMetrics.currentSplitVerdict] is stamped with the plain
+/// verdict, as LiveRunController's tracker would with no hysteresis in play
+/// (that's covered by live_split_verdict_test.dart).
 LiveMetrics _metrics({
   required CurrentSplitInfo currentSplit,
   Duration currentSplitElapsed = Duration.zero,
   double currentSplitDistanceMeters = 0,
   List<Split> completedSplits = const [],
-}) => LiveMetrics(
-  elapsed: Duration.zero,
-  distanceMeters: 0,
-  avgSpeedMps: null,
-  completedSplits: completedSplits,
-  currentSplitElapsed: currentSplitElapsed,
-  currentSplitDistanceMeters: currentSplitDistanceMeters,
-  currentSplit: currentSplit,
-);
+}) {
+  final seconds = currentSplitElapsed.inMilliseconds / 1000;
+  return LiveMetrics(
+    elapsed: Duration.zero,
+    distanceMeters: 0,
+    avgSpeedMps: null,
+    completedSplits: completedSplits,
+    currentSplitElapsed: currentSplitElapsed,
+    currentSplitDistanceMeters: currentSplitDistanceMeters,
+    currentSplit: currentSplit,
+    currentSplitVerdict: splitVerdict(
+      avgSpeedMps: seconds <= 0 ? null : currentSplitDistanceMeters / seconds,
+      targetSpeedMps: currentSplit.targetSpeedMps,
+      elapsedInSplit: currentSplitElapsed,
+    ),
+  );
+}
 
 void main() {
   const target = 3.0; // m/s
-  const pastGrace = Duration(seconds: 15);
+  // Past both the on-screen verdict grace and the audio grace.
+  const pastGrace = Duration(seconds: 40);
 
   group('detectSplitAudioCue', () {
     test('returns null with no previous metrics (first sample of a run)', () {
@@ -183,16 +194,34 @@ void main() {
       },
     );
 
-    test('grace period elapsing (null -> tooFast) produces a verdict cue', () {
+    test('a verdict change inside the audio grace is silent (the tile still shows it)', () {
+      const early = Duration(seconds: 15);
       final previous = _metrics(
         currentSplit: _split(index: 1, targetSpeedMps: target),
-        currentSplitElapsed: splitVerdictGrace - const Duration(seconds: 1),
-        currentSplitDistanceMeters:
-            (splitVerdictGrace - const Duration(seconds: 1)).inSeconds *
-            target *
-            1.2,
+        currentSplitElapsed: early,
+        currentSplitDistanceMeters: early.inSeconds * target,
       );
-      final elapsed = splitVerdictGrace;
+      final current = _metrics(
+        currentSplit: _split(index: 1, targetSpeedMps: target),
+        currentSplitElapsed: early + const Duration(seconds: 1),
+        currentSplitDistanceMeters: (early + const Duration(seconds: 1)).inSeconds * target * 1.5,
+      );
+      expect(previous.currentSplitVerdict, SplitVerdict.onTarget);
+      expect(current.currentSplitVerdict, SplitVerdict.tooFast);
+      expect(detectSplitAudioCue(previous: previous, current: current), isNull);
+    });
+
+    test('crossing the audio grace announces the verdict already in force', () {
+      // Already too fast (and showing red) before the audio grace — nothing
+      // has been announced for this split yet, so it is news now.
+      final before = splitVerdictAudioGrace - const Duration(seconds: 1);
+      final previous = _metrics(
+        currentSplit: _split(index: 1, targetSpeedMps: target),
+        currentSplitElapsed: before,
+        currentSplitDistanceMeters: before.inSeconds * target * 1.2,
+      );
+      expect(previous.currentSplitVerdict, SplitVerdict.tooFast);
+      final elapsed = splitVerdictAudioGrace;
       final current = _metrics(
         currentSplit: _split(index: 1, targetSpeedMps: target),
         currentSplitElapsed: elapsed,

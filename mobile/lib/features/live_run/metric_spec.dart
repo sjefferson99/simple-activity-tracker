@@ -113,8 +113,8 @@ final MetricSpec _currentSplitSpec = MetricSpec(
   description:
       'Pace or speed over the current split so far, by moving time. Resets '
       'at each split boundary. When the split has a target, the tile turns '
-      'green when you are within 5% of it and red otherwise, with an arrow '
-      'showing which way to adjust.',
+      'green when you are within 1.3% of it (about 4 s/km at 5:00/km) and '
+      'red otherwise, with an arrow showing which way to adjust.',
   valueOf: (metrics, currentSpeedMps, unit) =>
       formatSpeedOrPace(_currentSplitAvgSpeedMps(metrics), unit),
   detail: (metrics, unit) {
@@ -135,13 +135,17 @@ final MetricSpec _currentSplitSpec = MetricSpec(
     final targetText = formatTargetForEditing(target, unit);
     final avg = _currentSplitAvgSpeedMps(metrics);
     if (avg == null) return '$header @ $targetText';
-    return '$header @ $targetText\n${formatSpeedDelta(avg, target, unit)}';
+    // While hysteresis holds the split on target (issue #154), say so rather
+    // than showing a correction arrow under a green number. The reverse
+    // can't disagree: the live verdict only ever holds *on* target.
+    final delta = metrics.currentSplitVerdict == SplitVerdict.onTarget
+        ? 'on target'
+        : formatSpeedDelta(avg, target, unit);
+    return '$header @ $targetText\n$delta';
   },
-  verdict: (metrics) => splitVerdict(
-    avgSpeedMps: _currentSplitAvgSpeedMps(metrics),
-    targetSpeedMps: metrics.currentSplit.targetSpeedMps,
-    elapsedInSplit: metrics.currentSplitElapsed,
-  ),
+  // The controller's live verdict, with hysteresis (issue #154), so the
+  // tile and the audio cues never disagree.
+  verdict: (metrics) => metrics.currentSplitVerdict,
 );
 
 /// How much of the current split is left — a countdown of remaining time

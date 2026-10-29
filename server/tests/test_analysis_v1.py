@@ -421,15 +421,23 @@ def test_a_single_sparse_step_spanning_two_differently_sized_custom_splits() -> 
     assert splits[1]["target_speed_mps"] == 1.5
 
 
-def test_verdict_boundaries_at_exactly_plus_minus_five_percent() -> None:
+def test_verdict_boundaries_at_plus_minus_one_point_three_percent() -> None:
+    """±1.3% of target speed, the same relative band for pace and speed
+    targets (issue #152) — mirrors mobile's splitTargetTolerance."""
     assert _verdict(5.0, 5.0) == "on_target"
-    assert _verdict(5.249, 5.0) == "on_target"  # just inside +5%
-    assert _verdict(5.25, 5.0) == "on_target"  # exactly +5%
-    assert _verdict(5.251, 5.0) == "too_fast"  # just outside +5%
-    assert _verdict(4.751, 5.0) == "on_target"  # just inside -5%
-    assert _verdict(4.75, 5.0) == "on_target"  # exactly -5%
-    assert _verdict(4.749, 5.0) == "too_slow"  # just outside -5%
+    assert _verdict(5.064, 5.0) == "on_target"  # just inside +1.3%
+    assert _verdict(5.066, 5.0) == "too_fast"  # just outside +1.3%
+    assert _verdict(4.936, 5.0) == "on_target"  # just inside -1.3%
+    assert _verdict(4.934, 5.0) == "too_slow"  # just outside -1.3%
     assert _verdict(5.0, None) is None
+
+
+def test_verdict_band_is_about_four_seconds_per_km_at_five_minute_pace() -> None:
+    target = 1000 / 300  # 5:00/km
+    assert _verdict(1000 / 303, target) == "on_target"
+    assert _verdict(1000 / 297, target) == "on_target"
+    assert _verdict(1000 / 305, target) == "too_slow"
+    assert _verdict(1000 / 295, target) == "too_fast"
 
 
 def test_no_split_plan_leaves_result_unchanged_from_before_issue_100() -> None:

@@ -4,9 +4,14 @@
 // (two GPX captures from a walk where the too-fast/too-slow beep pattern
 // only ever played once, not 2/3 times) against the exact production code
 // path, not a synthetic reproduction. Reads the plan/target straight out of
-// the GPX's own sat:split_plan extension, same as the server's parser does.
+// the GPX's own sat:split_plan/sat:split_target extensions, same as the
+// server's parser does.
 //
-// Usage (from mobile/): dart run tool/replay_split_audio.dart <path.gpx>
+// Stamps each tick's verdict with LiveSplitVerdictTracker, exactly as
+// LiveRunController does, and also counts how many verdict cues the plain
+// band (no hysteresis, issue #154) would have produced, for tuning.
+//
+// Usage (from mobile/): dart run tool/replay_split_audio.dart [--quiet] <path.gpx>...
 //
 // ignore_for_file: avoid_print — a CLI diagnostic tool's whole job is to
 // print its findings; a logging framework would be pure ceremony here.
@@ -15,6 +20,7 @@ import 'dart:io';
 import 'package:simple_activity_tracker/domain/models/live_metrics.dart';
 import 'package:simple_activity_tracker/domain/models/track_point.dart';
 import 'package:simple_activity_tracker/domain/tracking/activity_mode.dart';
+import 'package:simple_activity_tracker/domain/tracking/live_split_verdict.dart';
 import 'package:simple_activity_tracker/domain/tracking/metrics_engine.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_audio_cue.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_plan.dart';
@@ -22,16 +28,43 @@ import 'package:simple_activity_tracker/domain/tracking/split_preference.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_target.dart';
 
 void main(List<String> args) {
-  if (args.isEmpty) {
-    stderr.writeln('Usage: dart run tool/replay_split_audio.dart <path.gpx>');
+  final quiet = args.contains('--quiet');
+  final paths = args.where((a) => a != '--quiet').toList();
+  if (paths.isEmpty) {
+    stderr.writeln('Usage: dart run tool/replay_split_audio.dart [--quiet] <path.gpx>...');
     exit(1);
   }
-  final xml = File(args[0]).readAsStringSync();
+  var totalLive = 0;
+  var totalPlain = 0;
+  var totalSplits = 0;
+  for (final path in paths) {
+    final (live, plain, splits) = _replay(path, quiet: quiet);
+    totalLive += live;
+    totalPlain += plain;
+    totalSplits += splits;
+  }
+  if (paths.length > 1) {
+    print(
+      '\nAll ${paths.length} files, $totalSplits targeted splits: verdict cues '
+      '$totalLive with hysteresis vs $totalPlain with the plain band',
+    );
+  }
+}
+
+/// Returns (verdict cues with hysteresis, verdict cues with the plain band,
+/// targeted splits seen).
+(int, int, int) _replay(String path, {required bool quiet}) {
+  void say(String line) {
+    if (!quiet) print(line);
+  }
+
+  final xml = File(path).readAsStringSync();
 
   final splitType = _extractTag(xml, 'sat:split_type');
   final splitValue = _extractTag(xml, 'sat:split_value');
   final splitPlanRaw = _extractTag(xml, 'sat:split_plan');
-  print('split_type=$splitType split_value=$splitValue split_plan=$splitPlanRaw');
+  final rollingTarget = double.tryParse(_extractTag(xml, 'sat:split_target') ?? '');
+  say('split_type=$splitType split_value=$splitValue split_plan=$splitPlanRaw split_target=$rollingTarget');
 
   final kind = switch (splitType) {
     'distance_km' => SplitKind.distanceKm,
@@ -39,7 +72,7 @@ void main(List<String> args) {
     'time_min' => SplitKind.timeMin,
     _ => SplitKind.distanceKm,
   };
-  final base = SplitPreference(kind: kind, value: int.parse(splitValue!));
+  final base = SplitPreference(kind: kind, value: int.parse(splitValue ?? '1'));
   final customSplits = <PlannedSplit>[];
   if (splitPlanRaw != null && splitPlanRaw.isNotEmpty) {
     for (final entry in splitPlanRaw.split(';')) {
@@ -49,28 +82,54 @@ void main(List<String> args) {
       customSplits.add(PlannedSplit(size: size, targetSpeedMps: target));
     }
   }
-  final plan = SplitPlan(base: base, customSplits: customSplits);
-  print(
+  final plan = SplitPlan(
+    base: base,
+    customSplits: customSplits,
+    rollingTargetSpeedMps: customSplits.isEmpty ? rollingTarget : null,
+  );
+  say(
     'Parsed plan: ${plan.customSplits.length} custom splits, '
     'base ${plan.base.kind.name}=${plan.base.value}',
   );
   for (var i = 0; i < plan.customSplits.length; i++) {
-    print('  split ${i + 1}: size=${plan.sizeOf(i)} target=${plan.targetOf(i)}');
+    say('  split ${i + 1}: size=${plan.sizeOf(i)} target=${plan.targetOf(i)}');
   }
 
   final points = _parseTrackPoints(xml);
-  print('Parsed ${points.length} track points\n');
+  say('Parsed ${points.length} track points\n');
 
   final engine = MetricsEngine(mode: ActivityMode.running, splitPlan: plan);
+  final tracker = LiveSplitVerdictTracker();
   LiveMetrics? previous;
+  LiveMetrics? previousPlain;
   var cueCount = 0;
+  var liveVerdictCues = 0;
+  var plainVerdictCues = 0;
+  final targetedSplits = <int>{};
 
   for (final point in points) {
     engine.addPoint(point);
-    final current = engine.metrics;
+    final raw = engine.metrics;
+    final current = raw.withCurrentSplitVerdict(tracker.update(raw));
+    if (raw.currentSplit.targetSpeedMps != null) targetedSplits.add(raw.currentSplit.index);
+
+    // The same tick judged by the plain band, for comparison only.
+    final plain = raw.withCurrentSplitVerdict(
+      splitVerdict(
+        avgSpeedMps: _avgSpeedMps(raw),
+        targetSpeedMps: raw.currentSplit.targetSpeedMps,
+        elapsedInSplit: raw.currentSplitElapsed,
+      ),
+    );
+    if (detectSplitAudioCue(previous: previousPlain, current: plain)?.kind == SplitAudioCueKind.verdict) {
+      plainVerdictCues++;
+    }
+    previousPlain = plain;
+
     final cue = detectSplitAudioCue(previous: previous, current: current);
     if (cue != null) {
       cueCount++;
+      if (cue.kind == SplitAudioCueKind.verdict) liveVerdictCues++;
       final beepDesc = switch (cue.kind) {
         SplitAudioCueKind.splitChanged => '1 beep (splitChanged)',
         SplitAudioCueKind.verdict => switch (cue.verdict!) {
@@ -79,10 +138,10 @@ void main(List<String> args) {
             SplitVerdict.onTarget => '1 long beep (onTarget)',
           },
       };
-      print(
+      say(
         '[cue #$cueCount] t=${point.timestamp.toIso8601String()} '
         'splitIndex=${current.currentSplit.index} '
-        'currentSplitElapsed=${current.currentSplitElapsed} '
+        'progress=${currentSplitProgress(current).toStringAsFixed(2)} '
         'avgSpeedMps=${_avgSpeedMps(current)?.toStringAsFixed(3)} '
         'target=${current.currentSplit.targetSpeedMps} '
         '-> $beepDesc',
@@ -91,7 +150,11 @@ void main(List<String> args) {
     previous = current;
   }
 
-  print('\nTotal cues: $cueCount');
+  print(
+    '$path: ${targetedSplits.length} targeted splits, verdict cues '
+    '$liveVerdictCues with hysteresis vs $plainVerdictCues plain',
+  );
+  return (liveVerdictCues, plainVerdictCues, targetedSplits.length);
 }
 
 double? _avgSpeedMps(LiveMetrics m) {
