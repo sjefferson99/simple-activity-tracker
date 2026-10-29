@@ -300,5 +300,12 @@ git push origin vX.Y.Z
 # the tag is what triggers both workflows above.
 ```
 
+**Release notes** are generated from PR labels: "Generate release notes" on the release
+page (or `gh release create --generate-notes`) groups every merged PR under ⚠️ Breaking
+changes, ⚠️ Upgrade notes, Enhancements, Bug fixes and so on, per
+[.github/release.yml](.github/release.yml). Rewrite the generated lines in plain
+language, and expand the warning sections from each PR's "Release notes" section. The
+labelling rules are in [CLAUDE.md](CLAUDE.md) ("PR labels and release notes").
+
 The mobile build takes a few minutes, so the APK asset typically appears on the release
 a little after the release itself goes live — not a sign anything failed.
