@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/display/orientation_lock_settings.dart';
 import '../core/sync/sync_service.dart';
 import '../features/live_run/live_run_screen.dart';
 
@@ -19,6 +20,13 @@ class _SimpleActivityTrackerAppState
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Re-applied on every change, so flipping the Settings switch takes
+    // effect at once, including mid-run (issue #150).
+    ref.listenManual(
+      portraitLockProvider,
+      (_, locked) => applyPortraitLock(locked),
+      fireImmediately: true,
+    );
   }
 
   @override
