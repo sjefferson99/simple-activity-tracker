@@ -29,8 +29,8 @@ class SplitAudioCue {
   /// [LiveMetrics.currentSplit] at the tick the cue fired, for both kinds).
   final CurrentSplitInfo split;
 
-  /// This split's average speed so far (by moving time), for the verdict
-  /// TTS's "by how much" figure. Null if there has been no moving time yet,
+  /// This split's average speed so far (over its elapsed time), for the
+  /// verdict TTS's "by how much" figure. Null at the split's very start,
   /// or for a [SplitAudioCueKind.splitChanged] cue, which doesn't use it.
   final double? avgSpeedMps;
 
@@ -78,8 +78,8 @@ class SplitAudioCue {
       'rolledOntoRollingSplits: $rolledOntoRollingSplits)';
 }
 
-/// No verdict *cue* (beep or spoken correction) until a split has this much
-/// moving time — the tile's colour still shows from [splitVerdictGrace]
+/// No verdict *cue* (beep or spoken correction) until a split has run this
+/// long — the tile's colour still shows from [splitVerdictGrace]
 /// (issue #154 follow-up). With the ±1.3% band, a split's average flips
 /// most in its first 20-30 s; replaying 112 real completed targeted splits,
 /// 30 s cut verdict cues from 279 (2.5/split) to 184 (1.6/split), while

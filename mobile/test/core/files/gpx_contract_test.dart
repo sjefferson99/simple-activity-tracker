@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:simple_activity_tracker/core/files/run_gpx_log.dart';
 import 'package:simple_activity_tracker/domain/models/track_point.dart';
 import 'package:simple_activity_tracker/domain/tracking/activity_mode.dart';
+import 'package:simple_activity_tracker/domain/tracking/run_clock.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_plan.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_preference.dart';
 
@@ -39,6 +40,18 @@ final _cases = <String, SplitPlan>{
   ),
 };
 
+/// When each case's run clock ran (`sat:clock_spans`, issue #161): Start 8 s
+/// before the first fix, Stop 2 s after the last; custom-plan also pauses
+/// for 6 s between the 6th and 7th fixes (a new track segment on resume).
+DateTime _at(int minute, int second) =>
+    DateTime.utc(2026, 9, 24, 7, minute, second);
+final _startedAt = DateTime.utc(2026, 9, 24, 6, 59, 52);
+final _stoppedAt = _at(1, 52);
+final _pauses = <String, List<(DateTime, DateTime)>>{
+  'custom-plan': [(_at(0, 52), _at(0, 58))],
+  'rolling-target': [],
+};
+
 /// 12 fixes, 10 s apart, ~30 m apart heading north — a steady 3 m/s jog.
 List<TrackPoint> _points() => [
   for (var i = 0; i < 12; i++)
@@ -53,7 +66,23 @@ List<TrackPoint> _points() => [
     ),
 ];
 
-Map<String, dynamic> _expected(SplitPlan plan, List<TrackPoint> points) => {
+List<List<String>> _expectedSpans(String name) {
+  final bounds = [
+    _startedAt,
+    for (final (pause, resume) in _pauses[name]!) ...[pause, resume],
+    _stoppedAt,
+  ];
+  return [
+    for (var i = 0; i < bounds.length; i += 2)
+      [bounds[i].toIso8601String(), bounds[i + 1].toIso8601String()],
+  ];
+}
+
+Map<String, dynamic> _expected(
+  String name,
+  SplitPlan plan,
+  List<TrackPoint> points,
+) => {
   'split_type': plan.base.gpxSplitType,
   'split_value': plan.base.value,
   'rolling_target_mps': plan.isCustom ? null : plan.rollingTargetSpeedMps,
@@ -66,6 +95,7 @@ Map<String, dynamic> _expected(SplitPlan plan, List<TrackPoint> points) => {
     'accuracy_m': points.first.accuracyMeters,
     'speed_mps': points.first.speedMps,
   },
+  'clock_spans': _expectedSpans(name),
 };
 
 String _normalise(String text) => text.replaceAll('\r\n', '\n');
@@ -79,11 +109,20 @@ void main() {
   for (final MapEntry(key: name, value: plan) in _cases.entries) {
     test('$name.gpx matches what the app writes', () async {
       final written = File('${tempDir.path}/$name.gpx');
-      final log = RunGpxLog(written, plan, ActivityMode.running);
+      final clock = RunClock(startedAt: _startedAt);
+      final log = RunGpxLog(written, plan, ActivityMode.running, clock: clock);
       final points = _points();
+      final pauses = [..._pauses[name]!];
       for (final point in points) {
+        if (pauses.isNotEmpty && point.timestamp.isAfter(pauses.first.$2)) {
+          final (pause, resume) = pauses.removeAt(0);
+          clock.pause(pause);
+          clock.resume(resume);
+          log.startNewSegment();
+        }
         log.addPoint(point);
       }
+      clock.pause(_stoppedAt);
       await log.finalizeAndFlush();
 
       final golden = File('${_contractDir.path}/$name.gpx');
@@ -92,7 +131,7 @@ void main() {
         _contractDir.createSync(recursive: true);
         golden.writeAsStringSync(_normalise(written.readAsStringSync()));
         expected.writeAsStringSync(
-          '${const JsonEncoder.withIndent('  ').convert(_expected(plan, points))}\n',
+          '${const JsonEncoder.withIndent('  ').convert(_expected(name, plan, points))}\n',
         );
       }
 
@@ -109,7 +148,10 @@ void main() {
             'change (docs/VERSIONING.md §5); if this is a new extension, regenerate '
             'with --dart-define=UPDATE_CONTRACT=true.',
       );
-      expect(_expected(plan, points), jsonDecode(expected.readAsStringSync()));
+      expect(
+        _expected(name, plan, points),
+        jsonDecode(expected.readAsStringSync()),
+      );
     });
   }
 }

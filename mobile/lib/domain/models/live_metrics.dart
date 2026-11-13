@@ -10,17 +10,19 @@ class LiveMetrics {
   /// "Time" tile shows — that's [elapsedWallClock].
   final Duration elapsed;
 
-  /// Wall-clock time since Start minus explicit pauses (see `RunClock`).
-  /// Stamped in by the controller, not [MetricsEngine], because it must keep
-  /// counting even when no fix is accepted (or arrives at all).
+  /// Wall-clock time since Start minus explicit pauses (see `RunClock`):
+  /// the "Time" tile, and the clock every split is timed on (issue #161).
+  /// Keeps counting when no fix is accepted, or none arrives at all, because
+  /// the controller advances the engine's clock on every UI tick.
   final Duration elapsedWallClock;
 
   final double distanceMeters;
   final double? avgSpeedMps;
   final List<Split> completedSplits;
 
-  /// Elapsed moving time and distance covered within the split still
-  /// in progress (i.e. since the last completed split boundary).
+  /// Elapsed time ([elapsedWallClock]'s clock, not moving time) and
+  /// distance covered within the split still in progress (i.e. since the
+  /// last completed split boundary).
   final Duration currentSplitElapsed;
   final double currentSplitDistanceMeters;
 

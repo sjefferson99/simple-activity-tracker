@@ -44,11 +44,11 @@ Scope, from [issue #99](https://github.com/sjefferson99/simple-activity-tracker/
 
 Recommendations the owner did not object to, so treat as decided too:
 
-- The verdict is judged on the **current split's average pace so far** (moving time, exactly
-  what the Split pace tile already shows), never on instantaneous chip speed, which is far
+- The verdict is judged on the **current split's average pace so far** (exactly what the
+  Split pace tile already shows; elapsed time since issue #161, originally moving time), never on instantaneous chip speed, which is far
   too noisy to colour a tile with.
 - A **neutral grace period** at the start of every split: no tint until the split has at
-  least 10 s of moving time. Otherwise every split opens red for its first few seconds.
+  least 10 s of elapsed time. Otherwise every split opens red for its first few seconds.
 - The **Last split** tile is tinted by its own final result against its own target (no
   grace), and each row in the expandable splits list shows its target and delta.
 - The pace/speed preference (D4) also **seeds the live screen's speed/pace toggle** at
@@ -365,7 +365,7 @@ colouring depends on real pace noise:
 2. Custom time plan: `1:30 @ 4.0 km/h`, `1:00 @ 6.0 km/h`, `1:30 @ 4.0 km/h`, then walk for
    5 minutes. Expect: three tinted splits in the list with targets and deltas, "Split 4"
    untargeted and untinted, tile reads `Split 4 · 1 min` (base size) after the plan.
-3. Pause mid-split, resume: verdict continues from the split's moving-time average, no
+3. Pause mid-split, resume: verdict continues from the split's average (the pause is excluded), no
    flash to red on resume.
 4. Kill and relaunch the app: the Splits screen shows the same plan (persistence), and
    an install *over* a build that only had the old three keys shows the old rolling

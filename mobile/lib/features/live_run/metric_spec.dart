@@ -89,8 +89,8 @@ final MetricSpec _distanceSpec = MetricSpec(
       '${formatDistanceMi(metrics.distanceMeters)} mi',
 );
 
-/// The current split's average speed so far, by moving time — null if the
-/// split has had no moving time yet. This is the figure both the tile's
+/// The current split's average speed so far, over the split's elapsed time
+/// (the Time tile's clock, issue #161) — null at the split's very start. This is the figure both the tile's
 /// value and its target verdict are judged on (issue #99): never
 /// instantaneous/chip speed, which is too noisy to color a tile with.
 double? _currentSplitAvgSpeedMps(LiveMetrics metrics) {
@@ -111,7 +111,8 @@ final MetricSpec _currentSplitSpec = MetricSpec(
   id: 'current_split',
   label: (unit) => unit.isPace ? 'Split pace' : 'Split speed',
   description:
-      'Pace or speed over the current split so far, by moving time. Resets '
+      'Pace or speed over the current split so far, timed on the same clock '
+      'as Time: only Pause stops it. Resets '
       'at each split boundary. When the split has a target, the tile turns '
       'green when you are within 1.3% of it (about 4 s/km at 5:00/km) and '
       'red otherwise, with an arrow showing which way to adjust.',

@@ -1,5 +1,6 @@
 import itertools
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from app.analysis.analyzer import AnalysisResult
 from app.analysis.elevation import gain_and_loss, is_phone_gps_track, smooth_profile
@@ -38,11 +39,22 @@ from app.analysis.track import Point, Track, drop_inaccurate_points
 # GPX track segment's own span rather than the whole track's first-to-last,
 # excluding the gap a pause/resume leaves between segments — closes most of
 # the drift against the phone's own pause-excluding "Time" tile, without
-# a new upload field (see _elapsed_seconds_excluding_pauses).
+# a new upload field (since replaced by _ElapsedClock, v13).
+# 13: splits are timed on the elapsed clock — wall-clock since Start, minus
+# pauses — not moving time (issue #161), matching the phone, whose splits now
+# add up to its Time tile. The stationary gate and the implausible-step check
+# decide only distance, never how long a split lasts. The timeline comes from
+# the GPX's sat:clock_spans when present (Start, pause, resume and Stop
+# instants, so it includes the time before the first fix and after the
+# last), else from each track segment's own first-to-last span as before.
+# elapsed_seconds is that timeline's total, the chart's time axis (series
+# and split boundary t_s) is on it too, and a time split that ends after the
+# last fix but before Stop is now listed. Moving time, average moving speed
+# and best efforts are unchanged.
 # Bump this whenever the result shape or algorithm changes, then run
 # `simple-activity-tracker-server reanalyze --all` on each deployment so
 # stored analyses catch up — the web UI reads stored results as-is.
-ANALYSIS_VERSION = 12
+ANALYSIS_VERSION = 13
 
 # Green within ±1.3% of target speed (about ±4 s/km at 5:00/km), red outside
 # in either direction — one relative band for pace and speed targets alike
@@ -147,6 +159,10 @@ class _Step:
     cum_time_s: float  # cumulative *moving* time including this step (issue #50: gated
     # the same way as cum_distance_m — zero for a non-moving step, not wall-clock)
     is_moving: bool  # whether the stationary gate credits this step as motion
+    # Both ends of the step on the elapsed timeline (_ElapsedClock): what
+    # splits are timed on (issue #161), unlike cum_time_s.
+    prev_elapsed_s: float = 0.0
+    elapsed_s: float = 0.0
 
 
 @dataclass
@@ -202,7 +218,54 @@ class _StationaryDetector:
         return was_moving
 
 
-def _build_steps(segments: list[list[Point]], max_implied_speed_mps: float) -> list[_Step]:
+class _ElapsedClock:
+    """The activity's elapsed timeline: wall-clock seconds since Start with
+    pauses left out — the phone's RunClock, the clock its "Time" tile and
+    splits run on (issue #161). Built from the GPX's sat:clock_spans when the
+    app wrote them, else from each track segment's first-to-last fix (the
+    app starts a segment on every resume, so the gaps between segments are
+    the pauses; this misses only the time before a segment's first fix and
+    after its last)."""
+
+    def __init__(self, spans: list[tuple[datetime, datetime]]) -> None:
+        self._spans: list[tuple[datetime, datetime, float]] = []
+        offset = 0.0
+        for start, end in spans:
+            self._spans.append((start, end, offset))
+            offset += (end - start).total_seconds()
+        self.total_s = offset
+
+    @classmethod
+    def for_track(
+        cls,
+        clock_spans: tuple[tuple[datetime, datetime | None], ...] | None,
+        segments: list[list[Point]],
+    ) -> "_ElapsedClock":
+        fixes = [p.time for points in segments for p in points]
+        if clock_spans and fixes:
+            last_fix = max(fixes)
+            # A span left open (the app crashed, or the file was written
+            # mid-run) is taken to end at the last fix.
+            return cls([(start, end or max(start, last_fix)) for start, end in clock_spans])
+        return cls([(points[0].time, points[-1].time) for points in segments if points])
+
+    def at(self, t: datetime) -> float:
+        """Elapsed seconds at `t`. A time while paused (or before Start)
+        reads as the previous span's end, so the timeline never runs
+        backwards."""
+        elapsed = 0.0
+        for start, end, offset in self._spans:
+            if t <= start:
+                return offset
+            if t < end:
+                return offset + (t - start).total_seconds()
+            elapsed = offset + (end - start).total_seconds()
+        return elapsed
+
+
+def _build_steps(
+    segments: list[list[Point]], max_implied_speed_mps: float, clock: _ElapsedClock
+) -> list[_Step]:
     steps: list[_Step] = []
     cum_distance = 0.0
     cum_time = 0.0
@@ -246,6 +309,8 @@ def _build_steps(segments: list[list[Point]], max_implied_speed_mps: float) -> l
                     cum_distance_m=cum_distance,
                     cum_time_s=cum_time,
                     is_moving=is_moving,
+                    prev_elapsed_s=clock.at(prev.time),
+                    elapsed_s=clock.at(curr.time),
                 )
             )
     return steps
@@ -311,7 +376,11 @@ def _compute_splits(
     split_type: str = _DEFAULT_SPLIT_TYPE,
     split_value: int = _DEFAULT_SPLIT_VALUE,
     split_plan: SplitPlanData | None = None,
+    elapsed_total_s: float | None = None,
 ) -> list[dict[str, object]]:
+    """Splits timed on the elapsed timeline (_Step.elapsed_s, issue #161).
+    `elapsed_total_s` is where that timeline ends (Stop): a time split whose
+    boundary falls after the last fix but by then is still listed."""
     if not steps:
         return []
 
@@ -332,7 +401,12 @@ def _compute_splits(
         rolling_target_mps=rolling_target,
         custom_splits=custom_splits,
     )
-    return _compute_time_splits(steps, first_point, sizing)
+    return _compute_time_splits(
+        steps,
+        first_point,
+        sizing,
+        steps[-1].elapsed_s if elapsed_total_s is None else elapsed_total_s,
+    )
 
 
 def _compute_distance_splits(
@@ -342,7 +416,6 @@ def _compute_distance_splits(
     builder = _SplitBuilder(
         index=1, start_distance_m=0.0, start_time_s=0.0, start_ele=first_point.ele
     )
-    prev_cum_time = 0.0
     prev_ele = first_point.ele
     next_boundary = builder.start_distance_m + sizing.size_of(builder.index)
 
@@ -361,7 +434,12 @@ def _compute_distance_splits(
             # the boundary (mirrors mobile MetricsEngine's approach).
             overshoot = step.cum_distance_m - next_boundary
             fraction = 1 - (overshoot / step.distance_m)
-            crossing_time_s = prev_cum_time + fraction * step.dt_s
+            # On the elapsed timeline (issue #161): time the stationary gate
+            # didn't credit still counts toward the split.
+            crossing_time_s = step.prev_elapsed_s + fraction * (
+                step.elapsed_s - step.prev_elapsed_s
+            )
+            crossing_time_s = max(crossing_time_s, builder.start_time_s)
             duration_s = crossing_time_s - builder.start_time_s
             split_distance_m = next_boundary - builder.start_distance_m
             avg_speed = split_distance_m / duration_s if duration_s > 0 else 0.0
@@ -392,69 +470,75 @@ def _compute_distance_splits(
             )
             next_boundary = builder.start_distance_m + sizing.size_of(builder.index)
 
-        prev_cum_time = step.cum_time_s
-
     return splits
 
 
 def _compute_time_splits(
-    steps: list[_Step], first_point: Point, sizing: _SplitSizing
+    steps: list[_Step], first_point: Point, sizing: _SplitSizing, elapsed_total_s: float
 ) -> list[dict[str, object]]:
+    """Time-kind splits close at fixed points on the elapsed timeline (issue
+    #161), so a split is exactly its size on any stopwatch. A step's credited
+    distance is shared by time between the splits it straddles; an
+    uncredited (stationary) step adds no distance but its time still counts.
+    Boundaries after the last fix, up to `elapsed_total_s`, close with the
+    distance already covered — the phone closes them on its clock too."""
     splits: list[dict[str, object]] = []
     builder = _SplitBuilder(
         index=1, start_distance_m=0.0, start_time_s=0.0, start_ele=first_point.ele
     )
-    prev_cum_distance = 0.0
     prev_ele = first_point.ele
     next_boundary = builder.start_time_s + sizing.size_of(builder.index)
+
+    def close(crossing_distance_m: float, lat: float, lon: float, ele: float | None) -> None:
+        nonlocal builder, next_boundary
+        duration_s = next_boundary - builder.start_time_s
+        split_distance_m = crossing_distance_m - builder.start_distance_m
+        avg_speed = split_distance_m / duration_s if duration_s > 0 else 0.0
+        target_speed_mps = sizing.target_of(builder.index)
+        splits.append(
+            {
+                "index": builder.index,
+                "duration_seconds": duration_s,
+                "avg_speed_mps": avg_speed,
+                "elevation_delta_m": builder.elevation_delta_m,
+                "distance_m": split_distance_m,
+                "target_speed_mps": target_speed_mps,
+                "verdict": _verdict(avg_speed, target_speed_mps),
+                "boundary": {
+                    "t_s": next_boundary,
+                    "dist_m": crossing_distance_m,
+                    "lat": lat,
+                    "lon": lon,
+                },
+            }
+        )
+        builder = _SplitBuilder(
+            index=builder.index + 1,
+            start_distance_m=crossing_distance_m,
+            start_time_s=next_boundary,
+            start_ele=ele,
+        )
+        next_boundary = builder.start_time_s + sizing.size_of(builder.index)
 
     for step in steps:
         builder.elevation_delta_m += _elevation_delta(prev_ele, step.point.ele)
         prev_ele = step.point.ele
+        prev_cum_distance = step.cum_distance_m - step.distance_m
+        span_s = step.elapsed_s - step.prev_elapsed_s
 
-        # A while loop, not if — see _compute_distance_splits's identical
-        # comment: a single sparse step can cross more than one time
-        # boundary, and next_boundary is re-derived per split for the same
-        # variable-size-plan reason.
-        while step.cum_time_s >= next_boundary and step.dt_s > 0:
-            # Interpolate the crossing distance — the mirror image of the
-            # distance-mode loop's time interpolation (see
-            # _compute_distance_splits): here the boundary is time, so the
-            # unknown at the crossing point is how far the runner had gone.
-            overshoot_s = step.cum_time_s - next_boundary
-            fraction = 1 - (overshoot_s / step.dt_s)
-            crossing_distance_m = prev_cum_distance + fraction * step.distance_m
-            duration_s = next_boundary - builder.start_time_s
-            split_distance_m = crossing_distance_m - builder.start_distance_m
-            avg_speed = split_distance_m / duration_s if duration_s > 0 else 0.0
-            target_speed_mps = sizing.target_of(builder.index)
+        # A while loop, not if: one sparse step (or a dropped implausible
+        # one before it) can cover several boundaries, and next_boundary is
+        # re-derived per split for a custom plan's varying sizes.
+        while step.elapsed_s >= next_boundary and sizing.size_of(builder.index) > 0:
+            fraction = (next_boundary - step.prev_elapsed_s) / span_s if span_s > 0 else 1.0
+            fraction = min(max(fraction, 0.0), 1.0)
             lat, lon = _interpolate_latlon(step, fraction)
-            splits.append(
-                {
-                    "index": builder.index,
-                    "duration_seconds": duration_s,
-                    "avg_speed_mps": avg_speed,
-                    "elevation_delta_m": builder.elevation_delta_m,
-                    "distance_m": split_distance_m,
-                    "target_speed_mps": target_speed_mps,
-                    "verdict": _verdict(avg_speed, target_speed_mps),
-                    "boundary": {
-                        "t_s": next_boundary,
-                        "dist_m": crossing_distance_m,
-                        "lat": lat,
-                        "lon": lon,
-                    },
-                }
-            )
-            builder = _SplitBuilder(
-                index=builder.index + 1,
-                start_distance_m=crossing_distance_m,
-                start_time_s=next_boundary,
-                start_ele=step.point.ele,
-            )
-            next_boundary = builder.start_time_s + sizing.size_of(builder.index)
+            close(prev_cum_distance + fraction * step.distance_m, lat, lon, step.point.ele)
 
-        prev_cum_distance = step.cum_distance_m
+    if steps:
+        last = steps[-1]
+        while elapsed_total_s >= next_boundary and sizing.size_of(builder.index) > 0:
+            close(last.cum_distance_m, last.point.lat, last.point.lon, last.point.ele)
 
     return splits
 
@@ -599,12 +683,11 @@ def _series(
     windowed_speeds: list[float | None],
     first_point: Point,
 ) -> list[dict[str, object]]:
-    """t_s is accumulated moving time (cum_time_s), not wall-clock elapsed —
-    it never advances across a gap between segments (a pause, or a stretch
-    with no GPS fixes), the same way moving_seconds and the splits don't
-    credit that gap either. A wall-clock x-axis would show a flat, dataless
-    stretch across every pause; a moving-time axis keeps the pace/elevation
-    chart continuous, matching what the runner actually experienced."""
+    """t_s is on the elapsed timeline (_ElapsedClock, issue #161) — the same
+    clock as elapsed_seconds and the split boundaries' t_s, so the chart's
+    split markers land where the splits table says. Pauses are left out, so
+    the chart doesn't stretch across them; standing still without pausing
+    shows, as it does in the splits."""
     if not steps:
         return []
 
@@ -615,7 +698,7 @@ def _series(
     stride = max(1, -(-n // budget))  # ceil division
     samples: list[dict[str, object]] = [
         {
-            "t_s": 0.0,
+            "t_s": steps[0].prev_elapsed_s,
             "dist_m": 0.0,
             "speed_mps": None,
             "ele_m": first_point.ele,
@@ -625,18 +708,18 @@ def _series(
         step = steps[i]
         samples.append(
             {
-                "t_s": step.cum_time_s,
+                "t_s": step.elapsed_s,
                 "dist_m": step.cum_distance_m,
                 "speed_mps": windowed_speeds[i],
                 "ele_m": smoothed[i + 1] if i + 1 < len(smoothed) else step.point.ele,
             }
         )
-    if samples[-1]["t_s"] != steps[-1].cum_time_s:
+    if samples[-1]["t_s"] != steps[-1].elapsed_s:
         last_index = len(steps) - 1
         last = steps[last_index]
         samples.append(
             {
-                "t_s": last.cum_time_s,
+                "t_s": last.elapsed_s,
                 "dist_m": last.cum_distance_m,
                 "speed_mps": windowed_speeds[last_index],
                 "ele_m": smoothed[-1] if smoothed else last.point.ele,
@@ -656,26 +739,6 @@ def _bounds(segments: list[list[Point]]) -> dict[str, float] | None:
         "min_lon": min(lons),
         "max_lon": max(lons),
     }
-
-
-def _elapsed_seconds_excluding_pauses(segments: list[list[Point]]) -> float:
-    """Sum of each GPX <trkseg>'s own span (its last point's time minus its
-    first), rather than the whole track's first-to-last — issue #50. Mobile
-    starts a new track segment on every pause/resume (RunGpxLog), so the gap
-    *between* segments is paused wall-clock time, the same information
-    RunClock excludes on the phone. This can't be an exact match for the
-    phone's own "Time" tile (a pause shorter than one GPS fix interval, or a
-    segment boundary from a genuine GPS dropout rather than a real pause,
-    isn't distinguishable from here), but it removes the single biggest
-    source of drift — a real pause used to be silently counted as elapsed
-    time. A track with only one segment (no pauses) is unaffected: this
-    equals the old first-to-last calculation exactly."""
-    total = 0.0
-    for points in segments:
-        if len(points) < 2:
-            continue
-        total += (points[-1].time - points[0].time).total_seconds()
-    return total
 
 
 @dataclass
@@ -730,11 +793,12 @@ class AnalyzerV1:
         max_implied_speed_mps = _MAX_IMPLIED_SPEED_MPS_BY_ACTIVITY_TYPE.get(
             activity_type, _DEFAULT_MAX_IMPLIED_SPEED_MPS
         )
-        steps = _build_steps(filtered_segments, max_implied_speed_mps)
+        clock = _ElapsedClock.for_track(track.clock_spans, filtered_segments)
+        steps = _build_steps(filtered_segments, max_implied_speed_mps, clock)
         windowed_speeds = _windowed_speeds(steps, all_points[0])
 
         total_distance_m = steps[-1].cum_distance_m if steps else 0.0
-        elapsed_s = _elapsed_seconds_excluding_pauses(filtered_segments)
+        elapsed_s = clock.total_s
         # cum_time_s is already moving-gated (_build_steps zeroes a
         # non-moving step's own contribution), so the running total on the
         # last step *is* moving_s — same gate now decides both this and
@@ -753,7 +817,9 @@ class AnalyzerV1:
             "split_type": split_type,
             "split_value": split_value,
             "split_targets_as": split_plan.targets_as if split_plan else None,
-            "splits": _compute_splits(steps, all_points[0], split_type, split_value, split_plan),
+            "splits": _compute_splits(
+                steps, all_points[0], split_type, split_value, split_plan, elapsed_s
+            ),
             "best_efforts": _best_efforts(steps),
             "series": _series(steps, smoothed, windowed_speeds, all_points[0]),
             "bounds": _bounds(filtered_segments),

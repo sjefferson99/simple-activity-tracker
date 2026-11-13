@@ -5,6 +5,7 @@ import '../models/split.dart';
 import '../models/track_point.dart';
 import 'activity_mode.dart';
 import 'elevation_accumulator.dart';
+import 'run_clock.dart';
 import 'split_plan.dart';
 import 'split_preference.dart';
 
@@ -174,6 +175,15 @@ class _StationaryDetector {
 /// [mode] only affects which GPS segments are accepted as plausible motion
 /// versus discarded as a bad fix — see [_PlausibilityLimits]. It does not
 /// yet change how metrics are computed or displayed.
+///
+/// **Two clocks (issue #161).** Splits are measured on the run's *elapsed*
+/// clock — [RunClock]: wall-clock since Start, stopped only by an explicit
+/// pause — the same clock as the "Time" tile, so completed splits plus the
+/// split in progress always add up to Time exactly, and a 5-minute split
+/// is five minutes on any stopwatch. Nothing the GPS filters decide (a
+/// stationary verdict, a dropped or implausible fix) ever takes time out of
+/// a split; only distance is filtered. Moving time ([LiveMetrics.elapsed])
+/// is kept separately, for average pace and the server's `moving_seconds`.
 class MetricsEngine {
   final _PlausibilityLimits _limits;
 
@@ -185,11 +195,19 @@ class MetricsEngine {
   final SplitPlan _plan;
   final bool _isTimeMode;
 
+  /// The run's elapsed clock, shared with the caller, which pauses and
+  /// resumes it. Null until the first point when none was given: a
+  /// standalone engine (tests, replay tools) then starts its own clock at
+  /// the first fix and, never being paused, counts every gap as elapsed.
+  RunClock? _clock;
+
   MetricsEngine({
     ActivityMode mode = ActivityMode.running,
     SplitPlan splitPlan = SplitPlan.defaultPlan,
     SplitPreference? splitPreference,
-  }) : _limits = _PlausibilityLimits.forMode(mode),
+    RunClock? clock,
+  }) : _clock = clock,
+       _limits = _PlausibilityLimits.forMode(mode),
        // splitPreference is kept as a convenience wrapper for callers/tests
        // that only need a rolling plan — it wins over splitPlan if both are
        // given, which should never happen outside a test double.
@@ -209,15 +227,56 @@ class MetricsEngine {
   Duration _movingElapsed = Duration.zero;
   double _totalDistanceMeters = 0;
 
+  /// The latest point on the run's elapsed timeline the engine has seen,
+  /// from a fix's timestamp or [advanceTo] — what [LiveMetrics.
+  /// elapsedWallClock] reports and the split in progress is timed against.
+  Duration _latestRunTime = Duration.zero;
+
+  /// No fix is placed earlier than this on the run timeline: the run time
+  /// at the last [resetSegmentAnchor], so a stale fix delivered just after
+  /// a resume can't land before the pause it followed.
+  Duration _runTimeFloor = Duration.zero;
+
   double _splitStartDistanceMeters = 0;
-  Duration _splitStartElapsed = Duration.zero;
+
+  /// Where the split in progress started, on the run's elapsed timeline.
+  Duration _splitStartRunTime = Duration.zero;
   final List<Split> _completedSplits = [];
+
+  /// Where each completed split ended on the elapsed timeline, parallel to
+  /// [_completedSplits] — what [_creditTimeMode] needs to share a late fix's
+  /// distance back into a split the clock already closed.
+  final List<Duration> _splitEndRunTimes = [];
 
   double? _maxSpeedMps;
   final ElevationAccumulator _elevation = ElevationAccumulator();
 
-  LiveMetrics _metrics = LiveMetrics.zero;
-  LiveMetrics get metrics => _metrics;
+  /// Metrics as of the latest fix or [advanceTo], whichever was later.
+  LiveMetrics get metrics =>
+      _clock == null ? LiveMetrics.zero : _buildMetrics();
+
+  /// Moves the run's elapsed clock on to [now] without a fix, so a time-kind
+  /// split closes on the clock (and its countdown keeps moving) even when no
+  /// fix arrives — call on every UI tick. A no-op for a standalone engine
+  /// that hasn't seen a fix yet, as its clock starts at the first one.
+  void advanceTo(DateTime now) {
+    if (_clock == null) return;
+    _advanceRunTime(_runTimeOf(now));
+  }
+
+  /// [now] placed on the run's elapsed timeline (pauses excluded), starting
+  /// a standalone engine's own clock on first use.
+  Duration _runTimeOf(DateTime now) {
+    final clock = _clock ??= RunClock(startedAt: now);
+    final value = clock.elapsed(now);
+    return value < _runTimeFloor ? _runTimeFloor : value;
+  }
+
+  void _advanceRunTime(Duration runTime) {
+    if (runTime <= _latestRunTime) return;
+    _latestRunTime = runTime;
+    if (_isTimeMode) _closeTimeSplitsUpTo(runTime);
+  }
 
   /// Feeds one more accepted GPS fix into the engine. A point is dropped
   /// entirely if [TrackPoint.hasAccuracy] is false — an unmeasured accuracy
@@ -226,6 +285,10 @@ class MetricsEngine {
   /// is worse than [_maxAcceptableAccuracyMeters]. Call site should not call
   /// this for paused/rejected points.
   void addPoint(TrackPoint point) {
+    // Time moves on with every fix, however it's judged below: the filters
+    // decide only what distance counts, never how long a split lasts.
+    _advanceRunTime(_runTimeOf(point.timestamp));
+
     if (!point.hasAccuracy) return;
     if (point.accuracyMeters > _maxAcceptableAccuracyMeters) return;
 
@@ -239,14 +302,12 @@ class MetricsEngine {
 
     if (previous == null) {
       _lastAccepted = point;
-      _metrics = _buildMetrics();
       return;
     }
 
     final segmentDistance = haversineDistanceMeters(previous, point);
     final segmentDuration = point.timestamp.difference(previous.timestamp);
     if (segmentDuration <= Duration.zero) {
-      _metrics = _buildMetrics();
       return;
     }
 
@@ -312,7 +373,6 @@ class MetricsEngine {
     );
     if (!isMoving) {
       _lastAccepted = point;
-      _metrics = _buildMetrics();
       return;
     }
 
@@ -336,7 +396,6 @@ class MetricsEngine {
     _lastAccepted = point;
     _pendingCandidate = null;
     _stationaryDetector.reset();
-    _metrics = _buildMetrics();
   }
 
   void _acceptSegment(
@@ -353,138 +412,135 @@ class MetricsEngine {
       _maxSpeedMps = segmentSpeedMps;
     }
 
-    _applySegment(segmentDistance, segmentDuration);
-    _metrics = _buildMetrics();
+    _movingElapsed += segmentDuration;
+    final from = _runTimeOf(previous.timestamp);
+    final to = _runTimeOf(point.timestamp);
+    if (_isTimeMode) {
+      _creditTimeMode(segmentDistance, from, to);
+    } else {
+      _creditDistanceMode(segmentDistance, from, to);
+    }
   }
 
   /// Call when tracking pauses/resumes so elapsed/distance calculations
-  /// don't bridge the gap as if it were continuous movement.
+  /// don't bridge the gap as if it were continuous movement. The elapsed
+  /// clock itself is paused by whoever owns the [RunClock].
   void resetSegmentAnchor() {
     _lastAccepted = null;
     _pendingCandidate = null;
     _stationaryDetector.reset();
     _elevation.resetAnchor();
+    _runTimeFloor = _latestRunTime;
   }
 
-  void _applySegment(double segmentDistance, Duration segmentDuration) {
-    if (_isTimeMode) {
-      _applySegmentTimeMode(segmentDistance, segmentDuration);
-    } else {
-      _applySegmentDistanceMode(segmentDistance, segmentDuration);
-    }
-  }
-
+  /// Distance-kind splits: a split ends where the run crosses its distance
+  /// boundary, at the elapsed-clock time interpolated along the segment that
+  /// crossed it. Its duration is elapsed time since the previous boundary,
+  /// so time the GPS filters didn't credit as moving still counts.
+  ///
   /// Splits may vary in size (issue #99's custom plans), so each loop
-  /// iteration below looks up the size of the split it is about to
-  /// complete — [_plan.sizeOf]/[_plan.targetOf] with `_completedSplits.
-  /// length` as the 0-based index of the split-in-progress — rather than
-  /// reusing one constant across the whole run. This matters even for a
-  /// plain rolling plan, which is just every index mapping to the same
-  /// size/target, but is essential for a custom plan: a single GPS gap can
-  /// straddle several short splits of *different* sizes, and each one must
-  /// be closed at its own boundary, not the previous split's.
-  void _applySegmentDistanceMode(
-    double segmentDistance,
-    Duration segmentDuration,
-  ) {
-    var remainingDistance = segmentDistance;
-    var elapsedBefore = _movingElapsed;
-    var splitDistanceMeters = _plan.sizeOf(_completedSplits.length);
+  /// iteration looks up the size of the split it is about to complete
+  /// rather than reusing one constant: a single GPS gap can straddle several
+  /// short splits of *different* sizes, and each one must be closed at its
+  /// own boundary, not the previous split's.
+  void _creditDistanceMode(double distance, Duration from, Duration to) {
+    final span = to - from;
+    var credited = 0.0;
+    var size = _plan.sizeOf(_completedSplits.length);
 
-    while (_totalDistanceMeters + remainingDistance >=
-            _splitStartDistanceMeters + splitDistanceMeters &&
-        remainingDistance > 0) {
-      final splitIndex = _completedSplits.length;
-      final distanceIntoSplit =
-          (_splitStartDistanceMeters + splitDistanceMeters) -
-          _totalDistanceMeters;
-      final fraction = distanceIntoSplit / remainingDistance;
-      final crossingDuration = segmentDuration * fraction;
-      final crossingElapsed = elapsedBefore + crossingDuration;
+    while (distance - credited > 0 &&
+        _totalDistanceMeters + (distance - credited) >=
+            _splitStartDistanceMeters + size) {
+      final intoSplit =
+          (_splitStartDistanceMeters + size) - _totalDistanceMeters;
+      credited += intoSplit;
+      // Fraction of the whole segment, not of what's left of it, so several
+      // crossings in one segment don't compound rounding.
+      var crossing = from + span * (credited / distance);
+      if (crossing < _splitStartRunTime) crossing = _splitStartRunTime;
 
-      final splitDuration = crossingElapsed - _splitStartElapsed;
-      _completedSplits.add(
-        Split(
-          index: splitIndex + 1,
-          duration: splitDuration,
-          // A split covering measurable distance in no measurable time would
-          // divide by zero; report 0 rather than an infinite pace.
-          avgSpeedMps: splitDuration.inMilliseconds > 0
-              ? splitDistanceMeters / splitDuration.inMilliseconds * 1000
-              : 0,
-          distanceMeters: splitDistanceMeters,
-          targetSpeedMps: _plan.targetOf(splitIndex),
-        ),
-      );
-
-      _totalDistanceMeters += distanceIntoSplit;
-      elapsedBefore = crossingElapsed;
-      _splitStartDistanceMeters = _totalDistanceMeters;
-      _splitStartElapsed = crossingElapsed;
-
-      remainingDistance -= distanceIntoSplit;
-      segmentDuration = segmentDuration - crossingDuration;
-      // Re-evaluated for the *next* split, now that this one is complete —
-      // the size a custom plan gives split N+1 may differ from split N's.
-      splitDistanceMeters = _plan.sizeOf(_completedSplits.length);
+      _totalDistanceMeters += intoSplit;
+      _closeSplit(end: crossing, distanceMeters: size);
+      size = _plan.sizeOf(_completedSplits.length);
     }
 
-    _totalDistanceMeters += remainingDistance;
-    _movingElapsed = elapsedBefore + segmentDuration;
+    _totalDistanceMeters += distance - credited;
   }
 
-  /// The mirror image of [_applySegmentDistanceMode]: the boundary is a
-  /// fixed elapsed-time target, so instead of interpolating the crossing
-  /// *time* by fraction of the segment's distance, this interpolates the
-  /// crossing *distance* by fraction of the segment's duration. See that
-  /// method's doc for why the split size is looked up fresh each iteration.
-  void _applySegmentTimeMode(double segmentDistance, Duration segmentDuration) {
-    var remainingDuration = segmentDuration;
-    var distanceBefore = _totalDistanceMeters;
-    var splitDurationTarget = _durationOf(_completedSplits.length);
+  /// Time-kind splits close on the elapsed clock ([_closeTimeSplitsUpTo]),
+  /// not when a fix happens to arrive, so a fix's distance can belong partly
+  /// to a split that has already closed: it covers `from`..`to` on the
+  /// timeline, and each split gets the share of [distance] for the share of
+  /// that span it overlaps. Whatever lies after the last boundary stays with
+  /// the split in progress.
+  void _creditTimeMode(double distance, Duration from, Duration to) {
+    _totalDistanceMeters += distance;
+    final span = to - from;
+    if (span <= Duration.zero) return;
 
-    while (_movingElapsed + remainingDuration >=
-            _splitStartElapsed + splitDurationTarget &&
-        remainingDuration > Duration.zero) {
-      final splitIndex = _completedSplits.length;
-      final durationIntoSplit =
-          (_splitStartElapsed + splitDurationTarget) - _movingElapsed;
-      final fraction =
-          durationIntoSplit.inMicroseconds / remainingDuration.inMicroseconds;
-      final crossingDistance = segmentDistance * fraction;
-      final crossingTotalDistance = distanceBefore + crossingDistance;
-
-      final splitDistance = crossingTotalDistance - _splitStartDistanceMeters;
-      _completedSplits.add(
-        Split(
-          index: splitIndex + 1,
-          duration: splitDurationTarget,
-          // A split covering measurable distance in no measurable time would
-          // divide by zero; report 0 rather than an infinite pace. Not
-          // reachable with a rolling plan (whole minutes, always >=1) but a
-          // custom time plan's size is caller-validated to be > 0 seconds
-          // too — guarded here for symmetry with the distance-mode branch.
-          avgSpeedMps: splitDurationTarget.inMilliseconds > 0
-              ? splitDistance / splitDurationTarget.inMilliseconds * 1000
-              : 0,
-          distanceMeters: splitDistance,
-          targetSpeedMps: _plan.targetOf(splitIndex),
-        ),
+    var movedBack = 0.0;
+    for (var i = _completedSplits.length - 1; i >= 0; i--) {
+      final end = _splitEndRunTimes[i];
+      if (end <= from) break;
+      final start = i == 0 ? Duration.zero : _splitEndRunTimes[i - 1];
+      final overlap = (end < to ? end : to) - (start > from ? start : from);
+      if (overlap <= Duration.zero) continue;
+      final share = distance * overlap.inMicroseconds / span.inMicroseconds;
+      final split = _completedSplits[i];
+      _completedSplits[i] = _split(
+        index: split.index,
+        duration: split.duration,
+        distanceMeters: split.distanceMeters + share,
       );
-
-      _movingElapsed += durationIntoSplit;
-      distanceBefore = crossingTotalDistance;
-      _splitStartDistanceMeters = crossingTotalDistance;
-      _splitStartElapsed = _movingElapsed;
-
-      remainingDuration -= durationIntoSplit;
-      segmentDistance -= crossingDistance;
-      splitDurationTarget = _durationOf(_completedSplits.length);
+      movedBack += share;
     }
-
-    _totalDistanceMeters = distanceBefore + segmentDistance;
-    _movingElapsed += remainingDuration;
+    _splitStartDistanceMeters += movedBack;
   }
+
+  /// Closes every time-kind split whose boundary [runTime] has reached, with
+  /// the distance credited to it so far — a later fix may still add to it
+  /// (see [_creditTimeMode]).
+  void _closeTimeSplitsUpTo(Duration runTime) {
+    var size = _durationOf(_completedSplits.length);
+    while (size > Duration.zero && runTime >= _splitStartRunTime + size) {
+      _closeSplit(
+        end: _splitStartRunTime + size,
+        distanceMeters: _totalDistanceMeters - _splitStartDistanceMeters,
+      );
+      size = _durationOf(_completedSplits.length);
+    }
+  }
+
+  /// Records the split in progress as complete at [end] on the elapsed
+  /// timeline and starts the next one there.
+  void _closeSplit({required Duration end, required double distanceMeters}) {
+    _completedSplits.add(
+      _split(
+        index: _completedSplits.length + 1,
+        duration: end - _splitStartRunTime,
+        distanceMeters: distanceMeters,
+      ),
+    );
+    _splitEndRunTimes.add(end);
+    _splitStartRunTime = end;
+    _splitStartDistanceMeters = _totalDistanceMeters;
+  }
+
+  Split _split({
+    required int index,
+    required Duration duration,
+    required double distanceMeters,
+  }) => Split(
+    index: index,
+    duration: duration,
+    // A split covering measurable distance in no measurable time would
+    // divide by zero; report 0 rather than an infinite pace.
+    avgSpeedMps: duration.inMicroseconds > 0
+        ? distanceMeters / duration.inMicroseconds * 1e6
+        : 0,
+    distanceMeters: distanceMeters,
+    targetSpeedMps: _plan.targetOf(index - 1),
+  );
 
   /// [_plan.sizeOf] returns seconds for a time-kind plan — converted here
   /// rather than in [SplitPlan] itself, which stays Duration-agnostic so it
@@ -501,12 +557,16 @@ class MetricsEngine {
 
   LiveMetrics _buildMetrics() {
     final splitIndex = _completedSplits.length;
+    final currentSplitElapsed = _latestRunTime - _splitStartRunTime;
     return LiveMetrics(
       elapsed: _movingElapsed,
+      elapsedWallClock: _latestRunTime,
       distanceMeters: _totalDistanceMeters,
       avgSpeedMps: _avgSpeedMps(),
       completedSplits: List.unmodifiable(_completedSplits),
-      currentSplitElapsed: _movingElapsed - _splitStartElapsed,
+      currentSplitElapsed: currentSplitElapsed.isNegative
+          ? Duration.zero
+          : currentSplitElapsed,
       currentSplitDistanceMeters:
           _totalDistanceMeters - _splitStartDistanceMeters,
       currentSplit: CurrentSplitInfo(

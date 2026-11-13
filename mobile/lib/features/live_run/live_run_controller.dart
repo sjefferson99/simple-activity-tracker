@@ -182,9 +182,12 @@ class LiveRunController extends Notifier<LiveRunState> {
     _audioSettings = ref.read(splitAudioSettingsControllerProvider);
     _previousMetricsForAudio = null;
     _splitVerdictTracker.reset();
+    // Shares _runClock, so splits are timed on exactly the clock the Time
+    // tile shows and pause() stops (issue #161).
     _metricsEngine = MetricsEngine(
       mode: _activityMode!,
       splitPlan: _splitPlan!,
+      clock: _runClock,
     );
     // After _metricsEngine so the cue can read its freshly-constructed
     // initial split-1 state — see _playActivityStartedCue's own doc.
@@ -201,7 +204,12 @@ class LiveRunController extends Notifier<LiveRunState> {
           splitPlan: _splitPlan!,
         );
     _currentGpxFile = await newRunGpxFile(DateTime.now());
-    _gpxLog = RunGpxLog(_currentGpxFile!, _splitPlan!, _activityMode!);
+    _gpxLog = RunGpxLog(
+      _currentGpxFile!,
+      _splitPlan!,
+      _activityMode!,
+      clock: _runClock,
+    );
     // A periodic flush that fails is not fatal: every flush rewrites the
     // whole track, so the next one recovers whatever this one missed.
     // Swallow it here rather than letting it surface as an unhandled error.
@@ -259,6 +267,10 @@ class LiveRunController extends Notifier<LiveRunState> {
   }
 
   Future<void> stop() async {
+    // Stop ends the clock's last span — idempotent if already paused, which
+    // keeps the pause instant as the end. Before the metrics snapshot so the
+    // summary and the GPX's sat:clock_spans agree on when the run ended.
+    _runClock?.pause(DateTime.now().toUtc());
     final metrics = _currentMetrics();
     final gpxFile = _currentGpxFile;
     final clientRunId = _clientRunId;
@@ -421,14 +433,13 @@ class LiveRunController extends Notifier<LiveRunState> {
     return version;
   }
 
-  /// The engine's point-driven metrics with the wall-clock Time and the
-  /// live split verdict stamped in.
+  /// The engine's metrics with its elapsed clock moved on to now (closing a
+  /// time split on the clock even with no fix) and the live split verdict
+  /// stamped in.
   LiveMetrics _currentMetrics() {
-    final base = _metricsEngine?.metrics ?? LiveMetrics.zero;
-    final clock = _runClock;
-    final timed = clock == null
-        ? base
-        : base.copyWith(elapsedWallClock: clock.elapsed(DateTime.now().toUtc()));
+    final engine = _metricsEngine;
+    engine?.advanceTo(DateTime.now().toUtc());
+    final timed = engine?.metrics ?? LiveMetrics.zero;
     return timed.withCurrentSplitVerdict(_splitVerdictTracker.update(timed));
   }
 

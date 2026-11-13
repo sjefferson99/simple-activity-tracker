@@ -64,7 +64,7 @@
   <h2>Server analysis</h2>
   {% if activity.analysis.status == "done" %}
   {% set result = activity.analysis.result %}
-  {% set time_tooltip = '"Time" is wall-clock, computed from the uploaded GPX\'s own track segments — each pause/resume on the phone starts a new segment, so the gap between segments is excluded the same way the phone\'s own "Time" excludes a pause. It can still differ slightly from the phone: a pause shorter than one GPS update, or a segment boundary caused by a GPS dropout rather than a real pause, isn\'t distinguishable from the file alone. "Moving time" is separate and always smaller — it also excludes any GPS-detected stationary stretch inside a segment (standing still without pausing the app).' %}
+  {% set time_tooltip = '"Time" is wall-clock from Start to Stop, minus pauses: the same clock as the phone\'s own "Time", and the clock the splits are timed on, so they add up to it. Recent app versions record exactly when Start, each pause and resume, and Stop happened. For older recordings and imports it is worked out from the GPS fixes, so time before the first fix in each track segment and after its last is missing. "Moving time" is separate and always smaller: it also excludes any GPS-detected stationary stretch (standing still without pausing the app). Average speed uses moving time.' %}
   <div class="stat-grid">
     <div class="stat">
       <div class="value">{{ result.distance_meters | distance_km }}</div>

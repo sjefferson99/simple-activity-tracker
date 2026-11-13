@@ -39,8 +39,11 @@ Raspberry Pi on your home network.
 
 ### How split targets are judged
 
-A split is judged on its **average speed so far, by moving time**, never on the
-instantaneous reading, which is too noisy. The rules (issues #99, #152, #154):
+A split is judged on its **average speed so far**, never on the instantaneous reading,
+which is too noisy. Splits are timed on the same clock as **Time**: wall-clock since
+Start, stopped only by pressing Pause, so a 5-minute split is five minutes on any
+stopwatch and the splits add up to Time (issue #161). Standing still or losing GPS
+without pausing still counts toward the split. The rules (issues #99, #152, #154):
 
 - **On target means within ±1.3% of the target speed.** That's about ±4 s/km at
   5:00/km, ±6 s/mi at 8:00/mi, or ±0.16 km/h at 12 km/h.
@@ -51,7 +54,7 @@ instantaneous reading, which is too noisy. The rules (issues #99, #152, #154):
   average is roughly (metres of error ÷ distance covered), which is itself a
   percentage. A fixed ±4 s/km would be 1.7% at 4:00/km but 0.95% at 7:00/km, stricter
   on slower runs than the measurement can support.
-- **No verdict for the first 10 s of moving time** in each split, while the average
+- **No verdict for the first 10 s** of each split, while the average
   is meaningless.
 - **Hysteresis while a split is in progress.** Once a split reads on target, it stays
   on target until its average leaves the band by an extra margin too; off target
@@ -63,7 +66,7 @@ instantaneous reading, which is too noisy. The rules (issues #99, #152, #154):
   beeps share this one verdict, so they always agree. To re-tune, replay GPX files with
   `dart run tool/replay_split_audio.dart --quiet <files>` from `mobile/`.
 - **Beeps wait 30 s into each split; the colour doesn't.** The colour shows from 10 s,
-  but verdict beeps and spoken corrections start at 30 s of moving time, with one cue
+  but verdict beeps and spoken corrections start at 30 s, with one cue
   for where you stand then and only real changes after that. Replaying real splits,
   about 30% of all verdict changes happen in a split's first 20–30 s while the
   average settles; holding the audio until 30 s cut verdict cues from 2.5 to 1.6 per
