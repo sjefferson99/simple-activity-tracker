@@ -65,6 +65,7 @@ a:hover { color: var(--accent-hover); }
 
 h1 { font-size: 1.4rem; margin: 0 0 1rem; }
 h2 { font-size: 1.1rem; margin: 0 0 0.75rem; }
+h3 { font-size: 0.95rem; margin: 1.25rem 0 0.5rem; color: var(--text-muted); font-weight: 600; }
 
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); }
@@ -378,6 +379,15 @@ button.secondary:hover, .button.secondary:hover { background: var(--bg); }
 
 .muted { color: var(--text-muted); }
 .text-right { text-align: right; }
+th[scope="row"] { color: var(--text); font-weight: 500; font-size: 0.95rem; }
+.checkbox-label { display: flex; gap: 0.5rem; align-items: flex-start; color: var(--text); margin: 0.25rem 0 1rem; }
+.checkbox-label input { margin-top: 0.3rem; }
+.chart-controls { margin-bottom: 0.75rem; flex-wrap: wrap; }
+.chart-controls select { width: auto; }
+/* Issue #190: PR / 2nd / 3rd best badges on best efforts. */
+.badge.rank-1 { background: rgba(202, 138, 4, 0.2); color: #854d0e; }
+.badge.rank-2 { background: rgba(100, 116, 139, 0.18); color: #334155; }
+.badge.rank-3 { background: rgba(180, 83, 9, 0.15); color: #92400e; }
 
 .activity-search-form { margin-bottom: 1rem; }
 .activity-search-row { align-items: flex-end; }

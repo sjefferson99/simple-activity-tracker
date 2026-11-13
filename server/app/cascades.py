@@ -9,6 +9,7 @@ shares and live sessions) can't be missed by one of the five delete paths.
 from sqlalchemy import ColumnElement, delete, select
 from sqlalchemy.orm import Session
 
+from app.models.best_effort import ActivityBestEffort
 from app.models.live import LivePoint, LiveSession
 from app.repositories.shares import SqlAlchemyShareRepository
 
@@ -20,8 +21,10 @@ def _delete_live_sessions(session: Session, condition: ColumnElement[bool]) -> N
 
 
 def delete_activity_dependents(session: Session, activity_id: str) -> None:
-    """Per-activity shares, and the live session the activity came from."""
+    """Per-activity shares, best efforts (issue #190), and the live session
+    the activity came from."""
     SqlAlchemyShareRepository(session).delete_for_activity(activity_id)
+    session.execute(delete(ActivityBestEffort).where(ActivityBestEffort.activity_id == activity_id))
     _delete_live_sessions(session, LiveSession.activity_id == activity_id)
 
 

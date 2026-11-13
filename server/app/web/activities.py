@@ -46,6 +46,7 @@ from app.deps import db_session
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
 from app.models.user import User, _new_uuid
+from app.records import best_effort_ranks
 from app.repositories.activities import (
     ActivityListDirection,
     ActivityListFilters,
@@ -91,6 +92,7 @@ def _activity_view(activity: Activity, analysis: ActivityAnalysis | None) -> dic
         "device_name": activity.device_name,
         "source_platform": activity.source_platform,
         "activity_type": activity.activity_type,
+        "is_virtual": activity.is_virtual,
         "started_at": activity.started_at,
         "ended_at": activity.ended_at,
         "client_summary": activity.client_summary,
@@ -545,6 +547,9 @@ def activity_detail(
         {
             "user": user,
             "activity": _activity_view(activity, analysis),
+            # Owner's page only: on a shared page the ranks would tell the
+            # viewer about activities they can't open.
+            "best_effort_ranks": best_effort_ranks(session, activity),
             **activity_share_context(session, user, activity.id),
         },
     )
@@ -675,6 +680,9 @@ def activity_patch(
     title: Annotated[str, Form()] = "",
     notes: Annotated[str, Form()] = "",
     device_name: Annotated[str, Form()] = "",
+    # A checkbox: present ("on") when ticked, absent when not. The edit form
+    # always posts every field, so absent means "not virtual".
+    is_virtual: Annotated[str | None, Form()] = None,
 ) -> Response:
     activities = SqlAlchemyActivityRepository(session)
     activity = activities.get_by_id_for_user(user.id, activity_id)
@@ -692,6 +700,7 @@ def activity_patch(
     activity.title = title or None
     activity.notes = notes or None
     activity.device_name = device_name or None
+    activity.is_virtual = is_virtual is not None
     activity.updated_at = datetime.now(UTC)
     return Response(status_code=200, headers={"HX-Refresh": "true"})
 

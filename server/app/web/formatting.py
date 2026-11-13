@@ -15,6 +15,27 @@ def format_distance_km(meters: float | None) -> str:
     return f"{meters / 1000:.2f} km"
 
 
+_NAMED_EFFORT_DISTANCES = {1609.344: "1 mile", 21097.5: "Half marathon", 42195.0: "Marathon"}
+
+
+def format_effort_distance(meters: float | None) -> str:
+    """A best-effort distance by name (issue #190): "400 m", "5 km",
+    "1 mile", "Half marathon"."""
+    if meters is None:
+        return "—"
+    for named, label in _NAMED_EFFORT_DISTANCES.items():
+        if abs(meters - named) < 0.5:
+            return label
+    if meters < 1000:
+        return f"{meters:.0f} m"
+    return f"{meters / 1000:g} km"
+
+
+def format_rank(rank: int | None) -> str:
+    """A "PR / 2nd / 3rd best" badge label, or "" outside the top three."""
+    return {1: "PR", 2: "2nd best", 3: "3rd best"}.get(rank or 0, "")
+
+
 def format_duration(seconds: float | None) -> str:
     if seconds is None or seconds < 0:
         return "—"
