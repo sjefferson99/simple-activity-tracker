@@ -13,7 +13,7 @@
 
 <div class="card">
   {% if read_only %}<p class="muted"><a href="/?tab=shared">Shared with me</a> · shared by {{ owner_name }}</p>{% endif %}
-  <h1>{{ activity.title or "Activity" }} <span class="badge type-{{ activity.activity_type }}">{{ {"cycling": "Cycle", "walking": "Walk"}.get(activity.activity_type, "Run") }}</span></h1>
+  <h1>{{ activity.title or "Activity" }} <span class="badge type-{{ activity.activity_type }}">{{ {"cycling": "Cycle", "walking": "Walk"}.get(activity.activity_type, "Run") }}</span>{% if activity.is_virtual %} <span class="badge" data-testid="virtual-badge">Virtual</span>{% endif %}</h1>
   <p class="muted"><time datetime="{{ activity.started_at.isoformat() }}" class="local-time" data-format="date-time">{{ activity.started_at.isoformat() }}</time>{% if activity.device_name %} · {{ activity.device_name }}{% endif %}</p>
 
   {% if activity.recovered_from_live and not read_only %}
@@ -113,15 +113,18 @@
 
   {% if result.best_efforts %}
   <h2 style="margin-top:1.5rem;">Best efforts</h2>
-  <p class="muted">Fastest 1k/5k/10k windows — always fixed distances, independent of the split size below.</p>
-  <table>
-    <thead><tr><th>Distance</th><th>Time</th><th>Pace</th></tr></thead>
+  {% set ranks = best_effort_ranks if best_effort_ranks is defined else {} %}
+  <p class="muted">Fastest window at each fixed distance, independent of the split size below.{% if ranks %} PR, 2nd and 3rd best are among your outdoor {{ {"cycling": "rides", "walking": "walks"}.get(activity.activity_type, "runs") }} up to this one's date.{% elif activity.is_virtual and not read_only %} Virtual activities aren't ranked against your records.{% endif %}</p>
+  <table data-testid="best-efforts">
+    <thead><tr><th>Distance</th><th>Time</th><th>{% if activity.activity_type == "cycling" %}Speed{% else %}Pace{% endif %}</th>{% if ranks %}<th></th>{% endif %}</tr></thead>
     <tbody>
       {% for effort in result.best_efforts %}
+      {% set rank = ranks.get(effort.distance_meters) %}
       <tr>
-        <td>{{ effort.distance_meters | distance_km }}</td>
+        <td>{{ effort.distance_meters | effort_distance }}</td>
         <td>{{ effort.duration_seconds | duration }}</td>
-        <td>{{ effort.avg_speed_mps | pace }}</td>
+        <td>{% if activity.activity_type == "cycling" %}{{ effort.avg_speed_mps | kmh }}{% else %}{{ effort.avg_speed_mps | pace }}{% endif %}</td>
+        {% if ranks %}<td>{% if rank and rank <= 3 %}<span class="badge rank-{{ rank }}" data-testid="effort-rank">{{ rank | rank_label }}</span>{% endif %}</td>{% endif %}
       </tr>
       {% endfor %}
     </tbody>
@@ -219,6 +222,7 @@
     <textarea id="notes" name="notes" rows="3" maxlength="4000" placeholder="Notes for this activity...">{{ activity.notes or '' }}</textarea>
     <label for="device_name">Device</label>
     <input type="text" id="device_name" name="device_name" maxlength="200" value="{{ activity.device_name or '' }}" placeholder="e.g. Garmin Forerunner 245">
+    <label class="checkbox-label"><input type="checkbox" name="is_virtual" {% if activity.is_virtual %}checked{% endif %}> Virtual or indoor (Zwift, a turbo trainer, a treadmill): counted in totals, but not in records, PRs or trends</label>
     <button type="submit">Save</button>
   </form>
 </div>

@@ -87,6 +87,7 @@ def build_export_archive(activities: list[Activity], gpx_by_activity_id: dict[st
                 source_platform=activity.source_platform,
                 source_app_version=activity.source_app_version,
                 gpx_filename=_gpx_filename(activity),
+                is_virtual=activity.is_virtual,
             )
             for activity in activities
         ]

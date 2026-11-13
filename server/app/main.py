@@ -25,6 +25,7 @@ from app.web import admin as admin_web
 from app.web import devices as devices_web
 from app.web import live as live_web
 from app.web import login as login_web
+from app.web import progress as progress_web
 from app.web import register as register_web
 from app.web import settings as settings_web
 from app.web import shared_activities as shared_activities_web
@@ -84,6 +85,7 @@ def create_app() -> FastAPI:
     app.include_router(sharing_web.router)
     app.include_router(shared_activities_web.router)
     app.include_router(live_web.router)
+    app.include_router(progress_web.router)
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

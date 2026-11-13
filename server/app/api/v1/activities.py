@@ -40,6 +40,7 @@ from app.analysis.v1 import (
     ANALYSIS_VERSION,
     AnalyzerV1,
     distance_and_duration_from_result,
+    elapsed_and_gain_from_result,
     endpoints_from_result,
 )
 from app.api.v1.errors import api_error
@@ -69,6 +70,7 @@ from app.deps import db_session
 from app.models.activity import Activity
 from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
 from app.models.tag import Tag
+from app.records import replace_best_efforts
 from app.repositories.activities import InvalidCursorError, SqlAlchemyActivityRepository
 from app.repositories.activity_analyses import SqlAlchemyActivityAnalysisRepository
 from app.repositories.live import SqlAlchemyLiveSessionRepository
@@ -179,6 +181,7 @@ class _NewActivity:
     notes: str | None = None
     device_name: str | None = None
     tags: list[str] = field(default_factory=list)
+    is_virtual: bool = False
 
 
 def _build_analysis(
@@ -204,6 +207,7 @@ def _build_analysis(
         )
         distance_meters, moving_seconds = distance_and_duration_from_result(result)
         start_lat, start_lon, end_lat, end_lon = endpoints_from_result(result)
+        elapsed_seconds, elevation_gain_m = elapsed_and_gain_from_result(result)
         return ActivityAnalysis(
             activity_id=activity_id,
             analysis_version=ANALYSIS_VERSION,
@@ -215,6 +219,8 @@ def _build_analysis(
             start_lon=start_lon,
             end_lat=end_lat,
             end_lon=end_lon,
+            elapsed_seconds=elapsed_seconds,
+            elevation_gain_m=elevation_gain_m,
             track=sample_track(track, max_points=DEFAULT_MAX_POINTS),
             computed_at=datetime.now(UTC),
         )
@@ -273,6 +279,7 @@ def _replace_recovered_activity(
     analysis = _build_analysis(activity.id, track, split_plan, new_activity.activity_type)
     analyses.add(analysis)
     session.flush()
+    replace_best_efforts(session, activity.id, analysis.result)
     return analysis, old_blob_key
 
 
@@ -323,6 +330,7 @@ def _insert_activity_with_gpx(
         split_type=split_plan.split_type if split_plan else None,
         split_value=split_plan.split_value if split_plan else None,
         split_plan=_split_plan_to_json(split_plan) if split_plan else None,
+        is_virtual=new_activity.is_virtual,
         created_at=now,
         updated_at=now,
     )
@@ -358,6 +366,7 @@ def _insert_activity_with_gpx(
         # delete synchronously instead.
         blob_store.delete(blob_key)
         raise
+    replace_best_efforts(session, activity.id, analysis.result)
 
     return activity, analysis, True
 
@@ -381,6 +390,7 @@ def _insert_from_manifest_entry(
             title=entry.title,
             notes=entry.notes,
             device_name=entry.device_name,
+            is_virtual=entry.is_virtual,
         ),
         gpx_bytes,
     )
@@ -397,6 +407,7 @@ def _insert_from_strava_row(
     title: str | None,
     tags: list[str],
     gpx_bytes: bytes,
+    is_virtual: bool = False,
 ) -> bool:
     """Adapts _insert_activity_with_gpx to the StravaActivityInserter shape
     run_strava_import() expects — see app/activity_import_strava.py. Follows
@@ -418,6 +429,7 @@ def _insert_from_strava_row(
             source_app_version="",
             title=title,
             tags=tags,
+            is_virtual=is_virtual,
         ),
         gpx_bytes,
     )

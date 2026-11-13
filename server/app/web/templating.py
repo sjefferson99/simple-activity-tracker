@@ -6,8 +6,10 @@ from app.version import APP_VERSION
 from app.web.formatting import (
     format_distance_km,
     format_duration,
+    format_effort_distance,
     format_kmh,
     format_pace,
+    format_rank,
     format_speed_delta,
     format_split_plan_summary,
     format_split_target,
@@ -21,6 +23,8 @@ templates.env.filters["kmh"] = format_kmh
 templates.env.filters["distance_km"] = format_distance_km
 templates.env.filters["duration"] = format_duration
 templates.env.filters["pace"] = format_pace
+templates.env.filters["effort_distance"] = format_effort_distance
+templates.env.filters["rank_label"] = format_rank
 templates.env.filters["split_target"] = format_split_target
 templates.env.filters["speed_delta"] = format_speed_delta
 templates.env.filters["split_plan_summary"] = format_split_plan_summary

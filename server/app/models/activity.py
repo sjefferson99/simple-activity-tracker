@@ -63,6 +63,12 @@ class Activity(Base):
     # hadn't arrived. That upload, if it ever does, replaces this activity's
     # GPX/summary/analysis in place and clears the flag.
     recovered_from_live: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # A virtual or indoor activity (Zwift, ROUVY, a treadmill), issue #190.
+    # Still counted in the Progress page's totals, but never in records, PR
+    # ranks or trends: virtual descents and simulated speeds aren't
+    # comparable with riding outdoors. Set by the Strava import for its
+    # "Virtual Ride"/"Virtual Run" types, and by the owner on the web page.
+    is_virtual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
     # selectin avoids N+1 on the activity list page, which renders every
