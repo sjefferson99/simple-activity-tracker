@@ -11,18 +11,19 @@ Position _androidFix({
   required double accuracy,
   required double speed,
   double altitudeAccuracy = 0,
-}) => Position(
-  latitude: 51.5,
-  longitude: -0.1,
-  timestamp: DateTime.utc(2026, 1, 1, 9),
-  accuracy: accuracy,
-  altitude: 12,
-  altitudeAccuracy: altitudeAccuracy,
-  heading: 0,
-  headingAccuracy: 0,
-  speed: speed,
-  speedAccuracy: 0,
-);
+}) =>
+    Position(
+      latitude: 51.5,
+      longitude: -0.1,
+      timestamp: DateTime.utc(2026, 1, 1, 9),
+      accuracy: accuracy,
+      altitude: 12,
+      altitudeAccuracy: altitudeAccuracy,
+      heading: 0,
+      headingAccuracy: 0,
+      speed: speed,
+      speedAccuracy: 0,
+    );
 
 void main() {
   group('sampleFromPosition on Android (has* flags always false upstream)', () {
@@ -66,8 +67,9 @@ void main() {
         3.5,
       );
       expect(
-        sampleFromPosition(_androidFix(accuracy: 4.2, speed: 1.7))
-            .verticalAccuracyMeters,
+        sampleFromPosition(
+          _androidFix(accuracy: 4.2, speed: 1.7),
+        ).verticalAccuracyMeters,
         isNull,
       );
     });

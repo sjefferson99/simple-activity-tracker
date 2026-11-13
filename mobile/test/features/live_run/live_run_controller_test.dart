@@ -155,7 +155,7 @@ void main() {
   const testTimeout = Duration(milliseconds: 50);
 
   /// Runs one fix through a real run and returns the GPX the app wrote.
-  /// [beforeFix] is whatever the barometer does ahead of that fix.
+  /// [beforeFix] is whatever the sensors do ahead of that fix.
   Future<String> recordOneFix(void Function() beforeFix) async {
     final service = _NeverEmittingLocationService();
     final c = container(
@@ -326,92 +326,81 @@ void main() {
     expect(finished.metrics.elapsed, Duration.zero);
   });
 
-  test(
-    'live upload gets the run: points, pause, a new segment, and the finish',
-    () async {
-      final service = _NeverEmittingLocationService();
-      final api = FakeApiClient()
-        ..getServerInfoHandler = ({required baseUrl, required token}) async =>
-            const ServerInfoDto(
-              version: '1.4.0',
-              apiLevel: 2,
-              minAppApiLevel: 0,
-            );
-      final live = LiveUploadService(
-        apiClient: api,
-        authService: _SignedInAuthService(),
-        connectivity: FakeConnectivityMonitor(),
-        sharingStore: LiveSharingStore(),
-        interval: null,
-      );
-      addTearDown(live.dispose);
-      final c2 = container(
-        service,
-        extraOverrides: [
-          liveUploadServiceProvider.overrideWithValue(live),
-          // stop() triggers a real SyncService pass for the saved run, which
-          // checks connectivity through a plugin unit tests don't have
-          // (MissingPluginException). This test waits long enough after stop()
-          // for that pass to get there, so it gets fakes instead.
-          syncServiceProvider.overrideWithValue(
-            SyncService(
-              apiClient: FakeApiClient(),
-              runStore: FakeRunStore(),
-              authService: AuthService(apiClient: FakeApiClient()),
-              connectivity: FakeConnectivityMonitor(),
-              periodicRetryInterval: null,
-            ),
+  test('live upload gets the run: points, pause, a new segment, and the finish', () async {
+    final service = _NeverEmittingLocationService();
+    final api = FakeApiClient()
+      ..getServerInfoHandler = ({required baseUrl, required token}) async =>
+          const ServerInfoDto(version: '1.4.0', apiLevel: 2, minAppApiLevel: 0);
+    final live = LiveUploadService(
+      apiClient: api,
+      authService: _SignedInAuthService(),
+      connectivity: FakeConnectivityMonitor(),
+      sharingStore: LiveSharingStore(),
+      interval: null,
+    );
+    addTearDown(live.dispose);
+    final c2 = container(
+      service,
+      extraOverrides: [
+        liveUploadServiceProvider.overrideWithValue(live),
+        // stop() triggers a real SyncService pass for the saved run, which
+        // checks connectivity through a plugin unit tests don't have
+        // (MissingPluginException). This test waits long enough after stop()
+        // for that pass to get there, so it gets fakes instead.
+        syncServiceProvider.overrideWithValue(
+          SyncService(
+            apiClient: FakeApiClient(),
+            runStore: FakeRunStore(),
+            authService: AuthService(apiClient: FakeApiClient()),
+            connectivity: FakeConnectivityMonitor(),
+            periodicRetryInterval: null,
           ),
-        ],
-      );
-      final controller = c2.read(liveRunControllerProvider.notifier)
-        ..acquiringTimeout = const Duration(seconds: 30);
+        ),
+      ],
+    );
+    final controller = c2.read(liveRunControllerProvider.notifier)
+      ..acquiringTimeout = const Duration(seconds: 30);
 
-      // Pause/resume/start each kick off their own send; a sendNow() during
-      // it joins that pass and only queues another, so wait for both.
-      Future<void> settle() async {
-        await pumpEventQueue();
-        await live.sendNow();
-        await live.sendNow();
-      }
+    // Pause/resume/start each kick off their own send; a sendNow() during
+    // it joins that pass and only queues another, so wait for both.
+    Future<void> settle() async {
+      await pumpEventQueue();
+      await live.sendNow();
+      await live.sendNow();
+    }
 
-      LocationSample at(double lat) => LocationSample(
-        latitude: lat,
-        longitude: -0.1,
-        accuracyMeters: 5,
-        hasAccuracy: true,
-        timestamp: DateTime.now(),
-      );
+    LocationSample at(double lat) => LocationSample(
+      latitude: lat,
+      longitude: -0.1,
+      accuracyMeters: 5,
+      hasAccuracy: true,
+      timestamp: DateTime.now(),
+    );
 
-      await controller.start();
-      service.emit(at(51.5));
-      service.emit(at(51.5001));
-      await settle();
-      final runId = api.liveStoredPoints.keys.single;
-      expect(api.liveStoredPoints[runId], 2);
+    await controller.start();
+    service.emit(at(51.5));
+    service.emit(at(51.5001));
+    await settle();
+    final runId = api.liveStoredPoints.keys.single;
+    expect(api.liveStoredPoints[runId], 2);
 
-      controller.pause();
-      await settle();
-      expect(api.liveStates[runId], 'paused');
+    controller.pause();
+    await settle();
+    expect(api.liveStates[runId], 'paused');
 
-      controller.resume();
-      service.emit(at(51.5002));
-      await settle();
-      expect(
-        api.livePointCalls
-            .lastWhere((call) => call.points.isNotEmpty)
-            .points
-            .single
-            .segment,
-        1,
-      );
+    controller.resume();
+    service.emit(at(51.5002));
+    await settle();
+    expect(
+      api.livePointCalls.lastWhere((call) => call.points.isNotEmpty).points.single.segment,
+      1,
+    );
 
-      await controller.stop();
-      await settle();
-      expect(api.liveStoredPoints[runId], 3);
-      expect(api.liveStates[runId], 'finished');
-      final finished = c2.read(liveRunControllerProvider) as LiveRunFinished;
-      expect(finished.clientRunId, runId);
-    },
-  );
+    await controller.stop();
+    await settle();
+    expect(api.liveStoredPoints[runId], 3);
+    expect(api.liveStates[runId], 'finished');
+    final finished = c2.read(liveRunControllerProvider) as LiveRunFinished;
+    expect(finished.clientRunId, runId);
+  });
 }

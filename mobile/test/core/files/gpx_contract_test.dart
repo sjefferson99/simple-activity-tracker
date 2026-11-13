@@ -124,9 +124,7 @@ String _normalise(String text) => text.replaceAll('\r\n', '\n');
 void main() {
   late Directory tempDir;
 
-  setUp(
-    () async => tempDir = await Directory.systemTemp.createTemp('gpx_contract'),
-  );
+  setUp(() async => tempDir = await Directory.systemTemp.createTemp('gpx_contract'));
   tearDown(() => tempDir.delete(recursive: true));
 
   for (final MapEntry(key: name, value: (:plan, :pressureHpa))
@@ -162,8 +160,7 @@ void main() {
       expect(
         golden.existsSync() && expected.existsSync(),
         isTrue,
-        reason:
-            'Missing ${golden.path} — regenerate with --dart-define=UPDATE_CONTRACT=true',
+        reason: 'Missing ${golden.path} — regenerate with --dart-define=UPDATE_CONTRACT=true',
       );
       expect(
         _normalise(written.readAsStringSync()),

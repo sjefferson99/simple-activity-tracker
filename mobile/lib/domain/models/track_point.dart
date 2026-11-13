@@ -60,19 +60,20 @@ class TrackPoint {
     double? pressureSdHpa,
     double? motionRmsMps2,
     double? cadenceHz,
-  }) => TrackPoint(
-    latitude: sample.latitude,
-    longitude: sample.longitude,
-    elevationMeters: sample.elevationMeters,
-    timestamp: sample.timestamp,
-    accuracyMeters: sample.accuracyMeters,
-    hasAccuracy: sample.hasAccuracy,
-    speedMps: sample.speedMps,
-    hasSpeed: sample.hasSpeed,
-    pressureHpa: pressureHpa,
-    pressureSdHpa: pressureSdHpa,
-    verticalAccuracyMeters: sample.verticalAccuracyMeters,
-    motionRmsMps2: motionRmsMps2,
-    cadenceHz: cadenceHz,
-  );
+  }) =>
+      TrackPoint(
+        latitude: sample.latitude,
+        longitude: sample.longitude,
+        elevationMeters: sample.elevationMeters,
+        timestamp: sample.timestamp,
+        accuracyMeters: sample.accuracyMeters,
+        hasAccuracy: sample.hasAccuracy,
+        speedMps: sample.speedMps,
+        hasSpeed: sample.hasSpeed,
+        pressureHpa: pressureHpa,
+        pressureSdHpa: pressureSdHpa,
+        verticalAccuracyMeters: sample.verticalAccuracyMeters,
+        motionRmsMps2: motionRmsMps2,
+        cadenceHz: cadenceHz,
+      );
 }
