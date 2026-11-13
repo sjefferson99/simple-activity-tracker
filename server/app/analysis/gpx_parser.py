@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
@@ -25,6 +26,7 @@ _ACCURACY_TAG = f"{{{_EXTENSIONS_NS}}}accuracy"
 _HAS_ACCURACY_TAG = f"{{{_EXTENSIONS_NS}}}has_accuracy"
 _SPEED_TAG = f"{{{_EXTENSIONS_NS}}}speed"
 _HAS_SPEED_TAG = f"{{{_EXTENSIONS_NS}}}has_speed"
+_PRESSURE_TAG = f"{{{_EXTENSIONS_NS}}}pressure_hpa"
 _CLOCK_SPANS_TAG = f"{{{_EXTENSIONS_NS}}}clock_spans"
 
 
@@ -73,6 +75,19 @@ def _point_speed_mps(gpx_point: gpxpy.gpx.GPXTrackPoint) -> float | None:
         return None
 
 
+def _point_pressure_hpa(gpx_point: gpxpy.gpx.GPXTrackPoint) -> float | None:
+    """The point's sat:pressure_hpa extension value (issue #184), or None if
+    absent, unparseable or not a usable pressure."""
+    for element in gpx_point.extensions:
+        if getattr(element, "tag", None) == _PRESSURE_TAG:
+            try:
+                pressure = float(element.text or "")
+            except ValueError:
+                return None
+            return pressure if math.isfinite(pressure) and pressure > 0 else None
+    return None
+
+
 def parse_gpx(data: bytes) -> Track:
     """Parses GPX bytes into a Track. Points with no timestamp are dropped —
     a Track without complete timing can't support any of the analysis this
@@ -109,6 +124,7 @@ def parse_gpx(data: bytes) -> Track:
                     time=_as_utc(p.time),
                     accuracy_m=_point_accuracy_m(p),
                     speed_mps=_point_speed_mps(p),
+                    pressure_hpa=_point_pressure_hpa(p),
                 )
                 for p in gpx_segment.points
                 if p.time is not None

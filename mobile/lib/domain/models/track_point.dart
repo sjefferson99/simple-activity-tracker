@@ -24,6 +24,20 @@ class TrackPoint {
   /// measured-but-null speed.
   final bool hasSpeed;
 
+  /// Mean barometer reading over the second before this fix, in
+  /// hectopascals (issue #184).
+  /// Null on a phone with no barometer, or if the sensor stopped reporting.
+  final double? pressureHpa;
+
+  /// Elevation-tuning diagnostics (docs/BAROMETER-PLAN.md), each null when
+  /// unavailable: the spread of the readings averaged into [pressureHpa],
+  /// GPS altitude accuracy, and the accelerometer's shake (m/s², gravity
+  /// removed) and dominant rhythm over the moments before this fix.
+  final double? pressureSdHpa;
+  final double? verticalAccuracyMeters;
+  final double? motionRmsMps2;
+  final double? cadenceHz;
+
   const TrackPoint({
     required this.latitude,
     required this.longitude,
@@ -33,16 +47,32 @@ class TrackPoint {
     this.elevationMeters,
     this.speedMps,
     this.hasSpeed = false,
+    this.pressureHpa,
+    this.pressureSdHpa,
+    this.verticalAccuracyMeters,
+    this.motionRmsMps2,
+    this.cadenceHz,
   });
 
-  factory TrackPoint.fromSample(LocationSample sample) => TrackPoint(
-        latitude: sample.latitude,
-        longitude: sample.longitude,
-        elevationMeters: sample.elevationMeters,
-        timestamp: sample.timestamp,
-        accuracyMeters: sample.accuracyMeters,
-        hasAccuracy: sample.hasAccuracy,
-        speedMps: sample.speedMps,
-        hasSpeed: sample.hasSpeed,
-      );
+  factory TrackPoint.fromSample(
+    LocationSample sample, {
+    double? pressureHpa,
+    double? pressureSdHpa,
+    double? motionRmsMps2,
+    double? cadenceHz,
+  }) => TrackPoint(
+    latitude: sample.latitude,
+    longitude: sample.longitude,
+    elevationMeters: sample.elevationMeters,
+    timestamp: sample.timestamp,
+    accuracyMeters: sample.accuracyMeters,
+    hasAccuracy: sample.hasAccuracy,
+    speedMps: sample.speedMps,
+    hasSpeed: sample.hasSpeed,
+    pressureHpa: pressureHpa,
+    pressureSdHpa: pressureSdHpa,
+    verticalAccuracyMeters: sample.verticalAccuracyMeters,
+    motionRmsMps2: motionRmsMps2,
+    cadenceHz: cadenceHz,
+  );
 }

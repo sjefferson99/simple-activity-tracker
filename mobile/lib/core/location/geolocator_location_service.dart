@@ -112,7 +112,9 @@ class GeolocatorLocationService implements LocationService {
 /// ambiguous: a measured 0.0 (stationary) and an unmeasured speed both
 /// arrive as `0.0` with the flag false. The raw value is kept in [speedMps]
 /// either way so the GPX diagnostics record exactly what the chip said;
-/// [LocationSample.hasSpeed] is only true when it's unambiguous.
+/// [LocationSample.hasSpeed] is only true when it's unambiguous. Altitude
+/// accuracy has the same lost flag, and like horizontal accuracy is never
+/// genuinely 0 m.
 LocationSample sampleFromPosition(Position position) {
   final hasAccuracy = position.hasAccuracy || position.accuracy > 0;
   final hasSpeed = position.hasSpeed || position.speed > 0;
@@ -125,5 +127,9 @@ LocationSample sampleFromPosition(Position position) {
     accuracyMeters: position.accuracy,
     hasAccuracy: hasAccuracy,
     timestamp: position.timestamp,
+    verticalAccuracyMeters:
+        position.hasAltitudeAccuracy || position.altitudeAccuracy > 0
+        ? position.altitudeAccuracy
+        : null,
   );
 }

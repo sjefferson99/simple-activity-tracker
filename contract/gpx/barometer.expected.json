@@ -1,0 +1,19 @@
+{
+  "split_type": "distance_km",
+  "split_value": 1,
+  "rolling_target_mps": null,
+  "custom_splits": [],
+  "targets_as": "pace",
+  "point_count": 12,
+  "first_point": {
+    "accuracy_m": 4.0,
+    "speed_mps": 3.0,
+    "pressure_hpa": 1013.25
+  },
+  "clock_spans": [
+    [
+      "2026-09-24T06:59:52.000Z",
+      "2026-09-24T07:01:52.000Z"
+    ]
+  ]
+}

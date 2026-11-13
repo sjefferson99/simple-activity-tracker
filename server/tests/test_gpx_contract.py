@@ -28,7 +28,11 @@ def _expected(gpx_path: Path) -> dict:
 
 
 def test_contract_gpx_files_exist() -> None:
-    assert {p.name for p in _CASES} >= {"custom-plan.gpx", "rolling-target.gpx"}
+    assert {p.name for p in _CASES} >= {
+        "barometer.gpx",
+        "custom-plan.gpx",
+        "rolling-target.gpx",
+    }
 
 
 @pytest.mark.parametrize("gpx_path", _CASES, ids=lambda p: p.name)
@@ -49,6 +53,7 @@ def test_server_reads_what_the_app_means(gpx_path: Path) -> None:
     assert len(points) == expected["point_count"]
     assert points[0].accuracy_m == expected["first_point"]["accuracy_m"]
     assert points[0].speed_mps == expected["first_point"]["speed_mps"]
+    assert points[0].pressure_hpa == expected["first_point"].get("pressure_hpa")
     assert track.clock_spans is not None
     assert [
         [start.isoformat(), end.isoformat() if end else None] for start, end in track.clock_spans

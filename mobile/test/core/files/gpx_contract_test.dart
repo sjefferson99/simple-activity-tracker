@@ -24,20 +24,31 @@ const _updateContract = bool.fromEnvironment('UPDATE_CONTRACT');
 
 final _contractDir = Directory('../contract/gpx');
 
-final _cases = <String, SplitPlan>{
-  'custom-plan': const SplitPlan(
-    base: SplitPreference.defaultPreference,
-    customSplits: [
-      PlannedSplit(size: 400, targetSpeedMps: 3.5),
-      PlannedSplit(size: 200),
-      PlannedSplit(size: 400, targetSpeedMps: 3.25),
-    ],
+/// Name, plan and the barometer reading on every fix (null: none, as on a
+/// phone without one).
+typedef _Case = ({SplitPlan plan, double? pressureHpa});
+
+final _cases = <String, _Case>{
+  'custom-plan': (
+    plan: const SplitPlan(
+      base: SplitPreference.defaultPreference,
+      customSplits: [
+        PlannedSplit(size: 400, targetSpeedMps: 3.5),
+        PlannedSplit(size: 200),
+        PlannedSplit(size: 400, targetSpeedMps: 3.25),
+      ],
+    ),
+    pressureHpa: null,
   ),
-  'rolling-target': const SplitPlan(
-    base: SplitPreference.defaultPreference,
-    rollingTargetSpeedMps: 3.0,
-    targetsAsPace: false,
+  'rolling-target': (
+    plan: const SplitPlan(
+      base: SplitPreference.defaultPreference,
+      rollingTargetSpeedMps: 3.0,
+      targetsAsPace: false,
+    ),
+    pressureHpa: null,
   ),
+  'barometer': (plan: SplitPlan.defaultPlan, pressureHpa: 1013.25),
 };
 
 /// When each case's run clock ran (`sat:clock_spans`, issue #161): Start 8 s
@@ -50,10 +61,11 @@ final _stoppedAt = _at(1, 52);
 final _pauses = <String, List<(DateTime, DateTime)>>{
   'custom-plan': [(_at(0, 52), _at(0, 58))],
   'rolling-target': [],
+  'barometer': [],
 };
 
 /// 12 fixes, 10 s apart, ~30 m apart heading north — a steady 3 m/s jog.
-List<TrackPoint> _points() => [
+List<TrackPoint> _points(double? pressureHpa) => [
   for (var i = 0; i < 12; i++)
     TrackPoint(
       latitude: 51.5 + i * 0.00027,
@@ -63,6 +75,13 @@ List<TrackPoint> _points() => [
       accuracyMeters: 4,
       speedMps: 3,
       hasSpeed: true,
+      pressureHpa: pressureHpa,
+      // The tuning diagnostics come with the barometer case only, so the
+      // other goldens keep showing a phone that logs none of them.
+      pressureSdHpa: pressureHpa == null ? null : 0.0123,
+      verticalAccuracyMeters: pressureHpa == null ? null : 3.5,
+      motionRmsMps2: pressureHpa == null ? null : 4.567,
+      cadenceHz: pressureHpa == null ? null : 2.83,
     ),
 ];
 
@@ -94,6 +113,8 @@ Map<String, dynamic> _expected(
   'first_point': {
     'accuracy_m': points.first.accuracyMeters,
     'speed_mps': points.first.speedMps,
+    if (points.first.pressureHpa != null)
+      'pressure_hpa': points.first.pressureHpa,
   },
   'clock_spans': _expectedSpans(name),
 };
@@ -103,15 +124,18 @@ String _normalise(String text) => text.replaceAll('\r\n', '\n');
 void main() {
   late Directory tempDir;
 
-  setUp(() async => tempDir = await Directory.systemTemp.createTemp('gpx_contract'));
+  setUp(
+    () async => tempDir = await Directory.systemTemp.createTemp('gpx_contract'),
+  );
   tearDown(() => tempDir.delete(recursive: true));
 
-  for (final MapEntry(key: name, value: plan) in _cases.entries) {
+  for (final MapEntry(key: name, value: (:plan, :pressureHpa))
+      in _cases.entries) {
     test('$name.gpx matches what the app writes', () async {
       final written = File('${tempDir.path}/$name.gpx');
       final clock = RunClock(startedAt: _startedAt);
       final log = RunGpxLog(written, plan, ActivityMode.running, clock: clock);
-      final points = _points();
+      final points = _points(pressureHpa);
       final pauses = [..._pauses[name]!];
       for (final point in points) {
         if (pauses.isNotEmpty && point.timestamp.isAfter(pauses.first.$2)) {
@@ -138,7 +162,8 @@ void main() {
       expect(
         golden.existsSync() && expected.existsSync(),
         isTrue,
-        reason: 'Missing ${golden.path} — regenerate with --dart-define=UPDATE_CONTRACT=true',
+        reason:
+            'Missing ${golden.path} — regenerate with --dart-define=UPDATE_CONTRACT=true',
       );
       expect(
         _normalise(written.readAsStringSync()),

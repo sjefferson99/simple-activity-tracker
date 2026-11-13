@@ -77,6 +77,25 @@ class RunGpxLog {
           if (point.speedMps != null)
             '$_extensionsPrefix:speed': '${point.speedMps}',
           '$_extensionsPrefix:has_speed': '${point.hasSpeed}',
+          // Mean reading over the second before the fix, for elevation work
+          // (issue #184): absent, not a placeholder, with no barometer.
+          if (point.pressureHpa != null)
+            '$_extensionsPrefix:pressure_hpa': '${point.pressureHpa}',
+          // Elevation-tuning diagnostics (docs/BAROMETER-PLAN.md), each
+          // absent when unavailable.
+          if (point.pressureSdHpa != null)
+            '$_extensionsPrefix:pressure_sd': point.pressureSdHpa!
+                .toStringAsFixed(4),
+          if (point.verticalAccuracyMeters != null)
+            '$_extensionsPrefix:vertical_accuracy':
+                '${point.verticalAccuracyMeters}',
+          if (point.motionRmsMps2 != null)
+            '$_extensionsPrefix:motion_rms': point.motionRmsMps2!
+                .toStringAsFixed(3),
+          if (point.cadenceHz != null)
+            '$_extensionsPrefix:cadence_hz': point.cadenceHz!.toStringAsFixed(
+              2,
+            ),
         },
       ),
     );

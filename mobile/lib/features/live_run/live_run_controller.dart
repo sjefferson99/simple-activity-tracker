@@ -17,6 +17,10 @@ import '../../core/location/geolocator_location_service.dart';
 import '../../core/location/location_permission_state.dart';
 import '../../core/location/location_sample.dart';
 import '../../core/location/location_service.dart';
+import '../../core/sensors/barometer_service.dart';
+import '../../core/sensors/motion_service.dart';
+import '../../core/sensors/sensors_plus_barometer_service.dart';
+import '../../core/sensors/sensors_plus_motion_service.dart';
 import '../../core/sync/file_run_store.dart';
 import '../../core/sync/live_upload_service.dart';
 import '../../core/sync/sync_service.dart';
@@ -32,6 +36,8 @@ import '../../domain/models/track_point.dart';
 import '../../domain/tracking/activity_mode.dart';
 import '../../domain/tracking/metrics_engine.dart';
 import '../../domain/tracking/display_speed_window.dart';
+import '../../domain/tracking/motion_window.dart';
+import '../../domain/tracking/pressure_window.dart';
 import '../../domain/tracking/run_clock.dart';
 import '../../domain/tracking/run_phase.dart';
 import '../../domain/tracking/live_split_verdict.dart';
@@ -58,6 +64,14 @@ final locationServiceProvider = Provider<LocationService>((ref) {
   return GeolocatorLocationService();
 });
 
+final barometerServiceProvider = Provider<BarometerService>((ref) {
+  return SensorsPlusBarometerService();
+});
+
+final motionServiceProvider = Provider<MotionService>((ref) {
+  return SensorsPlusMotionService();
+});
+
 final liveRunControllerProvider =
     NotifierProvider<LiveRunController, LiveRunState>(LiveRunController.new);
 
@@ -73,6 +87,10 @@ class LiveRunController extends Notifier<LiveRunState> {
   Duration tickInterval = const Duration(seconds: 1);
 
   StreamSubscription<LocationSample>? _subscription;
+  StreamSubscription<double>? _barometerSubscription;
+  final PressureWindow _pressureWindow = PressureWindow();
+  StreamSubscription<double>? _motionSubscription;
+  final MotionWindow _motionWindow = MotionWindow();
   final DisplaySpeedWindow _displaySpeedWindow = DisplaySpeedWindow();
   MetricsEngine? _metricsEngine;
   RunClock? _runClock;
@@ -222,10 +240,34 @@ class LiveRunController extends Notifier<LiveRunState> {
 
     state = const LiveRunAcquiring();
     _acquiringTimeoutTimer = Timer(acquiringTimeout, _onAcquiringTimeout);
+    _listenToSensors();
     _subscription = service.stream.listen(_onSample);
     // The Time tile must keep counting when no fix is accepted — or none
     // arrives at all — so it can't ride on the sample stream alone.
     _tickTimer = Timer.periodic(tickInterval, (_) => _onTick());
+  }
+
+  /// Best-effort, like the GPX diagnostics they feed: a phone without one of
+  /// these sensors (its stream errors at once) records exactly as before.
+  void _listenToSensors() {
+    _pressureWindow.reset();
+    _motionWindow.reset();
+    _motionSubscription = ref
+        .read(motionServiceProvider)
+        .accelerationMagnitude
+        .listen(
+          (magnitude) => _motionWindow.add(magnitude, DateTime.now()),
+          onError: (Object _) {},
+          cancelOnError: true,
+        );
+    _barometerSubscription = ref
+        .read(barometerServiceProvider)
+        .pressureHpa
+        .listen(
+          (hpa) => _pressureWindow.add(hpa, DateTime.now()),
+          onError: (Object _) {},
+          cancelOnError: true,
+        );
   }
 
   void _onTick() {
@@ -376,6 +418,10 @@ class LiveRunController extends Notifier<LiveRunState> {
     _tickTimer = null;
     await _subscription?.cancel();
     _subscription = null;
+    await _barometerSubscription?.cancel();
+    _barometerSubscription = null;
+    await _motionSubscription?.cancel();
+    _motionSubscription = null;
 
     // The wakelock must be released even if the final write fails, or the
     // screen stays forced on for the rest of the app's life.
@@ -396,7 +442,16 @@ class LiveRunController extends Notifier<LiveRunState> {
     _acquiringTimeoutTimer?.cancel();
     _acquiringTimeoutTimer = null;
 
-    final point = TrackPoint.fromSample(sample);
+    final now = DateTime.now();
+    final pressure = _pressureWindow.at(now);
+    final motion = _motionWindow.at(now);
+    final point = TrackPoint.fromSample(
+      sample,
+      pressureHpa: pressure?.hpa,
+      pressureSdHpa: pressure?.sdHpa,
+      motionRmsMps2: motion?.rmsMps2,
+      cadenceHz: motion?.cadenceHz,
+    );
 
     // The engine discards low-accuracy fixes so they can't inflate distance,
     // but the GPX deliberately keeps every fix — the file is the raw track,

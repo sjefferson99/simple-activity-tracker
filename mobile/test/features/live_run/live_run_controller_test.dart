@@ -24,6 +24,8 @@ import 'package:simple_activity_tracker/features/live_run/live_run_state.dart';
 import 'package:wakelock_plus_platform_interface/messages.g.dart';
 
 import '../../fakes/fake_api_client.dart';
+import '../../fakes/fake_barometer_service.dart';
+import '../../fakes/fake_motion_service.dart';
 import '../../fakes/fake_connectivity_monitor.dart';
 import '../../fakes/fake_run_store.dart';
 
@@ -113,6 +115,15 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   _installFakeWakelockPlatform();
 
+  late FakeBarometerService barometer;
+  late FakeMotionService motion;
+  late Directory tempDir;
+
+  setUp(() {
+    barometer = FakeBarometerService();
+    motion = FakeMotionService();
+  });
+
   ProviderContainer container(
     LocationService locationService, {
     List<Override> extraOverrides = const [],
@@ -120,9 +131,7 @@ void main() {
     FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(
       {},
     );
-    final tempDir = Directory.systemTemp.createTempSync(
-      'live_run_controller_test',
-    );
+    tempDir = Directory.systemTemp.createTempSync('live_run_controller_test');
     addTearDown(() => tempDir.deleteSync(recursive: true));
     PathProviderPlatform.instance = _FakePathProviderPlatform(tempDir.path);
     PackageInfoPlatform.instance = _FakePackageInfoPlatform();
@@ -130,6 +139,8 @@ void main() {
     final c = ProviderContainer(
       overrides: [
         locationServiceProvider.overrideWithValue(locationService),
+        barometerServiceProvider.overrideWithValue(barometer),
+        motionServiceProvider.overrideWithValue(motion),
         ...extraOverrides,
       ],
     );
@@ -142,6 +153,72 @@ void main() {
   // fast-forward through, so the acquiring timeout itself is shrunk via the
   // @visibleForTesting seam instead of faking the clock.
   const testTimeout = Duration(milliseconds: 50);
+
+  /// Runs one fix through a real run and returns the GPX the app wrote.
+  /// [beforeFix] is whatever the barometer does ahead of that fix.
+  Future<String> recordOneFix(void Function() beforeFix) async {
+    final service = _NeverEmittingLocationService();
+    final c = container(
+      service,
+      extraOverrides: [
+        syncServiceProvider.overrideWithValue(
+          SyncService(
+            apiClient: FakeApiClient(),
+            runStore: FakeRunStore(),
+            authService: AuthService(apiClient: FakeApiClient()),
+            connectivity: FakeConnectivityMonitor(),
+            periodicRetryInterval: null,
+          ),
+        ),
+      ],
+    );
+    final controller = c.read(liveRunControllerProvider.notifier)
+      ..acquiringTimeout = const Duration(seconds: 30);
+    await controller.start();
+
+    beforeFix();
+    await pumpEventQueue();
+    service.emit(
+      LocationSample(
+        latitude: 51.5,
+        longitude: -0.1,
+        accuracyMeters: 5,
+        hasAccuracy: true,
+        timestamp: DateTime.now(),
+      ),
+    );
+    await pumpEventQueue();
+    await controller.stop();
+
+    final gpx = tempDir
+        .listSync(recursive: true)
+        .whereType<File>()
+        .singleWhere((file) => file.path.endsWith('.gpx'));
+    return gpx.readAsString();
+  }
+
+  test('each fix logs the barometer and motion around it in the GPX', () async {
+    final gpx = await recordOneFix(() {
+      barometer
+        ..emit(1013.0)
+        ..emit(1013.5);
+      motion
+        ..emit(9.0)
+        ..emit(11.0);
+    });
+    expect(gpx, contains('<sat:pressure_hpa>1013.25</sat:pressure_hpa>'));
+    expect(gpx, contains('<sat:pressure_sd>0.2500</sat:pressure_sd>'));
+    expect(gpx, contains('<sat:motion_rms>1.000</sat:motion_rms>'));
+    // Two samples are far too short for a cadence.
+    expect(gpx, isNot(contains('cadence_hz')));
+  });
+
+  test('a phone with no barometer records the fix without pressure', () async {
+    final gpx = await recordOneFix(barometer.failNoSensor);
+    expect(gpx, contains('<trkpt'));
+    expect(gpx, isNot(contains('pressure_')));
+    expect(gpx, isNot(contains('motion_rms')));
+  });
 
   test(
     'LiveRunAcquiring surfaces a timed-out message when no fix arrives in time',
@@ -249,81 +326,92 @@ void main() {
     expect(finished.metrics.elapsed, Duration.zero);
   });
 
-  test('live upload gets the run: points, pause, a new segment, and the finish', () async {
-    final service = _NeverEmittingLocationService();
-    final api = FakeApiClient()
-      ..getServerInfoHandler = ({required baseUrl, required token}) async =>
-          const ServerInfoDto(version: '1.4.0', apiLevel: 2, minAppApiLevel: 0);
-    final live = LiveUploadService(
-      apiClient: api,
-      authService: _SignedInAuthService(),
-      connectivity: FakeConnectivityMonitor(),
-      sharingStore: LiveSharingStore(),
-      interval: null,
-    );
-    addTearDown(live.dispose);
-    final c2 = container(
-      service,
-      extraOverrides: [
-        liveUploadServiceProvider.overrideWithValue(live),
-        // stop() triggers a real SyncService pass for the saved run, which
-        // checks connectivity through a plugin unit tests don't have
-        // (MissingPluginException). This test waits long enough after stop()
-        // for that pass to get there, so it gets fakes instead.
-        syncServiceProvider.overrideWithValue(
-          SyncService(
-            apiClient: FakeApiClient(),
-            runStore: FakeRunStore(),
-            authService: AuthService(apiClient: FakeApiClient()),
-            connectivity: FakeConnectivityMonitor(),
-            periodicRetryInterval: null,
+  test(
+    'live upload gets the run: points, pause, a new segment, and the finish',
+    () async {
+      final service = _NeverEmittingLocationService();
+      final api = FakeApiClient()
+        ..getServerInfoHandler = ({required baseUrl, required token}) async =>
+            const ServerInfoDto(
+              version: '1.4.0',
+              apiLevel: 2,
+              minAppApiLevel: 0,
+            );
+      final live = LiveUploadService(
+        apiClient: api,
+        authService: _SignedInAuthService(),
+        connectivity: FakeConnectivityMonitor(),
+        sharingStore: LiveSharingStore(),
+        interval: null,
+      );
+      addTearDown(live.dispose);
+      final c2 = container(
+        service,
+        extraOverrides: [
+          liveUploadServiceProvider.overrideWithValue(live),
+          // stop() triggers a real SyncService pass for the saved run, which
+          // checks connectivity through a plugin unit tests don't have
+          // (MissingPluginException). This test waits long enough after stop()
+          // for that pass to get there, so it gets fakes instead.
+          syncServiceProvider.overrideWithValue(
+            SyncService(
+              apiClient: FakeApiClient(),
+              runStore: FakeRunStore(),
+              authService: AuthService(apiClient: FakeApiClient()),
+              connectivity: FakeConnectivityMonitor(),
+              periodicRetryInterval: null,
+            ),
           ),
-        ),
-      ],
-    );
-    final controller = c2.read(liveRunControllerProvider.notifier)
-      ..acquiringTimeout = const Duration(seconds: 30);
+        ],
+      );
+      final controller = c2.read(liveRunControllerProvider.notifier)
+        ..acquiringTimeout = const Duration(seconds: 30);
 
-    // Pause/resume/start each kick off their own send; a sendNow() during
-    // it joins that pass and only queues another, so wait for both.
-    Future<void> settle() async {
-      await pumpEventQueue();
-      await live.sendNow();
-      await live.sendNow();
-    }
+      // Pause/resume/start each kick off their own send; a sendNow() during
+      // it joins that pass and only queues another, so wait for both.
+      Future<void> settle() async {
+        await pumpEventQueue();
+        await live.sendNow();
+        await live.sendNow();
+      }
 
-    LocationSample at(double lat) => LocationSample(
-      latitude: lat,
-      longitude: -0.1,
-      accuracyMeters: 5,
-      hasAccuracy: true,
-      timestamp: DateTime.now(),
-    );
+      LocationSample at(double lat) => LocationSample(
+        latitude: lat,
+        longitude: -0.1,
+        accuracyMeters: 5,
+        hasAccuracy: true,
+        timestamp: DateTime.now(),
+      );
 
-    await controller.start();
-    service.emit(at(51.5));
-    service.emit(at(51.5001));
-    await settle();
-    final runId = api.liveStoredPoints.keys.single;
-    expect(api.liveStoredPoints[runId], 2);
+      await controller.start();
+      service.emit(at(51.5));
+      service.emit(at(51.5001));
+      await settle();
+      final runId = api.liveStoredPoints.keys.single;
+      expect(api.liveStoredPoints[runId], 2);
 
-    controller.pause();
-    await settle();
-    expect(api.liveStates[runId], 'paused');
+      controller.pause();
+      await settle();
+      expect(api.liveStates[runId], 'paused');
 
-    controller.resume();
-    service.emit(at(51.5002));
-    await settle();
-    expect(
-      api.livePointCalls.lastWhere((call) => call.points.isNotEmpty).points.single.segment,
-      1,
-    );
+      controller.resume();
+      service.emit(at(51.5002));
+      await settle();
+      expect(
+        api.livePointCalls
+            .lastWhere((call) => call.points.isNotEmpty)
+            .points
+            .single
+            .segment,
+        1,
+      );
 
-    await controller.stop();
-    await settle();
-    expect(api.liveStoredPoints[runId], 3);
-    expect(api.liveStates[runId], 'finished');
-    final finished = c2.read(liveRunControllerProvider) as LiveRunFinished;
-    expect(finished.clientRunId, runId);
-  });
+      await controller.stop();
+      await settle();
+      expect(api.liveStoredPoints[runId], 3);
+      expect(api.liveStates[runId], 'finished');
+      final finished = c2.read(liveRunControllerProvider) as LiveRunFinished;
+      expect(finished.clientRunId, runId);
+    },
+  );
 }

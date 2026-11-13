@@ -70,6 +70,8 @@
 	<string>Simple Activity Tracker uses your location to measure your speed, distance, and splits while you run.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Simple Activity Tracker uses your location to keep tracking your run when the screen is off or the app is in the background.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Simple Activity Tracker uses your phone's barometer to measure height changes during an activity.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

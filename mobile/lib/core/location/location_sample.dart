@@ -26,6 +26,11 @@ class LocationSample {
 
   final DateTime timestamp;
 
+  /// The platform's estimate of [elevationMeters]' accuracy, or null when it
+  /// gave none. Logged to weigh GPS against the barometer
+  /// (docs/BAROMETER-PLAN.md).
+  final double? verticalAccuracyMeters;
+
   const LocationSample({
     required this.latitude,
     required this.longitude,
@@ -35,5 +40,6 @@ class LocationSample {
     this.elevationMeters,
     this.speedMps,
     this.hasSpeed = false,
+    this.verticalAccuracyMeters,
   });
 }

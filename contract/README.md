@@ -22,6 +22,9 @@ requires that the server didn't silently ignore any field.
   writer (golden files, `mobile/test/core/files/gpx_contract_test.dart`, same
   `UPDATE_CONTRACT` flag) and what the app means by it. The server's parser
   must extract exactly that (`server/tests/test_gpx_contract.py`).
+  `barometer.gpx` carries `sat:pressure_hpa` (hPa, the mean of the readings in
+  the second before the fix, issue #184), a per-point extension that's simply
+  absent on a phone with no barometer.
 - `elevation/gps-noise.json`: a replay of GPS altitude fixes and the
   elevation gain/loss they must produce. The app's live tile
   (`mobile/test/domain/tracking/elevation_accumulator_test.dart`) and the

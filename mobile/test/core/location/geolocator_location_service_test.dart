@@ -7,19 +7,22 @@ import 'package:simple_activity_tracker/core/location/geolocator_location_servic
 /// at its false default. This is what a real Android fix looks like to the
 /// app, regardless of what the chip measured. (A plain [Position] has the
 /// same defaults, so the Android subclass isn't needed to reproduce it.)
-Position _androidFix({required double accuracy, required double speed}) =>
-    Position(
-      latitude: 51.5,
-      longitude: -0.1,
-      timestamp: DateTime.utc(2026, 1, 1, 9),
-      accuracy: accuracy,
-      altitude: 12,
-      altitudeAccuracy: 0,
-      heading: 0,
-      headingAccuracy: 0,
-      speed: speed,
-      speedAccuracy: 0,
-    );
+Position _androidFix({
+  required double accuracy,
+  required double speed,
+  double altitudeAccuracy = 0,
+}) => Position(
+  latitude: 51.5,
+  longitude: -0.1,
+  timestamp: DateTime.utc(2026, 1, 1, 9),
+  accuracy: accuracy,
+  altitude: 12,
+  altitudeAccuracy: altitudeAccuracy,
+  heading: 0,
+  headingAccuracy: 0,
+  speed: speed,
+  speedAccuracy: 0,
+);
 
 void main() {
   group('sampleFromPosition on Android (has* flags always false upstream)', () {
@@ -53,6 +56,20 @@ void main() {
 
       expect(sample.speedMps, isNull);
       expect(sample.hasSpeed, isFalse);
+    });
+
+    test('a measured altitude accuracy is kept, an unmeasured one is null', () {
+      expect(
+        sampleFromPosition(
+          _androidFix(accuracy: 4.2, speed: 1.7, altitudeAccuracy: 3.5),
+        ).verticalAccuracyMeters,
+        3.5,
+      );
+      expect(
+        sampleFromPosition(_androidFix(accuracy: 4.2, speed: 1.7))
+            .verticalAccuracyMeters,
+        isNull,
+      );
     });
   });
 }

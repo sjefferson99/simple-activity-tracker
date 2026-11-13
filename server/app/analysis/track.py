@@ -20,6 +20,11 @@ class Point:
     # has_speed is what actually distinguishes the two (see mobile's
     # LocationSample.hasSpeed doc for why).
     speed_mps: float | None = None
+    # From the optional sat:pressure_hpa GPX extension (mobile only, issue
+    # #184): the phone's barometer reading around this fix. None when absent
+    # (no barometer, older app, imports). Parsed but not used by the analysis
+    # yet.
+    pressure_hpa: float | None = None
 
 
 @dataclass(frozen=True)
