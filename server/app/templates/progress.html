@@ -18,8 +18,17 @@
        href="/progress?type={{ t | urlencode }}&tz={{ tz_name | urlencode }}"
        {% if t == activity_type %}aria-current="page"{% endif %}>{{ type_names.get(t, t | capitalize) }}</a>
     {% endfor %}
+    {% if show_all_tab %}
+    <a class="sort-link{% if is_all %} active{% endif %}"
+       href="/progress?type=all&tz={{ tz_name | urlencode }}"
+       {% if is_all %}aria-current="page"{% endif %}>All activities</a>
+    {% endif %}
   </nav>
+  {% if is_all %}
+  <p class="muted">Your own activities of every type. Speed trends and records compare like with like, so they're on each type's own tab. Periods use your timezone ({{ tz_name }}); weeks start on Monday.</p>
+  {% else %}
   <p class="muted">Your own {{ type_names.get(activity_type, activity_type) | lower }} activities only. Periods use your timezone ({{ tz_name }}); weeks start on Monday.</p>
+  {% endif %}
   {% endif %}
 </div>
 
@@ -41,6 +50,13 @@
         <td class="text-right">{{ "%.0f" | format(c.current.gain_m) }} m<div class="muted">{{ "%.0f" | format(c.previous.gain_m) }} m</div></td>
       </tr>
       {% endfor %}
+      <tr data-testid="comparison-lifetime">
+        <th scope="row">All time{% if first_started_at %}<div class="muted">since <time datetime="{{ first_started_at.isoformat() }}" class="local-time" data-format="date">{{ first_started_at.date().isoformat() }}</time></div>{% endif %}</th>
+        <td class="text-right">{{ lifetime.count }}</td>
+        <td class="text-right">{{ lifetime.distance_m | distance_km }}</td>
+        <td class="text-right">{{ lifetime.moving_s | duration }}</td>
+        <td class="text-right">{{ "%.0f" | format(lifetime.gain_m) }} m</td>
+      </tr>
     </tbody>
   </table>
 </div>
@@ -69,6 +85,7 @@
   <div class="chart-container"><div id="period-chart"></div></div>
 </div>
 
+{% if not is_all %}
 <div class="card">
   <h2>Trend</h2>
   {% if trend_points | length > 1 %}
@@ -127,6 +144,7 @@
   </table>
   {% endif %}
 </div>
+{% endif %}
 {% endif %}
 {% endblock %}
 

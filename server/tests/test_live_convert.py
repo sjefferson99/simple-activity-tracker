@@ -166,6 +166,26 @@ def test_the_phones_upload_replaces_the_converted_activity_in_place(
         activity = session.get(Activity, activity_id)
         assert activity is not None and activity.recovered_from_live is False
 
+    # Issue #190: the records rows follow the phone's analysis, not the
+    # live-track one they replaced.
+    from sqlalchemy import select
+
+    from app.models.best_effort import ActivityBestEffort
+
+    with get_session_factory()() as session:
+        rows = session.execute(
+            select(ActivityBestEffort.distance_m, ActivityBestEffort.duration_s).where(
+                ActivityBestEffort.activity_id == activity_id
+            )
+        )
+        stored = {distance: duration for distance, duration in rows}
+    expected = {
+        e["distance_meters"]: e["duration_seconds"]
+        for e in replaced["analysis"]["result"]["best_efforts"]
+    }
+    assert expected
+    assert stored == expected
+
     # The share survived.
     web_login(app_client, "viewer@example.com", OTHER_USER_PASSWORD)
     assert app_client.get(f"/shared/activities/{activity_id}").status_code == 200

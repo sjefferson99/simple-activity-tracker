@@ -231,6 +231,25 @@ def test_progress_page_shows_records_and_this_weeks_totals(
     assert '<td class="text-right">1<div class="muted">0</div></td>' in week_row
 
 
+def test_progress_page_shows_lifetime_totals_including_virtual(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    old, recent, zwift = (
+        _upload(app_client, auth_headers, sample_gpx_bytes, cid) for cid in _ids(3)
+    )
+    _set_start_and_efforts(old, "2020-03-01T08:00:00+00:00", 300.0)
+    _set_start_and_efforts(recent, datetime.now(UTC).isoformat(), 300.0)
+    _set_start_and_efforts(zwift, datetime.now(UTC).isoformat(), 300.0)
+    _set_virtual(zwift)
+    web_login(app_client, "admin@example.com", "admin-password-123")
+
+    text = app_client.get("/progress", params={"tz": "UTC"}).text
+    row = text.split('data-testid="comparison-lifetime"')[1].split("</tr>")[0]
+    assert 'datetime="2020-03-01T08:00:00' in row  # since the first activity
+    assert '<td class="text-right">3</td>' in row  # virtual ones count in totals
+    assert '<td class="text-right">9.05 km</td>' in row  # 3 x the ~3.02 km fixture
+
+
 def test_progress_page_only_counts_your_own_activities(
     app_client, auth_headers, sample_gpx_bytes
 ) -> None:
@@ -263,6 +282,38 @@ def test_progress_page_type_tabs_and_unknown_type_fallback(
 
     unknown = app_client.get("/progress", params={"type": "rowing", "tz": "UTC"}).text
     assert 'aria-current="page">Running</a>' in unknown
+
+
+def test_all_activities_tab_totals_every_type_without_trends_or_records(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    ids = _ids(3)
+    for client_id, activity_type in zip(ids, ("running", "cycling", "walking"), strict=True):
+        _upload(app_client, auth_headers, sample_gpx_bytes, client_id, activity_type)
+    web_login(app_client, "admin@example.com", "admin-password-123")
+
+    default = app_client.get("/progress", params={"tz": "UTC"}).text
+    assert ">All activities</a>" in default
+
+    text = app_client.get("/progress", params={"type": "all", "tz": "UTC"}).text
+    assert 'aria-current="page">All activities</a>' in text
+    row = text.split('data-testid="comparison-lifetime"')[1].split("</tr>")[0]
+    assert '<td class="text-right">3</td>' in row
+    assert 'id="period-chart"' in text
+    assert 'id="trend-chart"' not in text
+    assert 'data-testid="progress-records"' not in text
+
+
+def test_all_activities_tab_is_hidden_with_only_one_type(
+    app_client, auth_headers, sample_gpx_bytes
+) -> None:
+    _upload(app_client, auth_headers, sample_gpx_bytes, _ids(1)[0])
+    web_login(app_client, "admin@example.com", "admin-password-123")
+
+    assert ">All activities</a>" not in app_client.get("/progress", params={"tz": "UTC"}).text
+    # A stale ?type=all link falls back to the only type.
+    fallback = app_client.get("/progress", params={"type": "all", "tz": "UTC"}).text
+    assert 'aria-current="page">Running</a>' in fallback
 
 
 def test_progress_page_falls_back_to_utc_for_a_bad_timezone(

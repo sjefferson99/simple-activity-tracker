@@ -17,6 +17,7 @@ from app.progress import (
     load_activity_stats,
     period_buckets,
     resolve_timezone,
+    totals,
     trend,
 )
 from app.records import best_effort_records
@@ -24,6 +25,10 @@ from app.web.deps import WebUser
 from app.web.templating import templates
 
 router = APIRouter(tags=["web"], include_in_schema=False)
+
+# The "All activities" tab: totals and period charts across every type.
+# Speed trends and records only compare like with like, so they're left off.
+ALL_TYPES = "all"
 
 
 def _buckets_json(stats: Any, tz: Any, now: datetime) -> dict[str, list[dict[str, object]]]:
@@ -75,19 +80,24 @@ def progress_page(
     if not types:
         return templates.TemplateResponse(request, "progress.html", context)
 
-    selected = activity_type if activity_type in types else types[0]
-    stats = load_activity_stats(session, user.id, selected)
+    is_all = activity_type == ALL_TYPES and len(types) > 1
+    selected = ALL_TYPES if is_all else (activity_type if activity_type in types else types[0])
+    stats = load_activity_stats(session, user.id, None if is_all else selected)
     now = datetime.now(UTC)
     context.update(
         {
             "activity_type": selected,
+            "is_all": is_all,
+            "show_all_tab": len(types) > 1,
             "show_pace": selected != "cycling",
             "comparisons": compare_periods(stats, tz_info, now),
+            "lifetime": totals(stats),
+            "first_started_at": stats[0].started_at if stats else None,
             "buckets": _buckets_json(stats, tz_info, now),
-            "trend_points": _trend_json(stats),
+            "trend_points": [] if is_all else _trend_json(stats),
             "rolling_window": TREND_ROLLING_WINDOW,
-            "effort_records": best_effort_records(session, user.id, selected),
-            "activity_records": activity_records(stats, selected),
+            "effort_records": [] if is_all else best_effort_records(session, user.id, selected),
+            "activity_records": [] if is_all else activity_records(stats, selected),
         }
     )
     return templates.TemplateResponse(request, "progress.html", context)

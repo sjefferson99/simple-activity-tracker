@@ -82,9 +82,14 @@ def activity_types_for(session: Session, user_id: str) -> list[str]:
     return [activity_type for activity_type, _ in rows]
 
 
-def load_activity_stats(session: Session, user_id: str, activity_type: str) -> list[ActivityStat]:
-    """The user's own analysed activities of this type (D1: never shared
-    ones), oldest first."""
+def load_activity_stats(
+    session: Session, user_id: str, activity_type: str | None
+) -> list[ActivityStat]:
+    """The user's own analysed activities of this type, or of every type
+    when activity_type is None (D1: never shared ones), oldest first."""
+    conditions = [Activity.user_id == user_id, ActivityAnalysis.status == AnalysisStatus.done]
+    if activity_type is not None:
+        conditions.append(Activity.activity_type == activity_type)
     rows = session.execute(
         select(
             Activity.id,
@@ -97,11 +102,7 @@ def load_activity_stats(session: Session, user_id: str, activity_type: str) -> l
             Activity.is_virtual,
         )
         .join(ActivityAnalysis, ActivityAnalysis.activity_id == Activity.id)
-        .where(
-            Activity.user_id == user_id,
-            Activity.activity_type == activity_type,
-            ActivityAnalysis.status == AnalysisStatus.done,
-        )
+        .where(*conditions)
         .order_by(Activity.started_at)
     )
     return [
