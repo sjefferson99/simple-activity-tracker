@@ -45,15 +45,26 @@ class SplitsTargetsView extends StatelessWidget {
       targetsAs: targetsAs,
     );
     final hasTargets = splits.any((s) => readDouble(s, 'target_speed_mps') != null);
+    // Rounded like the screen's Time, but by running total so the list adds
+    // up to it (issue #161).
+    final shownDurations = splitDisplayDurations([
+      for (final s in splits)
+        Duration(
+          microseconds:
+              (readDouble(s, 'duration_seconds')! * Duration.microsecondsPerSecond)
+                  .round(),
+        ),
+    ], round: true);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Splits', style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 8),
-        for (final split in splits)
+        for (final (i, split) in splits.indexed)
           _SplitTargetRow(
             split: split,
+            shownDuration: shownDurations[i],
             speedUnit: speedUnit,
             showTarget: hasTargets,
           ),
@@ -78,11 +89,13 @@ class SplitsTargetsView extends StatelessWidget {
 
 class _SplitTargetRow extends StatelessWidget {
   final Map<String, dynamic> split;
+  final Duration shownDuration;
   final SpeedUnit speedUnit;
   final bool showTarget;
 
   const _SplitTargetRow({
     required this.split,
+    required this.shownDuration,
     required this.speedUnit,
     required this.showTarget,
   });
@@ -90,10 +103,10 @@ class _SplitTargetRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // Presence of the first three is checked by SplitsTargetsView's filter.
+    // Presence of these and duration_seconds is checked by SplitsTargetsView's
+    // filter; the time shown comes from shownDuration.
     final index = readInt(split, 'index')!;
     final distanceM = readDouble(split, 'distance_m')!;
-    final durationS = readDouble(split, 'duration_seconds')!;
     final avgSpeedMps = readDouble(split, 'avg_speed_mps');
     final targetSpeedMps = readDouble(split, 'target_speed_mps');
     final verdictName = readString(split, 'verdict');
@@ -121,7 +134,7 @@ class _SplitTargetRow extends StatelessWidget {
         children: [
           Text('#$index', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
           Text(distanceText),
-          Text(formatDuration(Duration(seconds: durationS.round()))),
+          Text(formatDuration(shownDuration)),
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,

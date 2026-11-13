@@ -3,8 +3,10 @@ import 'package:simple_activity_tracker/domain/models/current_split_info.dart';
 import 'package:simple_activity_tracker/domain/tracking/activity_mode.dart';
 import 'package:simple_activity_tracker/domain/tracking/elevation_accumulator.dart';
 import 'package:simple_activity_tracker/domain/tracking/metrics_engine.dart';
+import 'package:simple_activity_tracker/domain/tracking/run_clock.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_plan.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_preference.dart';
+import 'package:simple_activity_tracker/domain/models/live_metrics.dart';
 import 'package:simple_activity_tracker/domain/models/track_point.dart';
 
 /// One degree of longitude at the equator is ~111,195m, matching the
@@ -1194,6 +1196,177 @@ void main() {
       feed(engine, 60, (_) => 170, fromSecond: 400);
 
       expect(engine.metrics.elevationGainMeters, beforePause);
+    });
+  });
+
+  group('issue #161: splits run on the elapsed clock', () {
+    final t0 = DateTime.utc(2026, 1, 1, 9);
+    DateTime at(num seconds) =>
+        t0.add(Duration(microseconds: (seconds * 1e6).round()));
+
+    /// Completed splits plus the split in progress — what the issue expects
+    /// to equal the Time tile.
+    Duration splitTotal(LiveMetrics m) => m.completedSplits.fold(
+      m.currentSplitElapsed,
+      (sum, split) => sum + split.duration,
+    );
+
+    TrackPoint fix(
+      double meters,
+      num seconds, {
+      double speedMps = 3,
+      double accuracyMeters = 5,
+      bool hasSpeed = true,
+    }) => _pointAtMeters(
+      meters,
+      at(seconds),
+      speedMps: speedMps,
+      hasSpeed: hasSpeed,
+      accuracyMeters: accuracyMeters,
+    );
+
+    // No chip speed: the position noise floor decides motion, so every 3m
+    // step counts from the first — keeps the distance arithmetic exact.
+    TrackPoint plain(double meters, num seconds) =>
+        fix(meters, seconds, hasSpeed: false);
+
+    test('splits add up to Time despite a slow GPS lock, speed dips, a '
+        'poor fix and an implausible jump', () {
+      final clock = RunClock(startedAt: t0);
+      final engine = MetricsEngine(
+        clock: clock,
+        splitPreference: const SplitPreference(
+          kind: SplitKind.distanceKm,
+          value: 1,
+        ),
+      );
+      // First fix 8s after Start; then 3 m/s with 1s fixes for ~23 minutes.
+      for (var s = 8; s <= 1400; s++) {
+        final meters = (s - 8) * 3.0;
+        if (s % 200 == 0) {
+          // A chip-speed dip: exits "moving" and needs 3 fixes to re-enter,
+          // so moving time loses ~4s here — split time must not.
+          engine.addPoint(fix(meters, s, speedMps: 0.2));
+        } else if (s % 333 == 0) {
+          engine.addPoint(fix(meters, s, accuracyMeters: 60));
+        } else if (s == 777) {
+          engine.addPoint(fix(meters + 5000, s));
+        } else {
+          engine.addPoint(fix(meters, s));
+        }
+      }
+      engine.advanceTo(at(1400.5));
+      final m = engine.metrics;
+
+      expect(m.completedSplits, hasLength(4));
+      expect(m.elapsedWallClock, const Duration(milliseconds: 1400500));
+      expect(splitTotal(m), m.elapsedWallClock);
+      // The filters still keep moving time (and so average pace) honest.
+      expect(m.elapsed, lessThan(const Duration(seconds: 1380)));
+      // Split 1 includes the 8s before the first fix: ~1000m at 3 m/s
+      // (333.3s) plus 8s, plus a few seconds the filters didn't credit.
+      expect(
+        m.completedSplits.first.duration.inMilliseconds / 1000,
+        greaterThan(341.3),
+      );
+    });
+
+    test('a time split closes on the clock between fixes, and the next fix '
+        'shares its distance back across the boundary', () {
+      final engine = MetricsEngine(
+        clock: RunClock(startedAt: t0),
+        splitPreference: const SplitPreference(
+          kind: SplitKind.timeMin,
+          value: 1,
+        ),
+      );
+      for (var s = 0; s <= 59; s++) {
+        engine.addPoint(plain(s * 3.0, s));
+      }
+      engine.advanceTo(at(59.5));
+      expect(engine.metrics.completedSplits, isEmpty);
+      expect(
+        engine.metrics.currentSplitElapsed,
+        const Duration(milliseconds: 59500),
+      );
+
+      // The UI tick reaches the boundary before the next fix does.
+      engine.advanceTo(at(60));
+      var m = engine.metrics;
+      expect(m.completedSplits, hasLength(1));
+      expect(m.completedSplits.first.duration, const Duration(seconds: 60));
+      expect(m.completedSplits.first.distanceMeters, closeTo(177, 0.01));
+      expect(m.currentSplitElapsed, Duration.zero);
+
+      // 59s -> 61s covers 6m; the first half was before the boundary.
+      engine.addPoint(plain(183, 61));
+      m = engine.metrics;
+      expect(m.completedSplits.first.distanceMeters, closeTo(180, 0.01));
+      expect(m.completedSplits.first.avgSpeedMps, closeTo(3, 0.001));
+      expect(m.currentSplitDistanceMeters, closeTo(3, 0.01));
+      expect(m.distanceMeters, closeTo(183, 0.01));
+      expect(splitTotal(m), m.elapsedWallClock);
+    });
+
+    test('a GPS gap spanning several time splits still closes each on time '
+        'and shares the gap\'s distance by time', () {
+      final engine = MetricsEngine(
+        clock: RunClock(startedAt: t0),
+        splitPreference: const SplitPreference(
+          kind: SplitKind.timeMin,
+          value: 1,
+        ),
+      );
+      engine.addPoint(plain(0, 0));
+      for (var s = 1; s <= 150; s++) {
+        engine.advanceTo(at(s));
+      }
+      expect(engine.metrics.completedSplits, hasLength(2));
+      expect(engine.metrics.currentSplitElapsed, const Duration(seconds: 30));
+
+      engine.addPoint(plain(450, 150));
+      final splits = engine.metrics.completedSplits;
+      expect(splits[0].distanceMeters, closeTo(180, 0.01));
+      expect(splits[1].distanceMeters, closeTo(180, 0.01));
+      expect(engine.metrics.currentSplitDistanceMeters, closeTo(90, 0.01));
+    });
+
+    test('only a pause stops the split clock', () {
+      final clock = RunClock(startedAt: t0);
+      final engine = MetricsEngine(
+        clock: clock,
+        splitPreference: const SplitPreference(
+          kind: SplitKind.distanceKm,
+          value: 1,
+        ),
+      );
+      // 0-200s at 3 m/s (600m), standing still 200-260s without pausing,
+      // paused 260-560s, then 3 m/s again from 562s.
+      for (var s = 0; s <= 200; s++) {
+        engine.addPoint(fix(s * 3.0, s));
+      }
+      for (var s = 201; s <= 260; s++) {
+        engine.addPoint(fix(600, s, speedMps: 0));
+      }
+      clock.pause(at(260));
+      engine.advanceTo(at(400));
+      expect(engine.metrics.elapsedWallClock, const Duration(seconds: 260));
+      clock.resume(at(560));
+      engine.resetSegmentAnchor();
+      for (var s = 562; s <= 760; s++) {
+        engine.addPoint(fix(600 + (s - 562) * 3.0, s));
+      }
+
+      final m = engine.metrics;
+      expect(m.completedSplits, hasLength(1));
+      // The stationary gate holds back the first 3 segments' distance at
+      // the start and again after the resume (591m credited by 200s). The
+      // 60s stand still counts (no pause), the 300s pause doesn't, and the
+      // remaining 409m is credited from run time 265s at 3 m/s.
+      final split = m.completedSplits.first.duration.inMilliseconds / 1000;
+      expect(split, closeTo(265 + 409 / 3, 0.01));
+      expect(m.elapsedWallClock, const Duration(seconds: 460));
+      expect(splitTotal(m), m.elapsedWallClock);
     });
   });
 

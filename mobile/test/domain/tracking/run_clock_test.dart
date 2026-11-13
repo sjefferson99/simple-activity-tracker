@@ -56,4 +56,18 @@ void main() {
       Duration.zero,
     );
   });
+
+  test('activeSpans lists each run of the clock, the last left open', () {
+    final clock = RunClock(startedAt: start);
+    expect(clock.activeSpans, [(start, null)]);
+
+    clock
+      ..pause(at(10))
+      ..pause(at(12))
+      ..resume(at(30));
+    expect(clock.activeSpans, [(start, at(10)), (at(30), null)]);
+
+    clock.pause(at(45));
+    expect(clock.activeSpans, [(start, at(10)), (at(30), at(45))]);
+  });
 }

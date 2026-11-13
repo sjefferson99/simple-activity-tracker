@@ -4,6 +4,7 @@ import 'package:gpx/gpx.dart';
 
 import '../../domain/models/track_point.dart';
 import '../../domain/tracking/activity_mode.dart';
+import '../../domain/tracking/run_clock.dart';
 import '../../domain/tracking/split_plan.dart';
 
 /// Namespace for this app's own per-point GPX extensions (accuracy/speed
@@ -27,6 +28,11 @@ class RunGpxLog {
   final File _targetFile;
   final SplitPlan _splitPlan;
   final ActivityMode _activityMode;
+
+  /// The run's elapsed clock, whose spans are written as `sat:clock_spans`.
+  /// Null only for callers with no clock (tests); the extension is then
+  /// left out and the server falls back to the fixes' own timestamps.
+  final RunClock? _clock;
   final Trk _track = Trk();
   Trkseg? _currentSegment;
 
@@ -34,7 +40,12 @@ class RunGpxLog {
   /// the same temp file concurrently and clobber each other's rename.
   Future<void> _pendingFlush = Future.value();
 
-  RunGpxLog(this._targetFile, this._splitPlan, this._activityMode) {
+  RunGpxLog(
+    this._targetFile,
+    this._splitPlan,
+    this._activityMode, {
+    RunClock? clock,
+  }) : _clock = clock {
     _startNewSegment();
   }
 
@@ -84,6 +95,9 @@ class RunGpxLog {
 
   Future<void> _writeSnapshot() async {
     final base = _splitPlan.base;
+    final clockSpans = _clock == null
+        ? null
+        : formatClockSpans(_clock.activeSpans);
     final gpx = Gpx()
       ..creator = 'Simple Activity Tracker'
       ..trks = [_track]
@@ -107,6 +121,10 @@ class RunGpxLog {
               ? 'pace'
               : 'speed',
         },
+        // When the run's clock ran (issue #161): splits are timed on this
+        // clock — since Start, stopped only by Pause — and the fixes alone
+        // can't say when Start, a pause, a resume or Stop happened.
+        '$_extensionsPrefix:clock_spans': ?clockSpans,
       };
     final xml = GpxWriter().asString(
       gpx,
@@ -127,3 +145,12 @@ class RunGpxLog {
     await flush();
   }
 }
+
+/// `sat:clock_spans`: each span as `start/end` in ISO 8601 UTC, joined by
+/// `;`, in order. A span still running when the file was written (a crash,
+/// or a flush mid-run) has an empty end (`start/`). Never change this
+/// format: the server parses it (docs/VERSIONING.md §5).
+String formatClockSpans(List<(DateTime, DateTime?)> spans) => [
+  for (final (start, end) in spans)
+    '${start.toUtc().toIso8601String()}/${end?.toUtc().toIso8601String() ?? ''}',
+].join(';');

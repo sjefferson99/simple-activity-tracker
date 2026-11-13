@@ -50,6 +50,34 @@ String formatDuration(Duration duration) {
   return hours > 0 ? '$hours:$mm:$ss' : '$mm:$ss';
 }
 
+/// Whole-second times for a list of consecutive splits, chosen so they add
+/// up exactly to the whole-second running total (issue #161). Each split
+/// shown on its own would lose its fraction of a second, so a list of them
+/// could add up to a few seconds less than the Time shown for the same run;
+/// instead each running total is made whole and the splits are the
+/// differences. [round] matches a display that rounds to the nearest second
+/// (server analysis); the default cuts to the whole second below, the same
+/// as [formatDuration] and the Time tile.
+List<Duration> splitDisplayDurations(
+  List<Duration> durations, {
+  bool round = false,
+}) {
+  var totalMicros = 0;
+  var shownSeconds = 0;
+  return [
+    for (final duration in durations)
+      () {
+        totalMicros += duration.inMicroseconds;
+        final whole = round
+            ? (totalMicros / Duration.microsecondsPerSecond).round()
+            : totalMicros ~/ Duration.microsecondsPerSecond;
+        final shown = Duration(seconds: whole - shownSeconds);
+        shownSeconds = whole;
+        return shown;
+      }(),
+  ];
+}
+
 String formatDistanceKm(double meters) => (meters / 1000).toStringAsFixed(2);
 
 double milesFromMeters(double meters) => meters / _metersPerMile;

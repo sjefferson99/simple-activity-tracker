@@ -25,6 +25,7 @@ _ACCURACY_TAG = f"{{{_EXTENSIONS_NS}}}accuracy"
 _HAS_ACCURACY_TAG = f"{{{_EXTENSIONS_NS}}}has_accuracy"
 _SPEED_TAG = f"{{{_EXTENSIONS_NS}}}speed"
 _HAS_SPEED_TAG = f"{{{_EXTENSIONS_NS}}}has_speed"
+_CLOCK_SPANS_TAG = f"{{{_EXTENSIONS_NS}}}clock_spans"
 
 
 def _point_accuracy_m(gpx_point: gpxpy.gpx.GPXTrackPoint) -> float | None:
@@ -115,7 +116,11 @@ def parse_gpx(data: bytes) -> Track:
             if points:
                 segments.append(Segment(points=points))
 
-    track = Track(segments=segments, creator=(gpx.creator or "").strip() or None)
+    track = Track(
+        segments=segments,
+        creator=(gpx.creator or "").strip() or None,
+        clock_spans=_clock_spans(gpx),
+    )
     if track.point_count == 0:
         raise GpxNoTrackPointsError("GPX file has no timestamped track points")
     return track
@@ -123,6 +128,42 @@ def parse_gpx(data: bytes) -> Track:
 
 def _as_utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _clock_spans(gpx: gpxpy.gpx.GPX) -> tuple[tuple[datetime, datetime | None], ...] | None:
+    """The root sat:clock_spans extension (issue #161; written by mobile's
+    RunGpxLog.formatClockSpans): `start/end;start/end`, ISO 8601 UTC, the
+    last end possibly empty for a span still open. None (never raises) when
+    absent or not a well-formed, ordered, non-overlapping list — the
+    analyzer then times the activity from its fixes instead."""
+    raw = next(
+        (
+            (element.text or "").strip()
+            for element in gpx.extensions
+            if getattr(element, "tag", None) == _CLOCK_SPANS_TAG
+        ),
+        None,
+    )
+    if not raw:
+        return None
+    spans: list[tuple[datetime, datetime | None]] = []
+    try:
+        for part in raw.split(";"):
+            start_raw, end_raw = part.split("/")
+            start = _as_utc(datetime.fromisoformat(start_raw))
+            end = _as_utc(datetime.fromisoformat(end_raw)) if end_raw else None
+            spans.append((start, end))
+    except ValueError:
+        return None
+    for i, (start, end) in enumerate(spans):
+        is_last = i == len(spans) - 1
+        if end is None and not is_last:
+            return None
+        if end is not None and end < start:
+            return None
+        if not is_last and spans[i + 1][0] < end:  # type: ignore[operator]
+            return None
+    return tuple(spans)
 
 
 def guess_device_name(data: bytes) -> str | None:

@@ -100,6 +100,14 @@ wall-clock elapsed (minus explicit pauses) as "Time" and keeps moving time inter
 for pace. This is a product decision, but as-is the tile actively misleads during
 exactly the conditions the filters are designed for.
 
+> **Resolved, then extended by issue #161.** Time became wall-clock minus pauses
+> (`RunClock`). Splits stayed on moving time at first, so they no longer added up to
+> Time and drifted from stopwatch-based apps: every uncredited segment (the 3-fix
+> moving confirmation, a dropped or implausible fix) silently lengthened the split.
+> Splits now run on the same `RunClock` as Time, and only an explicit pause stops it;
+> the filters decide distance, never time. Moving time remains for average pace and
+> `moving_seconds`.
+
 ### 1.5 The captures can't show the gating inputs
 
 `RunGpxLog` writes lat/lon/ele/time only. Three sessions of GPX analysis could never

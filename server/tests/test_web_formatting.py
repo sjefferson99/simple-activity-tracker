@@ -3,7 +3,7 @@
 import pytest
 
 from app.analysis.v1 import _verdict
-from app.web.formatting import format_speed_delta, format_split_target
+from app.web.formatting import format_speed_delta, format_split_target, split_display_seconds
 
 
 def test_format_split_target_as_speed() -> None:
@@ -68,3 +68,18 @@ def test_speed_delta_empty_when_nothing_to_show(targets_as: str) -> None:
     assert format_speed_delta(5.0, None, targets_as) == ""
     assert format_speed_delta(None, 5.0, targets_as) == ""
     assert format_speed_delta(0.0, 5.0, targets_as) == ""
+
+
+def test_split_display_seconds_add_up_to_the_rounded_running_total() -> None:
+    # Ten 1:40.6 splits: rounding each alone gives 1:41 x 10 = 16:50 against
+    # a Time of 16:46 (issue #161).
+    splits: list[dict[str, object]] = [{"duration_seconds": 100.6} for _ in range(10)]
+    shown = split_display_seconds(splits)
+    assert sum(s for s in shown if s is not None) == round(1006.0)
+    assert shown[:3] == [101, 100, 101]
+    assert all(s is not None and abs(s - 100.6) < 1 for s in shown)
+
+
+def test_split_display_seconds_skips_a_split_without_a_duration() -> None:
+    shown = split_display_seconds([{"duration_seconds": 60.0}, {}, {"duration_seconds": 60.0}])
+    assert shown == [60, None, 60]

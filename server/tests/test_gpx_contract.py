@@ -9,6 +9,7 @@ their format.
 """
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,13 @@ def test_server_reads_what_the_app_means(gpx_path: Path) -> None:
     assert len(points) == expected["point_count"]
     assert points[0].accuracy_m == expected["first_point"]["accuracy_m"]
     assert points[0].speed_mps == expected["first_point"]["speed_mps"]
+    assert track.clock_spans is not None
+    assert [
+        [start.isoformat(), end.isoformat() if end else None] for start, end in track.clock_spans
+    ] == [
+        [datetime.fromisoformat(s).isoformat(), datetime.fromisoformat(e).isoformat()]
+        for s, e in expected["clock_spans"]
+    ]
 
 
 @pytest.mark.parametrize("gpx_path", _CASES, ids=lambda p: p.name)

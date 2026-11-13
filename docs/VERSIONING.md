@@ -156,7 +156,8 @@ mistake.
    produce it.
 5. **GPX `sat:` extensions are a contract too.** Never change an existing
    extension's value format (`split_plan`'s `size@target;…`, `split_value` as a
-   whole number, the `split_type` names). Older servers parse them as they
+   whole number, the `split_type` names, `clock_spans`' `start/end;…` in ISO 8601
+   UTC with an empty last end for a span still open). Older servers parse them as they
    are. New meaning gets a new extension name, which older servers ignore
    (they have always ignored unknown extensions; verified against the v1.0.0
    parser).

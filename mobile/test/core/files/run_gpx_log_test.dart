@@ -5,6 +5,7 @@ import 'package:gpx/gpx.dart';
 import 'package:simple_activity_tracker/core/files/run_gpx_log.dart';
 import 'package:simple_activity_tracker/domain/models/track_point.dart';
 import 'package:simple_activity_tracker/domain/tracking/activity_mode.dart';
+import 'package:simple_activity_tracker/domain/tracking/run_clock.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_plan.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_preference.dart'
     show SplitKind, SplitPreference;
@@ -299,5 +300,42 @@ void main() {
     await File('${file.path}.tmp').writeAsString('not valid xml, mid-write');
 
     expect(await file.readAsString(), firstFlushContent);
+  });
+
+  group('sat:clock_spans (issue #161)', () {
+    test(
+      'records each run of the clock, an unfinished one with no end',
+      () async {
+        final file = File('${tempDir.path}/run.gpx');
+        final start = DateTime.utc(2026, 1, 1, 9);
+        final clock = RunClock(startedAt: start)
+          ..pause(start.add(const Duration(seconds: 90)))
+          ..resume(start.add(const Duration(seconds: 100, milliseconds: 250)));
+        final log = RunGpxLog(
+          file,
+          _defaultSplitPlan,
+          ActivityMode.running,
+          clock: clock,
+        );
+        log.addPoint(_point(51.5, -0.1, start.add(const Duration(seconds: 5))));
+        await log.flush();
+
+        final gpx = GpxReader().fromString(await file.readAsString());
+        expect(
+          gpx.extensions['sat:clock_spans'],
+          '2026-01-01T09:00:00.000Z/2026-01-01T09:01:30.000Z;'
+          '2026-01-01T09:01:40.250Z/',
+        );
+      },
+    );
+
+    test('is left out when there is no clock', () async {
+      final file = File('${tempDir.path}/run.gpx');
+      final log = RunGpxLog(file, _defaultSplitPlan, ActivityMode.running);
+      log.addPoint(_point(51.5, -0.1, DateTime.utc(2026, 1, 1, 9)));
+      await log.flush();
+
+      expect(await file.readAsString(), isNot(contains('clock_spans')));
+    });
   });
 }

@@ -48,6 +48,8 @@
     </tr>
   </thead>
   <tbody>
+    {# Shown so the column adds up to the activity's Time (issue #161). #}
+    {% set shown_seconds = splits | split_display_seconds %}
     {% for split in splits %}
     {% set verdict_class = {"on_target": "split-on-target", "too_fast": "split-off-target", "too_slow": "split-off-target"}.get(split.verdict, "") %}
     <tr>
@@ -58,7 +60,7 @@
         {% else %}{{ split.distance_m | distance_km }}
         {% endif %}
       </td>
-      <td>{{ split.duration_seconds | duration }}</td>
+      <td>{{ shown_seconds[loop.index0] | duration }}</td>
       <td class="{{ verdict_class }}">{{ split.avg_speed_mps | pace }}</td>
       <td class="{{ verdict_class }}">{{ split.avg_speed_mps | kmh }}</td>
       <td>{{ "%+.0f"|format(split.elevation_delta_m) }} m</td>

@@ -5,6 +5,7 @@
     <sat:split_value>1</sat:split_value>
     <sat:split_plan>400@3.5;200;400@3.25</sat:split_plan>
     <sat:split_targets_as>pace</sat:split_targets_as>
+    <sat:clock_spans>2026-09-24T06:59:52.000Z/2026-09-24T07:00:52.000Z;2026-09-24T07:00:58.000Z/2026-09-24T07:01:52.000Z</sat:clock_spans>
   </extensions>
   <trk>
     <trkseg>
@@ -68,6 +69,8 @@
           <sat:has_speed>true</sat:has_speed>
         </extensions>
       </trkpt>
+    </trkseg>
+    <trkseg>
       <trkpt lat="51.50162" lon="-0.1">
         <ele>26.0</ele>
         <time>2026-09-24T07:01:00.000Z</time>

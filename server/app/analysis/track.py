@@ -38,6 +38,12 @@ class Track:
     # altitude apart from imports (see elevation.is_phone_gps_track). None
     # for FIT/TCX parses and hand-built tracks.
     creator: str | None = None
+    # When the phone's run clock ran (sat:clock_spans, issue #161): each
+    # (start, end) is Start or a resume to a pause or Stop, end None for a
+    # span still open when the file was written. None when the file doesn't
+    # say (older app versions, imports); the analyzer then falls back to the
+    # fixes' own timestamps per segment.
+    clock_spans: tuple[tuple[datetime, datetime | None], ...] | None = None
 
     @property
     def point_count(self) -> int:

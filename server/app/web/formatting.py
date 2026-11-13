@@ -26,6 +26,28 @@ def format_duration(seconds: float | None) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def split_display_seconds(splits: list[dict[str, object]]) -> list[int | None]:
+    """Whole-second times for consecutive splits, chosen so the list adds up
+    to its rounded running total (issue #161) — mirrors mobile's
+    splitDisplayDurations. Rounding each split on its own could make a list
+    of them add up to several seconds off the activity's Time; instead each
+    running total is rounded (as format_duration rounds) and the splits are
+    the differences. None for a split with no duration_seconds."""
+    total = 0.0
+    shown_total = 0
+    result: list[int | None] = []
+    for split in splits:
+        seconds = split.get("duration_seconds")
+        if not isinstance(seconds, int | float):
+            result.append(None)
+            continue
+        total += seconds
+        whole = round(total)
+        result.append(whole - shown_total)
+        shown_total = whole
+    return result
+
+
 def format_pace(speed_mps: float | None) -> str:
     """min/km, the app's secondary unit — see mobile/lib/core/units."""
     if speed_mps is None or speed_mps <= 0:

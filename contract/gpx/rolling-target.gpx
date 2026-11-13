@@ -5,6 +5,7 @@
     <sat:split_value>1</sat:split_value>
     <sat:split_target>3.0</sat:split_target>
     <sat:split_targets_as>speed</sat:split_targets_as>
+    <sat:clock_spans>2026-09-24T06:59:52.000Z/2026-09-24T07:01:52.000Z</sat:clock_spans>
   </extensions>
   <trk>
     <trkseg>
