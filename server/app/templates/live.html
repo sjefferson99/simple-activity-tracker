@@ -157,12 +157,22 @@
       const card = document.getElementById("live-splits-card");
       const body = document.getElementById("live-splits");
       card.hidden = splits.length === 0;
+      // Each split's time from the rounded running total, so the column adds
+      // up to the elapsed time shown (issue #161).
+      let total = 0, shownTotal = 0;
       body.replaceChildren(...splits.map((s) => {
+        let shown = null;
+        if (s.duration_seconds != null) {
+          total += s.duration_seconds;
+          const whole = Math.round(total);
+          shown = whole - shownTotal;
+          shownTotal = whole;
+        }
         const row = document.createElement("tr");
         for (const value of [
           String(s.index),
           s.distance_m != null ? fmtDistance(s.distance_m) : "—",
-          fmtDuration(s.duration_seconds),
+          fmtDuration(shown),
           fmtPaceOrSpeed(s.avg_speed_mps),
         ]) {
           const cell = document.createElement("td");

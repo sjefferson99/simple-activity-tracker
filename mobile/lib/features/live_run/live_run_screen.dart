@@ -586,6 +586,10 @@ class SplitsPanel extends ConsumerWidget {
 
     final expanded = ref.watch(_splitsExpandedProvider);
     final theme = Theme.of(context);
+    // Shown so the list adds up to the Time tile (issue #161).
+    final shownDurations = splitDisplayDurations([
+      for (final split in completedSplits) split.duration,
+    ]);
 
     return Column(
       children: [
@@ -623,6 +627,8 @@ class SplitsPanel extends ConsumerWidget {
               // is what they want to check without scrolling.
               itemBuilder: (context, index) => SplitRow(
                 split: completedSplits[completedSplits.length - 1 - index],
+                shownDuration:
+                    shownDurations[completedSplits.length - 1 - index],
                 speedUnit: speedUnit,
                 unit: unit,
               ),
@@ -637,11 +643,16 @@ class SplitsPanel extends ConsumerWidget {
 
 class SplitRow extends StatelessWidget {
   final domain.Split split;
+
+  /// The time to show for this split, from [splitDisplayDurations] so a
+  /// list of rows adds up to Time; [Split.duration] itself when null.
+  final Duration? shownDuration;
   final SpeedUnit speedUnit;
   final double unit;
 
   const SplitRow({
     required this.split,
+    this.shownDuration,
     required this.speedUnit,
     required this.unit,
     super.key,
@@ -685,7 +696,7 @@ class SplitRow extends StatelessWidget {
           ),
           Text(distanceText, style: TextStyle(fontSize: unit * 2.8)),
           Text(
-            formatDuration(split.duration),
+            formatDuration(shownDuration ?? split.duration),
             style: TextStyle(fontSize: unit * 2.8),
           ),
           Column(

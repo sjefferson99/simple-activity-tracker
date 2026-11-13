@@ -523,4 +523,44 @@ void main() {
       expect(formatActivityDate(DateTime(2026, 1, 1, 7, 5)), '1 Jan 2026, 07:05');
     });
   });
+
+  group('splitDisplayDurations (issue #161)', () {
+    const ms = Duration(milliseconds: 1);
+    // Ten 1:40.6 splits: each alone shows 1:40, which would add up to
+    // 16:40 against a Time of 16:46.
+    final splits = List.filled(10, ms * 100600);
+
+    test('adds up to the whole-second running total, cut down like Time', () {
+      final shown = splitDisplayDurations(splits);
+      final total = shown.fold(Duration.zero, (a, b) => a + b);
+      expect(total, const Duration(seconds: 1006));
+      expect(formatDuration(total), formatDuration(ms * 1006000));
+      expect(shown.take(3), const [
+        Duration(seconds: 100),
+        Duration(seconds: 101),
+        Duration(seconds: 100),
+      ]);
+      // Never more than a second away from the real split.
+      for (final d in shown) {
+        expect((d - ms * 100600).abs(), lessThan(const Duration(seconds: 1)));
+      }
+    });
+
+    test('rounds the running total when asked', () {
+      final shown = splitDisplayDurations(splits.take(3).toList(), round: true);
+      expect(shown, const [
+        Duration(seconds: 101),
+        Duration(seconds: 100),
+        Duration(seconds: 101),
+      ]);
+    });
+
+    test('leaves whole-second splits as they are', () {
+      expect(
+        splitDisplayDurations(const [Duration(minutes: 5), Duration(minutes: 5)]),
+        const [Duration(minutes: 5), Duration(minutes: 5)],
+      );
+      expect(splitDisplayDurations(const []), isEmpty);
+    });
+  });
 }
