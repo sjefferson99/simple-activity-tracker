@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Docker Compose's `secrets:` block mounts files here by default. Only passed
@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     auto_migrate: bool = True
     backup_before_migrate: bool = True
     backup_dir: str = "/backups"
+    # How many `backup-<timestamp>` directories to keep in backup_dir after a
+    # backup is written (issue #207); older ones are deleted. 0 keeps all.
+    backup_keep: int = Field(default=5, ge=0)
     # Runs `reanalyze --all` on every startup, after migrate() — cheap no-op
     # when every stored ActivityAnalysis is already at the current
     # ANALYSIS_VERSION (see app/analysis/v1.py), and the mechanism that gets
