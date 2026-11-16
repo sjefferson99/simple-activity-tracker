@@ -302,8 +302,8 @@ GitHub UI) a `v*.*.*` tag triggers both `container.yml` and `mobile-release.yml`
 To cut a release:
 
 ```
-# bump version in server/pyproject.toml first if the server changed, commit it, then
-# either:
+# no version bump in any file: the tag is the only source of the release version
+# (docs/VERSIONING.md). Either:
 git tag vX.Y.Z
 git push origin vX.Y.Z
 # ...or create the tag from the GitHub UI: Releases → Draft a new release → type a new

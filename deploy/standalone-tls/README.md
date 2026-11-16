@@ -59,15 +59,15 @@ instead) — to update to the latest release later:
 
 After changing it: `docker compose pull app && docker compose up -d`.
 
-**Before switching to `edge`, take a backup and copy it somewhere outside
-`backups/`** (see "Backups and migration safety"). An `edge` build can migrate
-your database ahead of the newest release. Switching back to `latest` (or to an
-older pinned version) then puts an older image in front of a newer database,
-and the app fails to start. Keep the container stopped while you sort it out:
-every restart attempt writes another automatic backup and rotates older ones
-out of `backups/` (`SR_BACKUP_KEEP`). To leave `edge`, either stay on it until
-the next release catches up (then unset `SR_IMAGE_TAG`), or restore the backup
-you took before switching and then change the tag.
+**Before switching to `edge`, take a backup** (see "Backups and migration
+safety"), and copy it somewhere outside `backups/` if you'll be on `edge` for a
+while, since later automatic backups rotate older ones out. An `edge` build can
+migrate your database ahead of the newest release. Switching back to `latest`
+(or to an older pinned version) then puts an older image in front of a newer
+database, and the app refuses to start, saying so; it changes nothing and
+leaves your backups alone. To leave `edge`, either stay on it until the next
+release catches up (then unset `SR_IMAGE_TAG`), or restore the backup you took
+before switching and then change the tag.
 
 Until v1.3.0, `:latest` followed `main`. If you want to keep following `main`
 after upgrading, set `SR_IMAGE_TAG=edge`.
