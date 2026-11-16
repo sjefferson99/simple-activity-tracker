@@ -253,6 +253,12 @@ walking-pace tracking being broken.
 
 ### Step 5 — Credit distance from chip speed, not position deltas (2026-09-15)
 
+> **Reverted (2026-09-20, issue #50, commit `1f23767`).** Wheel-speed-sensor-verified
+> rides showed Doppler-integrated distance was 3–6 percentage points *less* accurate
+> than position summing. `MetricsEngine` credits plain position deltas again (matching
+> the server), and chip speed only drives the moving/stationary gate. Distance, Avg and
+> splits are all position-based. Kept below for history.
+
 Found while testing split targets (issue #99) on the S23: with the readout now smoothed
 (~3 s time-weighted EMA in `LiveRunController`, display-only) the user could hold a
 steady 4.0–4.1 km/h on it, yet every split average climbed to ~5 km/h. Replaying the
@@ -287,6 +293,47 @@ the no-speed fallback, and the long-gap fallback.
 splits for these runs read ~17–19% over the phone's, even though the GPX carries
 `sat:speed` per point since Step 1. Worth a server follow-up that integrates
 `sat:speed` when present, with the same fallbacks.
+
+### Step 6 — Calibrated chip speed for the live readout (issue #153, 2026-11-16)
+
+The big speed readout was `DisplaySpeedWindow`: path length ÷ time over the last 6 s.
+Its noise is position error at the window's ends (~1 m per fix against ~10 m travelled
+in 6 s at 6 km/h), which pace display amplifies (at 6 km/h one km/h ≈ 100 s/km).
+Widening or extra-smoothing the window can't fix that without ~10 s of lag.
+
+Now `CalibratedDisplaySpeed` (display-only; `MetricsEngine` is untouched):
+
+```
+display = EMA(chipSpeed, τ) × clamp(pathDist_60s / chipDist_60s, 0.8, 1.3)
+```
+
+- Doppler speed is far less noisy, but reads ~8–13% low on the phones tested (why #50
+  dropped it). The 60 s ratio removes that bias adaptively, so the readout agrees with
+  the position-based Distance, Avg and splits.
+- τ = 3 s for running and walking, 5 s for cycling (provisional: ride replays showed
+  smaller gains and a ~3.5% high reading at 3 s; no ride has been replayed against
+  this implementation yet).
+- Falls back to the 6 s path window during warm-up (≤ 20 m of path in the 60 s window)
+  and on any fix without a chip speed. `hasSpeed` is `speed > 0` on Android, so a
+  stopped phone also uses the window and settles toward zero.
+- Chip distance credits a segment only when both ends have a chip speed and the gap is
+  ≤ 5 s. All state resets on start, pause and resume.
+
+Replay (`dart run tool/replay_display_speed.dart <gpx>...` from `mobile/`), against a
+non-causal centred 30 s path speed while moving, on 7 captures from 2026-09-13 to
+2026-11-11 (all ~6–7.5 km/h runs/walks):
+
+| | Mean pace change per update | p95 | Bias vs path |
+|---|---|---|---|
+| 6 s window | 14.9–34.1 s/km | 49–102 | 1.000–1.009 |
+| Calibrated, τ = 3 s | 4.3–12.8 s/km | 12–38 | 0.995–1.017 |
+
+A clean synthetic 6 → 8 km/h step shows 63% of the change within 4 s (the 6 s window
+took ~5 s). In the minute after a stop, stationary jitter inflates the 60 s path a
+little: the 2026-10-23 capture read 5.0% high there versus 3.9% for the old window.
+
+**Verify on device** (per §3): a stationary capture and an out-and-back route, ideally
+against a known pace; a ride before trusting the cycling τ.
 
 ## 3. What went wrong last time (read this)
 
@@ -324,6 +371,9 @@ build — use `adb install` directly.
 - `mobile/lib/domain/tracking/metrics_engine.dart` — all acceptance logic.
 - `mobile/lib/features/live_run/live_run_controller.dart` — `_onSample`, readout
   speed source, acquiring timeout.
+- `mobile/lib/domain/tracking/calibrated_display_speed.dart` — the readout's speed
+  (Step 6), with `display_speed_window.dart` as its fallback.
+- `mobile/tool/replay_display_speed.dart` — replays GPX captures through both.
 - `mobile/lib/features/live_run/live_run_screen.dart` — `_SpeedReadout`,
   `_MetricGrid` (`valueOf(metrics, null, useKmh)`), status line.
 - `mobile/lib/features/live_run/metric_spec.dart` — what each tile displays.
