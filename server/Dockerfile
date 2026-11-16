@@ -38,7 +38,12 @@ ENV SAT_BUILD_VERSION=$APP_VERSION
 VOLUME /data
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+# --start-period covers a slow first start after an upgrade (the pre-migration
+# backup and migrations run before the app listens; issue #213). Failed checks
+# don't count during it, and the first passing check marks the container
+# healthy, so a normal start is no slower. Reanalysis runs in the background
+# once serving, so it doesn't need covering.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10m --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status == 200 else 1)"
 
 USER app

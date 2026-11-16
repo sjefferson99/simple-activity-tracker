@@ -69,7 +69,8 @@ class Settings(BaseSettings):
     # How many `backup-<timestamp>` directories to keep in backup_dir after a
     # backup is written (issue #207); older ones are deleted. 0 keeps all.
     backup_keep: int = Field(default=5, ge=0)
-    # Runs `reanalyze --all` on every startup, after migrate() — cheap no-op
+    # Runs `reanalyze --all` on every startup, in a background thread once
+    # the app is serving (issues #206, #213); a cheap no-op
     # when every stored ActivityAnalysis is already at the current
     # ANALYSIS_VERSION (see app/analysis/v1.py), and the mechanism that gets
     # an analyzer bugfix (e.g. issue #83) applied to already-uploaded
