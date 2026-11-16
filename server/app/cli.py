@@ -86,12 +86,14 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
         ANALYSIS_VERSION,
         AnalyzerV1,
         distance_and_duration_from_result,
+        elapsed_and_gain_from_result,
         endpoints_from_result,
     )
     from app.api.v1.activities import _split_plan_to_json
     from app.db import get_session_factory
     from app.models.activity import Activity
     from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
+    from app.records import replace_best_efforts
     from app.storage.blob_store import LocalFileBlobStore
     from app.terrain import terrain_correct
 
@@ -176,6 +178,7 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
 
             distance_meters, moving_seconds = distance_and_duration_from_result(result)
             start_lat, start_lon, end_lat, end_lon = endpoints_from_result(result)
+            elapsed_seconds, elevation_gain_m = elapsed_and_gain_from_result(result)
             existing = session.get(ActivityAnalysis, activity.id)
             if existing is None:
                 existing = ActivityAnalysis(activity_id=activity.id, computed_at=datetime.now(UTC))
@@ -189,9 +192,12 @@ def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
             existing.start_lon = start_lon
             existing.end_lat = end_lat
             existing.end_lon = end_lon
+            existing.elapsed_seconds = elapsed_seconds
+            existing.elevation_gain_m = elevation_gain_m
             existing.track = cached_track
             existing.error = error
             existing.computed_at = datetime.now(UTC)
+            replace_best_efforts(session, activity.id, result)
 
             if status == AnalysisStatus.done:
                 print(f"  {activity.id}: done")

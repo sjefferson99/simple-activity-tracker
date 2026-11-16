@@ -131,10 +131,18 @@ the app checks the server's API level and only uses what that server supports (s
   activities that start, finish, or do either or both within a radius.
 - **Activity detail:** map of the route with split markers, a pace/speed and elevation
   chart (time, km or mile axis) with hover linked to the map, the server's analysis,
-  best 1 km / 5 km / 10 km efforts, and a splits table you can re-slice at any size or
-  reset to the plan you ran with, including target verdicts.
-- **Organise:** edit title, notes and device name; add and remove tags; delete one or
-  many activities.
+  best efforts at fixed distances (400 m to marathon for runs and walks, 1 km to 100 km
+  for rides) marked **PR / 2nd / 3rd best** against your earlier activities, and a
+  splits table you can re-slice at any size or reset to the plan you ran with,
+  including target verdicts.
+- **Progress:** per activity type, and across all of them: this week, month and year
+  so far against the same point of the previous one, all-time totals, and distance,
+  time, climb or count per week, month or year. Per type it adds a speed (or pace)
+  and distance trend and your records. Activities marked **virtual or indoor**
+  (Zwift and the like; set automatically for Strava virtual rides) count in totals but
+  never in records, PRs or trends.
+- **Organise:** edit title, notes and device name, mark an activity virtual or indoor;
+  add and remove tags; delete one or many activities.
 - **Get activities in:** upload a GPX from any device, import a backup .zip from another
   server, or import a whole **Strava export** (GPX, TCX and FIT files). Imports show
   their progress.

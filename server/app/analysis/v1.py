@@ -51,10 +51,15 @@ from app.analysis.track import Point, Track, drop_inaccurate_points
 # and split boundary t_s) is on it too, and a time split that ends after the
 # last fix but before Stop is now listed. Moving time, average moving speed
 # and best efforts are unchanged.
+# 14: best efforts cover more distances, chosen per activity type (issue
+# #190): running and walking 400 m, 1 km, 1 mi, 5 km, 10 km, half and full
+# marathon; cycling 1, 5, 10, 20, 40, 50 and 100 km. 1 km and 5 km stay in
+# both lists, since released apps look those two up by distance. The
+# per-window algorithm is unchanged.
 # Bump this whenever the result shape or algorithm changes, then run
 # `simple-activity-tracker-server reanalyze --all` on each deployment so
 # stored analyses catch up — the web UI reads stored results as-is.
-ANALYSIS_VERSION = 13
+ANALYSIS_VERSION = 14
 
 # Green within ±1.3% of target speed (about ±4 s/km at 5:00/km), red outside
 # in either direction — one relative band for pace and speed targets alike
@@ -82,7 +87,22 @@ _MAX_IMPLIED_SPEED_MPS_BY_ACTIVITY_TYPE: dict[str, float] = {
 _DEFAULT_MAX_IMPLIED_SPEED_MPS = 12.0
 
 _SERIES_MAX_SAMPLES = 300
-_BEST_EFFORT_DISTANCES_METERS = (1000.0, 5000.0, 10000.0)
+_FOOT_BEST_EFFORT_DISTANCES_METERS = (
+    400.0,
+    1000.0,
+    1609.344,  # 1 mile
+    5000.0,
+    10000.0,
+    21097.5,
+    42195.0,
+)
+# Issue #190. Released apps read the 1 km and 5 km entries by distance
+# (contract/analysis-result/app-reads.json), so every list keeps those two.
+BEST_EFFORT_DISTANCES_METERS_BY_ACTIVITY_TYPE: dict[str, tuple[float, ...]] = {
+    "running": _FOOT_BEST_EFFORT_DISTANCES_METERS,
+    "walking": _FOOT_BEST_EFFORT_DISTANCES_METERS,
+    "cycling": (1000.0, 5000.0, 10000.0, 20000.0, 40000.0, 50000.0, 100000.0),
+}
 
 _METERS_PER_MILE = 1609.344
 
@@ -130,6 +150,24 @@ def endpoints_from_result(
     end_lat = end.get("lat") if isinstance(end, dict) else None
     end_lon = end.get("lon") if isinstance(end, dict) else None
     return start_lat, start_lon, end_lat, end_lon
+
+
+def elapsed_and_gain_from_result(
+    result: dict[str, object] | None,
+) -> tuple[float | None, float | None]:
+    """Extracts the denormalized ActivityAnalysis.elapsed_seconds/elevation_gain_m
+    pair (issue #190, for the Progress page's period totals), mirroring
+    distance_and_duration_from_result above. None for a missing/failed
+    analysis, or a track with no altitude."""
+    if result is None:
+        return None, None
+    elapsed = result.get("elapsed_seconds")
+    elevation = result.get("elevation")
+    gain = elevation.get("gain_m") if isinstance(elevation, dict) else None
+    return (
+        float(elapsed) if isinstance(elapsed, int | float) else None,
+        float(gain) if isinstance(gain, int | float) else None,
+    )
 
 
 _DEFAULT_SPLIT_TYPE = "distance_km"
@@ -581,7 +619,15 @@ def _elevation_stats(smoothed: list[float | None]) -> dict[str, float | None]:
     return {"gain_m": gain, "loss_m": loss, "min_m": min(values), "max_m": max(values)}
 
 
-def _best_efforts(steps: list[_Step]) -> list[dict[str, object]]:
+def best_effort_distances(activity_type: str) -> tuple[float, ...]:
+    """The best-effort distances analysed for this activity type; an unknown
+    type gets running's."""
+    return BEST_EFFORT_DISTANCES_METERS_BY_ACTIVITY_TYPE.get(
+        activity_type, _FOOT_BEST_EFFORT_DISTANCES_METERS
+    )
+
+
+def _best_efforts(steps: list[_Step], distances: tuple[float, ...]) -> list[dict[str, object]]:
     """Fastest window for each target distance, via a two-pointer sweep over
     cumulative distance/time (steps are monotonically increasing in both).
 
@@ -598,17 +644,17 @@ def _best_efforts(steps: list[_Step]) -> list[dict[str, object]]:
 
     total_distance = steps[-1].cum_distance_m
     results: list[dict[str, object]] = []
+    # cum_distance_m/cum_time_s *before* step i is the previous step's
+    # cumulative total, or 0 for the first step.
+    prev_cum_distance = [0.0] + [s.cum_distance_m for s in steps[:-1]]
+    prev_cum_time = [0.0] + [s.cum_time_s for s in steps[:-1]]
 
-    for target in _BEST_EFFORT_DISTANCES_METERS:
+    for target in distances:
         if target > total_distance:
             continue
 
         best_duration: float | None = None
         start = 0
-        # cum_distance_m/cum_time_s *before* step i is the previous step's
-        # cumulative total, or 0 for the first step.
-        prev_cum_distance = [0.0] + [s.cum_distance_m for s in steps[:-1]]
-        prev_cum_time = [0.0] + [s.cum_time_s for s in steps[:-1]]
 
         for end in range(len(steps)):
             while (
@@ -820,7 +866,7 @@ class AnalyzerV1:
             "splits": _compute_splits(
                 steps, all_points[0], split_type, split_value, split_plan, elapsed_s
             ),
-            "best_efforts": _best_efforts(steps),
+            "best_efforts": _best_efforts(steps, best_effort_distances(activity_type)),
             "series": _series(steps, smoothed, windowed_speeds, all_points[0]),
             "bounds": _bounds(filtered_segments),
             "start": {"lat": all_points[0].lat, "lon": all_points[0].lon},
