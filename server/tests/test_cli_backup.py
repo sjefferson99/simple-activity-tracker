@@ -372,3 +372,129 @@ def test_run_exits_cleanly_when_backup_directory_is_not_writable(
     finally:
         alembic_command.upgrade(_alembic_config(), "head")
         get_settings.cache_clear()
+
+
+# Issue #218: an older image started against a database a newer image already
+# migrated (switching from :edge back to :latest, or rolling an image back).
+
+_NEWER_REVISION = "f00dfeedcafe"  # not one of this image's migrations
+
+
+@pytest.fixture
+def database_from_newer_version(app_client):
+    """Stamps the database with a revision this code doesn't know, as a newer
+    server's migration would leave it, and puts the real head back after."""
+    from sqlalchemy import text
+
+    from app.db import get_engine
+
+    with get_engine().begin() as connection:
+        head = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        connection.execute(
+            text("UPDATE alembic_version SET version_num = :rev"), {"rev": _NEWER_REVISION}
+        )
+    yield
+    with get_engine().begin() as connection:
+        connection.execute(text("UPDATE alembic_version SET version_num = :rev"), {"rev": head})
+
+
+def test_unknown_database_revisions_empty_at_head_and_when_behind(app_client) -> None:
+    from alembic import command
+    from app.cli import _alembic_config, _unknown_database_revisions
+
+    assert _unknown_database_revisions() == []
+    command.downgrade(_alembic_config(), "-1")
+    try:
+        assert _unknown_database_revisions() == []
+    finally:
+        command.upgrade(_alembic_config(), "head")
+
+
+def test_unknown_database_revisions_reports_a_newer_revision(database_from_newer_version) -> None:
+    from app.cli import _unknown_database_revisions
+
+    assert _unknown_database_revisions() == [_NEWER_REVISION]
+
+
+def test_run_refuses_a_newer_database_without_writing_or_pruning_backups(
+    database_from_newer_version, monkeypatch
+) -> None:
+    # The crash loop this replaces wrote a backup and pruned an older one on
+    # every restart, deleting the pre-switch backups a rollback needs.
+    from app.cli import run
+    from app.config import get_settings
+
+    backup_dir = Path(get_settings().data_dir) / "backups"
+    existing = _make_fake_backups(backup_dir, 4)
+    monkeypatch.setenv("SR_BACKUP_DIR", str(backup_dir))
+    monkeypatch.setenv("SR_BACKUP_KEEP", "2")
+    get_settings.cache_clear()
+    started = []
+    monkeypatch.setattr("uvicorn.run", lambda *a, **k: started.append(True))
+
+    try:
+        for _ in range(3):  # several restarts of a crash-looping container
+            with pytest.raises(SystemExit, match="newer version has already upgraded it"):
+                run()
+    finally:
+        get_settings.cache_clear()
+
+    assert started == []
+    assert sorted(backup_dir.glob("backup-*")) == sorted(existing)
+
+
+def test_run_refuses_a_newer_database_with_auto_migrate_disabled(
+    database_from_newer_version, monkeypatch
+) -> None:
+    from app.cli import run
+    from app.config import get_settings
+
+    monkeypatch.setenv("SR_AUTO_MIGRATE", "false")
+    get_settings.cache_clear()
+    monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
+
+    try:
+        # Not the "run `migrate` first" message: migrating can't help here.
+        with pytest.raises(SystemExit, match="newer version has already upgraded it"):
+            run()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_migrate_command_refuses_a_newer_database(database_from_newer_version, monkeypatch) -> None:
+    from app.cli import main
+
+    monkeypatch.setattr("sys.argv", ["simple-activity-tracker-server", "migrate"])
+
+    with pytest.raises(SystemExit, match="newer version has already upgraded it"):
+        main()
+
+
+def test_first_boot_starts_without_a_backup_or_a_backup_directory(
+    app_client, monkeypatch, tmp_path
+) -> None:
+    # The newer-database check must not create the database file: `run` would
+    # then see an existing un-migrated database and try a pre-migration
+    # backup, which fails outright where /backups isn't mounted (the CI
+    # smoke test) and is pointless anywhere else.
+    from app.cli import _unknown_database_revisions, run
+    from app.config import get_settings
+    from app.db import get_engine
+
+    fresh_db = tmp_path / "first-boot.db"
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("occupies the path backup() would need to mkdir")
+    monkeypatch.setenv("SR_DATABASE_URL", f"sqlite:///{fresh_db}")
+    monkeypatch.setenv("SR_BACKUP_DIR", str(blocked))
+    get_settings.cache_clear()
+    get_engine.cache_clear()
+    started = []
+    monkeypatch.setattr("uvicorn.run", lambda *a, **k: started.append(True))
+
+    assert _unknown_database_revisions() == []
+    assert not fresh_db.exists()
+
+    run()
+
+    assert started == [True]
+    assert _is_database_at_head() is True
