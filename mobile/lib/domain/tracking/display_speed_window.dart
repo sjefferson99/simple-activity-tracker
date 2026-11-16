@@ -1,9 +1,13 @@
 import '../geo_math.dart';
 import '../models/track_point.dart';
 
-/// The live "current speed" tile's speed source (issue #50 follow-up):
-/// path length covered over the last ~[_windowDuration] of GPS fixes, not
-/// the GPS chip's own reported Doppler speed.
+/// Path length covered over the last ~[_windowDuration] of GPS fixes, not
+/// the GPS chip's own reported Doppler speed (issue #50 follow-up).
+///
+/// Since issue #153 this is the *fallback* for the live "current speed"
+/// tile: `CalibratedDisplaySpeed` uses it during warm-up and on fixes
+/// without a chip speed. The history below explains why chip speed isn't
+/// used raw.
 ///
 /// A real measured test (760m out-and-back, 8:00 exactly, 5.7 km/h) found
 /// the chip's raw speed field reading ~13% low throughout (mean 4.96 km/h)
