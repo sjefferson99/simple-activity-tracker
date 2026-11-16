@@ -47,6 +47,42 @@ def _is_database_at_head() -> bool:
     return current == head
 
 
+def _unknown_database_revisions() -> list[str]:
+    """The database's current migration revision(s) that this image's
+    migration scripts don't contain, i.e. revisions written by a *newer*
+    server version (issue #218). Empty for a fresh database, one at head, or
+    one merely behind."""
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+
+    from app.db import get_engine
+
+    script = ScriptDirectory.from_config(_alembic_config())
+    known = {revision.revision for revision in script.walk_revisions()}
+    with get_engine().connect() as connection:
+        current = MigrationContext.configure(connection).get_current_heads()
+    return [revision for revision in current if revision not in known]
+
+
+def _refuse_if_database_is_newer() -> None:
+    """Exits before anything touches the database or the backups when it was
+    migrated by a newer server version (e.g. switching from `:edge` back to
+    `:latest`, or rolling back an image). Must run before the pre-migration
+    backup: otherwise each restart of a crash-looping container writes
+    another backup and prunes an older one, deleting the backups from before
+    the switch, which are the ones a rollback needs (issue #218)."""
+    unknown = _unknown_database_revisions()
+    if unknown:
+        sys.exit(
+            f"The database is at migration {', '.join(unknown)}, which this server "
+            "version doesn't know: a newer version has already upgraded it. "
+            "Refusing to start; nothing was changed and no backup was written. "
+            "Run that newer version (e.g. the image tag you used before, such as "
+            "`edge`), or restore a backup taken before it upgraded the database "
+            "(see deploy/standalone-tls/README.md 'Backups and migration safety')."
+        )
+
+
 def migrate() -> None:
     command.upgrade(_alembic_config(), "head")
 
@@ -194,6 +230,7 @@ def run() -> None:
 
     configure_logging(settings.log_level)
 
+    _refuse_if_database_is_newer()
     if settings.auto_migrate:
         # Only back up when there's a migration to protect against (issue
         # #207): an up-to-date database starts without writing a full copy.
@@ -310,6 +347,7 @@ def main() -> None:
     if args.command == "run":
         run()
     elif args.command == "migrate":
+        _refuse_if_database_is_newer()
         migrate()
     elif args.command == "reanalyze":
         from app.audit import configure_logging

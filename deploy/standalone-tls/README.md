@@ -212,6 +212,13 @@ There's no automatic downgrade path for the database itself (migrations only
 run forward) — restoring a backup taken before a migration ran is the way to
 undo one if it caused a problem.
 
+**An older image against a newer database:** if a newer version has already
+migrated the database (for example after rolling the image back), `run`
+refuses to start with a message saying so. It writes no backup and prunes
+nothing, so the backups you'd restore from are left alone however often the
+container restarts. Go back to the newer image, or restore a backup taken
+before it migrated (above).
+
 **`SR_AUTO_MIGRATE`** (default `true`) controls whether `run` applies pending
 migrations automatically at startup. Set to `false` for a deployment where
 you'd rather apply migrations deliberately and out-of-band — with it false,
