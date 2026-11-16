@@ -41,13 +41,42 @@ in `certs/` more sensitive than the rest of this deployment folder, so
 matching `cert.pem`'s permissions is fine.
 
 `app` runs the published image (`ghcr.io/sjefferson99/simple-activity-tracker-server:latest`,
-the same one CI pushes on every merge to `main`) — to update to the latest
-version later: `docker compose pull app && docker compose up -d`.
+the newest release; see "Image tags" below to follow `main` or pin a version
+instead) — to update to the latest release later:
+`docker compose pull app && docker compose up -d`.
+
+## Image tags
+
+`docker-compose.yml` runs `:${SR_IMAGE_TAG:-latest}`, so you choose the tag in
+`.env` without editing the compose file:
+
+| `SR_IMAGE_TAG` | You get |
+|---|---|
+| unset or `latest` | the newest release (recommended) |
+| `1.3` | the newest patch release in the 1.3 line |
+| `1.3.0` | exactly that release; never changes |
+| `edge` | every merge to `main`: unreleased code, for testing |
+
+After changing it: `docker compose pull app && docker compose up -d`.
+
+**Before switching to `edge`, take a backup** (see "Backups and migration
+safety"), and copy it somewhere outside `backups/` if you'll be on `edge` for a
+while, since later automatic backups rotate older ones out. An `edge` build can
+migrate your database ahead of the newest release. Switching back to `latest`
+(or to an older pinned version) then puts an older image in front of a newer
+database, and the app refuses to start, saying so; it changes nothing and
+leaves your backups alone. To leave `edge`, either stay on it until the next
+release catches up (then unset `SR_IMAGE_TAG`), or restore the backup you took
+before switching and then change the tag.
+
+Until v1.3.0, `:latest` followed `main`. If you want to keep following `main`
+after upgrading, set `SR_IMAGE_TAG=edge`.
 
 ## Updating and rolling back
 
-`app` tracks `:latest`, so `docker compose pull app && docker compose up -d`
-always picks up the newest build from `main`. `docker compose ps` should show
+`docker compose pull app && docker compose up -d` picks up the newest image
+for your tag: the newest release on `latest`, the newest `main` build on
+`edge`, nothing new on a pinned `X.Y.Z`. `docker compose ps` should show
 both services `healthy` within about 30 seconds; if not, `docker compose logs app`
 first (migrations run at startup and fail loudly on a real problem).
 
@@ -82,10 +111,11 @@ docker compose exec app simple-activity-tracker-server reanalyze --all
 It only touches activities whose stored version is older than the current one,
 so it is safe to run after every update.
 
-To roll back, every merge to `main` also gets an immutable `sha-<short-commit>`
-tag on the same image (see `.github/workflows/container.yml`) — find the last
-known-good commit (`git log --oneline server/`, which prints the same short
-SHA the tag uses), then:
+To roll back, pin the previous release (`SR_IMAGE_TAG=1.2.6`, say) or, on
+`edge`, a specific build: every build also gets an immutable
+`sha-<short-commit>` tag (see `.github/workflows/container.yml`). For the
+latter, find the last known-good commit (`git log --oneline server/`, which
+prints the same short SHA the tag uses), then:
 
 ```bash
 docker pull ghcr.io/sjefferson99/simple-activity-tracker-server:sha-<short-commit>
@@ -94,18 +124,16 @@ docker run --rm --env-file .env -v ./data:/data \
   ghcr.io/sjefferson99/simple-activity-tracker-server:sha-<short-commit> --help  # sanity check the tag exists/pulls
 ```
 
-then temporarily point `app.image` in `docker-compose.yml` at that
-`sha-<short-commit>` tag and `docker compose up -d` — switch it back to
-`:latest` once you're ready to move forward again. There's no automatic
+then temporarily set `SR_IMAGE_TAG=sha-<short-commit>` in `.env` and
+`docker compose up -d` — set it back (or unset it) once you're ready to move
+forward again. There's no automatic
 downgrade path for the database itself (migrations only run forward); rolling
 back the image after a migration has already run against your data is not
 supported by this setup — restore from a backup instead if that ever happens
 (see "Backups and migration safety" below).
 
-A tagged release (`git tag vX.Y.Z && git push --tags`) also produces `vX.Y.Z`
-and `vX.Y` image tags for the same reason — a stable name to pin to rather
-than a commit SHA — though this project doesn't currently cut versioned
-releases on a schedule; `:latest`/`sha-<short-commit>` cover normal use.
+A release is the safer thing to pin to than a commit SHA: `X.Y.Z` never moves,
+and `X.Y` follows only patch releases in that line.
 
 ## Secrets
 

@@ -32,7 +32,7 @@ this work (notably: prompt before installing anything on the machine).
 | Analysis | Computed **synchronously at upload** by a versioned `Analyzer`, result stored as JSON with `analysis_version` | Simple now; the version column plus a `status` field on the API make async workers and re-analysis a non-breaking change. |
 | Containers | Multi-stage Dockerfile, non-root, `/data` volume; **GHCR** image built for `linux/amd64` + `linux/arm64` (QEMU) | Same image runs the standalone-tls deployment (§7.3) on amd64 or arm64 (Raspberry Pi 4/5, 64-bit OS) unchanged. |
 | User management | Admin-only pages + API: create, reset password, disable/enable, promote, delete. Self-service: change password, manage devices | Closed registration needs *some* way to add people; keeping it in the same UI avoids a CLI-only admin path. |
-| CI | GitHub Actions: Flutter analyze/test; server lint/type/test + OpenAPI drift check; container **built on every PR, pushed to GHCR on every merge to `main`** | Day-to-day development runs locally in Docker; anyone can `docker pull` the latest merged state from GHCR. |
+| CI | GitHub Actions: Flutter analyze/test; server lint/type/test + OpenAPI drift check; container **built on every PR, pushed to GHCR on every merge to `main`** | Day-to-day development runs locally in Docker; anyone can `docker pull` the latest merged state from GHCR. *(Changed in v1.3.0, issue #216: merges publish `:edge`; `:latest` now means the newest release.)* |
 | Raw GPX | Stored **byte-for-byte as uploaded**, downloadable from the run page | GPX 1.1 has no standard for embedding analysis, so the file stays pristine for other apps; all derived data lives in the DB. |
 | Mobile local persistence | File-backed `RunStore` (one JSON sidecar per run next to its GPX) behind an interface | Same crash-safe write-temp-then-rename pattern the app already uses; no new DB dependency; sqflite/drift can replace it later without touching callers. |
 
@@ -397,7 +397,8 @@ over `SyncService` and `AuthService`.
   with `push: true`, tags `latest` + `sha-<short>`, so a Pi can `docker compose pull` the
   newest merged state. `permissions: packages: write`. Image:
   `ghcr.io/sjefferson99/simple-runner-server`. (Semver tags on `v*` can be added later;
-  not needed for MVP.)
+  not needed for MVP.) *Changed in v1.3.0 (issue #216): `main` pushes now tag `edge` +
+  `sha-<short>`; `latest` moves only on a release tag (README "Image tags").*
 
 ---
 
@@ -522,7 +523,7 @@ the container, Postgres actually being exercised.
 | 2 | Registration | **Closed by default**, first admin bootstrapped from `SR_ADMIN_EMAIL`/`SR_ADMIN_PASSWORD`. |
 | 3 | Mobile sign-in | **Email + password** in the app, minting a named device token. Pairing code later if wanted. |
 | 4 | Cleartext HTTP | **Allowed with an in-app warning.** Production expectation: a certificated reverse proxy in front of the container. |
-| 5 | Container publishing | **Build on every PR (no push); push to GHCR on every merge to `main`.** Development happens locally in Docker; GHCR mirrors merged `main` for anyone to pull. |
+| 5 | Container publishing | **Build on every PR (no push); push to GHCR on every merge to `main`.** Development happens locally in Docker; GHCR mirrors merged `main` for anyone to pull. *(Changed in v1.3.0, issue #216: as `:edge`; `:latest` now follows releases.)* |
 | 6 | Headline numbers | **Phone summary is the headline; server analysis is labelled extra.** Raw GPX is downloadable from the web UI, byte-for-byte as uploaded (no standard exists for embedding analysis in GPX, so we don't try). |
 | 7 | Deletion | **Scoped to the device you're on** — server delete never touches the phone. "Delete everywhere" is a later option. |
 | 8 | Fixture data | **Synthetic GPX only.** The owner can supply a short real walk GPX later if a real-world fixture becomes useful. |

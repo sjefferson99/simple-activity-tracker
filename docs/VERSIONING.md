@@ -25,7 +25,9 @@ in, but it always knows whether it changed the API.
 - **Tag builds** (`v1.3.0`): `mobile-release.yml` builds the APK with
   `--build-name=1.3.0`. `container.yml` passes `APP_VERSION=1.3.0` into the
   image (`SAT_BUILD_VERSION` env var, read by `server/app/version.py`).
-- **`main` builds of the server image** (`:latest`) report `git describe`-style
+- **Release builds of the server image** (`:latest`, `:1.3.0`, `:1.3`) report
+  the plain tag version, `1.3.0`.
+- **`main` builds of the server image** (`:edge`) report `git describe`-style
   versions: `1.3.0+4.gabc1234` means 4 commits after `1.3.0`, at commit
   `abc1234`.
 - **Local builds** report `dev`. For the app, that's any build whose pubspec
