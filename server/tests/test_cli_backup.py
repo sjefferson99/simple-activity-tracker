@@ -468,3 +468,33 @@ def test_migrate_command_refuses_a_newer_database(database_from_newer_version, m
 
     with pytest.raises(SystemExit, match="newer version has already upgraded it"):
         main()
+
+
+def test_first_boot_starts_without_a_backup_or_a_backup_directory(
+    app_client, monkeypatch, tmp_path
+) -> None:
+    # The newer-database check must not create the database file: `run` would
+    # then see an existing un-migrated database and try a pre-migration
+    # backup, which fails outright where /backups isn't mounted (the CI
+    # smoke test) and is pointless anywhere else.
+    from app.cli import _unknown_database_revisions, run
+    from app.config import get_settings
+    from app.db import get_engine
+
+    fresh_db = tmp_path / "first-boot.db"
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("occupies the path backup() would need to mkdir")
+    monkeypatch.setenv("SR_DATABASE_URL", f"sqlite:///{fresh_db}")
+    monkeypatch.setenv("SR_BACKUP_DIR", str(blocked))
+    get_settings.cache_clear()
+    get_engine.cache_clear()
+    started = []
+    monkeypatch.setattr("uvicorn.run", lambda *a, **k: started.append(True))
+
+    assert _unknown_database_revisions() == []
+    assert not fresh_db.exists()
+
+    run()
+
+    assert started == [True]
+    assert _is_database_at_head() is True

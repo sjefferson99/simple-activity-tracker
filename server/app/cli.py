@@ -57,6 +57,13 @@ def _unknown_database_revisions() -> list[str]:
 
     from app.db import get_engine
 
+    # First boot: don't connect. Connecting makes SQLite create an empty
+    # database file, which `run` would then mistake for an existing database
+    # that needs a pre-migration backup.
+    database_url = get_settings().database_url
+    if database_url.startswith("sqlite:///") and not _database_path(database_url).exists():
+        return []
+
     script = ScriptDirectory.from_config(_alembic_config())
     known = {revision.revision for revision in script.walk_revisions()}
     with get_engine().connect() as connection:
