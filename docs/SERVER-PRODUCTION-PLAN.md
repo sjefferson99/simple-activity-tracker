@@ -368,6 +368,10 @@ HSTS, which is harmless twice. Add `access_log` with a format that includes
 `deploy/standalone-tls/docker-compose.yml` runs `…:latest` and `nginx:alpine` (both
 mutable), no healthchecks on `proxy`, no log rotation, no capability drops.
 
+*Note (v1.3.0, issue #216): `:latest` used to follow `main`; it now moves only on a
+release tag, `main` publishes `:edge`, and the compose file's tag is overridable via
+`SR_IMAGE_TAG` (README "Image tags").*
+
 - Do: pin `app` to an immutable tag (`sha-<commit>` today; semver once D4 lands) and
   `nginx` to `nginx:1.27-alpine` (or a digest); add `read_only: true` + `tmpfs: [/tmp]`
   to `app` (it writes only under `/data`), `cap_drop: [ALL]`, `security_opt:

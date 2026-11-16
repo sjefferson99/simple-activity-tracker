@@ -164,7 +164,8 @@ the app checks the server's API level and only uses what that server supports (s
 
 ### Server and operations
 
-- **One Docker image** for amd64 and arm64, published to GHCR on every merge, plus an
+- **One Docker image** for amd64 and arm64, published to GHCR for every release
+  (`:latest`) and every merge (`:edge`), plus an
   nginx sidecar that terminates HTTPS with a self-signed certificate.
 - **Storage:** SQLite plus the original GPX files on disk; migrations run automatically
   on start.
@@ -273,18 +274,17 @@ One `vX.Y.Z` tag is the release for the whole repo — server and mobile app tog
 even on a version bump that only touched one of them. Pushing (or publishing, from the
 GitHub UI) a `v*.*.*` tag triggers both `container.yml` and `mobile-release.yml`:
 
-- **Server** (`container.yml`): every merge to `main` already publishes
-  `ghcr.io/sjefferson99/simple-activity-tracker-server` as `:latest` and an immutable
-  `sha-<short-commit>` tag — this is enough for normal use (see "Updating and rolling
-  back" in [deploy/standalone-tls/README.md](deploy/standalone-tls/README.md)). A
-  versioned release additionally tags the image `vX.Y.Z` and `vX.Y`, for a stable name
-  that doesn't shift when `main` moves. Every image — `:latest`, `sha-*`, and semver
-  alike — is stamped with OCI labels (`org.opencontainers.image.source/revision/version`)
-  via [docker/metadata-action](https://github.com/docker/metadata-action), so `docker
+- **Server** (`container.yml`): publishes
+  `ghcr.io/sjefferson99/simple-activity-tracker-server` under the tags below (see
+  "Image tags"). A release tag push moves `:latest`, `X.Y.Z` and `X.Y`; a merge to
+  `main` moves only `:edge`. Every image is stamped with OCI labels
+  (`org.opencontainers.image.source/revision/version`) via
+  [docker/metadata-action](https://github.com/docker/metadata-action), so `docker
   inspect` on any pulled image shows exactly which commit and version it came from.
-  `:latest` only ever tracks `main`, not a release tag — a `v*.*.*` push produces
-  `vX.Y.Z`/`vX.Y` alongside whatever `sha-<short-commit>` matches that same commit,
-  without moving `:latest`.
+  `container.yml` only runs when `server/**`, `deploy/**` or the workflow changed. If a
+  release's tag build was skipped, `:latest` stays on the previous release: run the
+  `Container` workflow by hand (Actions → Container → Run workflow) and pick the release
+  tag, not `main`, under "Use workflow from".
 - **Mobile** (`mobile-release.yml`): builds a release APK (`flutter build apk --release`)
   signed with a dedicated release keystore (`ANDROID_KEYSTORE_BASE64` and friends —
   repo secrets, not committed; see `mobile/android/app/build.gradle.kts`) and attaches
@@ -320,3 +320,18 @@ labelling rules are in [CLAUDE.md](CLAUDE.md) ("PR labels and release notes").
 
 The mobile build takes a few minutes, so the APK asset typically appears on the release
 a little after the release itself goes live — not a sign anything failed.
+
+#### Image tags
+
+| Tag | Moves on | For |
+|---|---|---|
+| `latest` | each release (`vX.Y.Z` tag push) | the default for self-hosters |
+| `1.3.0` | that release only | pinned, reproducible deployments |
+| `1.3` | each release in that minor line | following patch releases only |
+| `edge` | each merge to `main` | testers, early adopters, the dev host |
+| `sha-abc1234` | every build | exact rollback or debugging |
+
+Pre-releases (`v1.3.0-rc1`) get only their own tag (`1.3.0-rc1`) and `sha-…`, never
+`latest` or `1.3`. The standalone compose file runs `:latest` unless `SR_IMAGE_TAG` is
+set in its `.env` (see [deploy/standalone-tls/README.md](deploy/standalone-tls/README.md#image-tags)).
+Before v1.3.0, `:latest` followed `main`; that's what `:edge` does now.
