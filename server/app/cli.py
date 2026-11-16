@@ -1,4 +1,5 @@
 import argparse
+import re
 import shutil
 import sqlite3
 import sys
@@ -69,6 +70,51 @@ def backup(target_dir: str) -> Path:
 
     print(f"Backup written to {dest}")
     return dest
+
+
+# Matches only the names backup() creates (`backup-` + the fixed-width
+# `%Y%m%dT%H%M%S%fZ` timestamp), so pruning never touches anything else an
+# admin keeps in the backup directory. Fixed width also means sorting the
+# names sorts them oldest-first.
+_BACKUP_NAME_RE = re.compile(r"^backup-\d{8}T\d{12}Z$")
+
+
+def prune_backups(target_dir: str, keep: int, *, protect: Path | None = None) -> list[Path]:
+    """Deletes the oldest `backup-<timestamp>` directories in target_dir
+    beyond the newest `keep` (issue #207). `keep=0` keeps everything.
+    `protect` (the backup just written) is never deleted and counts as one
+    of the kept: with a clock that has gone backwards its name could sort
+    older than existing backups, and it's the one about to matter.
+    Best-effort: a failure is reported and skipped, never raised, so a
+    pruning problem can't stop the server starting. Returns what was deleted.
+    """
+    if keep <= 0:
+        return []
+    try:
+        backups = sorted(
+            entry
+            for entry in Path(target_dir).iterdir()
+            if _BACKUP_NAME_RE.match(entry.name) and entry.is_dir() and not entry.is_symlink()
+        )
+    except OSError as exc:
+        print(f"Warning: could not list {target_dir} to prune old backups: {exc}")
+        return []
+
+    keep_others = keep
+    if protect is not None and protect in backups:
+        backups.remove(protect)
+        keep_others -= 1
+    removed = []
+    for old in backups[: max(len(backups) - keep_others, 0)]:
+        try:
+            shutil.rmtree(old)
+        except OSError as exc:
+            print(f"Warning: could not remove old backup {old}: {exc}")
+            continue
+        removed.append(old)
+    if removed:
+        print(f"Pruned {len(removed)} old backup(s) from {target_dir}, keeping the newest {keep}")
+    return removed
 
 
 def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
@@ -264,9 +310,15 @@ def run() -> None:
     configure_logging(settings.log_level)
 
     if settings.auto_migrate:
-        if settings.backup_before_migrate and _database_path(settings.database_url).exists():
+        # Only back up when there's a migration to protect against (issue
+        # #207): an up-to-date database starts without writing a full copy.
+        if (
+            settings.backup_before_migrate
+            and _database_path(settings.database_url).exists()
+            and not _is_database_at_head()
+        ):
             try:
-                backup(settings.backup_dir)
+                written = backup(settings.backup_dir)
             except OSError as exc:
                 sys.exit(
                     f"Pre-migration backup to {settings.backup_dir!r} failed: {exc}. "
@@ -274,6 +326,7 @@ def run() -> None:
                     "deploy/standalone-tls/README.md 'Backups and migration safety'), "
                     "or set SR_BACKUP_BEFORE_MIGRATE=false to skip it (not recommended)."
                 )
+            prune_backups(settings.backup_dir, settings.backup_keep, protect=written)
         migrate()
     elif not _is_database_at_head():
         sys.exit(
@@ -346,6 +399,16 @@ def main() -> None:
     backup_parser.add_argument(
         "directory", help="Directory the timestamped backup subdirectory is created under."
     )
+    backup_parser.add_argument(
+        "--keep",
+        type=int,
+        metavar="N",
+        default=None,
+        help=(
+            "After backing up, keep only the newest N backup-<timestamp> directories "
+            "there (0 keeps all). Defaults to SR_BACKUP_KEEP (5)."
+        ),
+    )
 
     args = parser.parse_args()
     if args.command == "run":
@@ -357,7 +420,11 @@ def main() -> None:
     elif args.command == "gc":
         gc(apply=args.apply)
     elif args.command == "backup":
-        backup(args.directory)
+        if args.keep is not None and args.keep < 0:
+            parser.error("--keep must be 0 or more")
+        written = backup(args.directory)
+        keep = args.keep if args.keep is not None else get_settings().backup_keep
+        prune_backups(args.directory, keep, protect=written)
     else:  # pragma: no cover - argparse enforces this
         sys.exit(f"Unknown command: {args.command}")
 

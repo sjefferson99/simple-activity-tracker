@@ -134,10 +134,18 @@ encrypts anything at rest.
 
 `run` (the app's default startup command) automatically backs up the
 database and GPX blobs to `./backups/` before applying any pending
-migrations, then migrates and starts. This is on by default
-(`SR_BACKUP_BEFORE_MIGRATE=true`); disable it with
+migrations, then migrates and starts. It only does this when there is a
+migration to apply: restarting an up-to-date stack takes no backup. This is
+on by default (`SR_BACKUP_BEFORE_MIGRATE=true`); disable it with
 `SR_BACKUP_BEFORE_MIGRATE=false` if you'd rather manage backups entirely
 yourself.
+
+**Retention:** after each backup (automatic or manual), the oldest
+`backup-<timestamp>/` directories beyond `SR_BACKUP_KEEP` (default `5`) are
+deleted. `SR_BACKUP_KEEP=0` keeps everything. Only directories matching the
+app's own `backup-<timestamp>` naming are ever removed; anything else you put
+in `./backups/` is left alone. If you copy backups off-site, make sure that
+runs often enough that rotation doesn't remove one before it's copied.
 
 To take a manual backup at any time (the container doesn't need to be
 stopped — it uses SQLite's `VACUUM INTO`, a consistent snapshot even against
@@ -151,6 +159,26 @@ Each run creates a new timestamped subdirectory under `./backups/`
 (`backup-<UTC-timestamp>/`) containing the database file and a copy of the
 `gpx/` blob tree — self-contained, so copying that one subdirectory
 elsewhere (another disk, off-site storage) is a complete backup.
+
+A manual backup applies the same retention; pass `--keep N` to override
+`SR_BACKUP_KEEP` for that run (`--keep 0` keeps everything).
+
+**Cleaning up an older deployment:** versions before this change took a full
+backup on *every* start and never removed any, so `./backups/` may hold
+hundreds of copies. After upgrading, the next backup prunes to
+`SR_BACKUP_KEEP` automatically, but an up-to-date stack may not take one for
+a long time. To clean up now, take a manual backup (this also prunes):
+
+```bash
+du -sh backups                       # before
+docker compose run --rm app simple-activity-tracker-server backup /backups
+du -sh backups                       # after
+```
+
+Entries not named `backup-<timestamp>` (for example `20260903_181135`, from
+the very first backup code) are never pruned automatically. Check them and
+remove them by hand if you don't need them (`sudo` may be needed, as the
+container writes as uid 1000).
 
 **To restore:**
 
