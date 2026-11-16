@@ -2,18 +2,23 @@
 
 Replays every phone recording in a captures folder through each candidate
 elevation algorithm and scores it against that recording's reference (a
-barometric bike computer or watch, exported as FIT), so the algorithm for
+barometric bike computer or watch, exported as FIT, or TCX where that's
+the original, as for Samsung Health), so the algorithm for
 issue #184's step 2 is chosen on evidence, and re-checked as recordings
 are added. Run from server/ after adding a recording to the manifest:
 
     uv run python -m scripts.elevation_replay ../captures/elevation
 
-The folder holds the phone GPX and reference FIT files plus manifest.json:
+The folder holds the phone GPX and reference FIT/TCX files plus manifest.json:
 
     [{"id": "2026-01-01-ride-0800", "phone": "....gpx", "reference": "....fit",
-      "activity": "ride", "carry": "pocket", "notes": "..."}]
+      "activity": "ride", "carry": "pocket", "device": "...", "notes": "..."}]
 
 activity: run | walk | ride. carry: pocket | hand | armband | handlebar.
+device (optional) names the phone, shown in the report. reference_ascent_m
+(optional) is the reference's ascent from elsewhere (e.g. Strava's figure)
+when its file carries no totals; its descent is then that ascent minus the
+reference profile's net change from start to end.
 reference may be null (only loop closure is scored then). The folder is
 gitignored: recordings hold home locations.
 
@@ -22,7 +27,9 @@ Scores, per recording with a reference, over the time both cover:
   removed, in metres. How well the profile is followed.
 - gain_err: |gain - ref gain| + |loss - ref loss| as a fraction of the
   reference's ref gain + loss. The reference's own totals are the device's
-  judgement (FIT session), independent of any filter here.
+  judgement (FIT session), independent of any filter here. A TCX has no
+  such totals, so its recordings are scored on shape only, unless the
+  manifest gives reference_ascent_m.
 Each candidate family's settings are also picked leave-one-out (tuned on
 every other recording, scored on this one), which is the honest estimate
 of how a setting does on a recording it wasn't tuned on.
@@ -43,6 +50,7 @@ from typing import Any
 
 import fitparse
 import gpxpy
+from defusedxml import ElementTree
 
 from app.analysis.elevation import ElevationAccumulator
 
@@ -53,8 +61,11 @@ _M_PER_HPA = 8.3
 # GPS altitude accuracy assumed when the fix doesn't report one (recordings
 # before the vertical_accuracy extension).
 _DEFAULT_GPS_SD_M = 5.0
-# Reference records further apart than this aren't interpolated across.
+# Reference records further apart than this aren't interpolated across, or
+# than three of the reference's usual spacing, whichever is longer (a Samsung
+# watch TCX carries altitude only every 10 s).
 _MAX_REFERENCE_GAP_S = 10.0
+_TCX = "{http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2}"
 
 
 @dataclass(frozen=True)
@@ -74,6 +85,7 @@ class Recording:
     id: str
     activity: str
     carry: str
+    device: str | None
     fixes: list[list[Fix]]  # per GPX segment (pause/resume)
     reference: list[tuple[float, float]] | None  # (t, height)
     reference_totals: tuple[float, float] | None  # session ascent, descent
@@ -96,7 +108,7 @@ def _ext(point: Any, name: str) -> float | None:
 
 
 def _baro_height(pressure_hpa: float, p0: float) -> float:
-    return 44330.0 * (1 - (pressure_hpa / p0) ** (1 / 5.255))
+    return 44330.0 * (1 - float((pressure_hpa / p0) ** (1 / 5.255)))
 
 
 def load_phone(path: Path) -> tuple[list[list[Fix]], bool]:
@@ -137,6 +149,8 @@ def load_phone(path: Path) -> tuple[list[list[Fix]], bool]:
 
 
 def load_reference(path: Path) -> tuple[list[tuple[float, float]], tuple[float, float] | None]:
+    if path.suffix.lower() == ".tcx":
+        return _load_tcx(path), None
     records: list[tuple[float, float]] = []
     totals = None
     for message in fitparse.FitFile(str(path)).get_messages():
@@ -152,6 +166,16 @@ def load_reference(path: Path) -> tuple[list[tuple[float, float]], tuple[float, 
     return records, totals
 
 
+def _load_tcx(path: Path) -> list[tuple[float, float]]:
+    records: list[tuple[float, float]] = []
+    for point in ElementTree.parse(str(path)).iter(_TCX + "Trackpoint"):
+        time, height = point.findtext(_TCX + "Time"), point.findtext(_TCX + "AltitudeMeters")
+        if time and height:
+            t = datetime.fromisoformat(time.replace("Z", "+00:00")).timestamp()
+            records.append((t, float(height)))
+    return sorted(records)
+
+
 def load(folder: Path) -> list[Recording]:
     manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
     recordings = []
@@ -160,6 +184,9 @@ def load(folder: Path) -> list[Recording]:
         reference = totals = None
         if entry.get("reference"):
             reference, totals = load_reference(folder / entry["reference"])
+            if totals is None and entry.get("reference_ascent_m") is not None:
+                ascent = float(entry["reference_ascent_m"])
+                totals = (ascent, ascent - (reference[-1][1] - reference[0][1]))
             # Only the time both devices cover is comparable.
             start, end = reference[0][0], reference[-1][0]
             fixes = [[f for f in seg if start <= f.t <= end] for seg in fixes]
@@ -169,6 +196,7 @@ def load(folder: Path) -> list[Recording]:
                 id=entry["id"],
                 activity=entry["activity"],
                 carry=entry["carry"],
+                device=entry.get("device"),
                 fixes=fixes,
                 reference=reference,
                 reference_totals=totals,
@@ -356,14 +384,21 @@ class Score:
     loop_m: float | None  # end - start height on a recording that closes its loop
 
 
+def _max_gap(times: list[float]) -> float:
+    if len(times) < 2:
+        return _MAX_REFERENCE_GAP_S
+    spacing = statistics.median(b - a for a, b in itertools.pairwise(times))
+    return max(_MAX_REFERENCE_GAP_S, 3 * spacing)
+
+
 def _reference_at(
-    reference: list[tuple[float, float]], times: list[float], t: float
+    reference: list[tuple[float, float]], times: list[float], t: float, max_gap: float
 ) -> float | None:
     i = bisect.bisect_left(times, t)
     if i <= 0 or i >= len(times):
         return None
     (t0, h0), (t1, h1) = reference[i - 1], reference[i]
-    if t1 - t0 > _MAX_REFERENCE_GAP_S:
+    if t1 - t0 > max_gap:
         return None
     return h0 + (h1 - h0) * (t - t0) / (t1 - t0)
 
@@ -379,7 +414,8 @@ def score(recording: Recording, series: Series, gain_loss: tuple[float, float]) 
     shape = gain_err = loop = None
     if recording.reference and flat:
         ref_times = [t for t, _ in recording.reference]
-        pairs = [(h, _reference_at(recording.reference, ref_times, t)) for t, h in flat]
+        max_gap = _max_gap(ref_times)
+        pairs = [(h, _reference_at(recording.reference, ref_times, t, max_gap)) for t, h in flat]
         diffs = [h - r for h, r in pairs if r is not None]
         if len(diffs) > 10:
             offset = statistics.median(diffs)
@@ -458,6 +494,10 @@ def _mean(values: Iterable[float | None]) -> float | None:
     return statistics.fmean(present) if present else None
 
 
+def _totals_text(totals: tuple[float, float]) -> str:
+    return f"{totals[0]:g}/{totals[1]:.0f}"
+
+
 def report(recordings: list[Recording], evaluation: dict[str, Any]) -> dict[str, Any]:
     all_settings: list[Setting] = evaluation["settings"]
     results: dict[str, dict[str, Score]] = evaluation["results"]
@@ -474,9 +514,11 @@ def report(recordings: list[Recording], evaluation: dict[str, Any]) -> dict[str,
         if cadence:
             extras += f", cadence {statistics.median(cadence):.2f} Hz ({len(cadence) / n:.0%})"
         totals = r.reference_totals
-        ref = f"{totals[0]:g}/{totals[1]:g} m" if totals else None
+        ref = _totals_text(totals) + " m" if totals else None
+        device = f" on {r.device}" if r.device else ""
         lines.append(
-            f"  {r.id}: {r.activity}/{r.carry}, {n} fixes, barometer {'yes' if baro else 'no'}, "
+            f"  {r.id}: {r.activity}/{r.carry}{device}, {n} fixes, "
+            f"barometer {'yes' if baro else 'no'}, "
             f"reference {ref or ('profile' if r.reference else 'none')}"
             f"{extras}"
         )
@@ -527,10 +569,10 @@ def report(recordings: list[Recording], evaluation: dict[str, Any]) -> dict[str,
             s = results[best.label].get(r.id)
             if s is None:
                 continue
-            ref = r.reference_totals
+            ref_totals = r.reference_totals
             parts = [f"{s.gain_m:5.1f}/{s.loss_m:5.1f} m"]
-            if ref:
-                parts.append(f"ref {ref[0]:g}/{ref[1]:g}")
+            if ref_totals:
+                parts.append(f"ref {_totals_text(ref_totals)}")
             if s.shape_m is not None:
                 parts.append(f"shape {s.shape_m:.2f} m")
             if s.loop_m is not None:

@@ -28,8 +28,8 @@ All are per-point `sat:` GPX extensions, each absent when unavailable. None chan
 ## Routine for every new recording
 
 1. Record with the phone, and a barometric reference where possible (a bike computer for rides, a watch for runs and walks). Note the carry position.
-2. Pull the phone GPX: `adb pull /sdcard/Download/SimpleActivityTracker/<file>.gpx`. Export the reference's **original** FIT (from Strava: Export Original), not a GPX.
-3. Sync the shared captures folder into the repo's `captures/elevation/` (gitignored). Copy both files in, and add an entry to `manifest.json` (`activity`: run/walk/ride, `carry`: pocket/hand/armband/handlebar).
+2. Pull the phone GPX: `adb pull /sdcard/Download/SimpleActivityTracker/<file>.gpx`. Export the reference's **original** file (from Strava: Export Original), not a GPX. That's a FIT for most devices; a Samsung watch gives a TCX, which the replay also reads. A TCX has no ascent/descent totals, so put the ascent Strava shows in the manifest as `reference_ascent_m` (descent is derived from the reference profile's net change); without it the recording is scored on shape only.
+3. Sync the shared captures folder into the repo's `captures/elevation/` (gitignored). Copy both files in, and add an entry to `manifest.json` (`activity`: run/walk/ride, `carry`: pocket/hand/armband/handlebar, `device`: which phone, since barometers differ between models).
 4. From `server/`: `uv run python -m scripts.elevation_replay ../captures/elevation --save`.
 5. In `TUNING-LOG.md`: add a row to the assessment log, update the coverage tracker, and record anything new in the findings.
 6. Sync back to the shared folder: newer files only, both ways, never delete. If `manifest.json` or `TUNING-LOG.md` was edited on two machines, merge by hand.
@@ -48,6 +48,8 @@ The tracker in `TUNING-LOG.md` counts recordings with a reference against these 
 | Ride | Pocket | 3 |
 | Ride | Handlebar mount | 2 |
 | Any | Hilly route, repeated ups and downs | 1 |
+
+A **walk** should be 30–45 minutes, like the runs, so weather drift and the blend's slow offset have time to matter; anything under 20 minutes says little. A **hilly route** has at least 100 m of total climb, in three or more separate climbs and descents of 15 m or more each, so the dead band and smoothing settings are tested on real repeated changes rather than one long drift.
 
 ## Candidates the replay scores
 
