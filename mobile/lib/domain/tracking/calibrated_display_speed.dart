@@ -62,8 +62,12 @@ class CalibratedDisplaySpeed {
   static const double _minCalibrationChipMeters = 1;
 
   /// Past this gap, two endpoint chip speeds don't describe the path between
-  /// them (fixes were dropped), so the segment credits no chip distance.
+  /// them (fixes were dropped), so the segment isn't used for calibration.
   static const double _maxChipIntegrationGapSeconds = 5;
+
+  /// A segment whose position-implied speed exceeds the chip's by more than
+  /// this is a GPS jump, not motion, and isn't used for calibration.
+  static const double _maxPathExcessMps = 10;
 
   static const double _minRatio = 0.8;
   static const double _maxRatio = 1.3;
@@ -86,17 +90,7 @@ class CalibratedDisplaySpeed {
 
     final previous = _previous;
     if (previous != null) {
-      final dt = _seconds(previous.timestamp, point.timestamp);
-      if (dt > 0) {
-        _pathCumulative += haversineDistanceMeters(previous, point);
-        final previousSpeed = _chipSpeed(previous);
-        final speed = _chipSpeed(point);
-        if (previousSpeed != null &&
-            speed != null &&
-            dt <= _maxChipIntegrationGapSeconds) {
-          _chipCumulative += (previousSpeed + speed) / 2 * dt;
-        }
-      }
+      _creditSegment(previous, point);
     }
     _previous = point;
 
@@ -131,6 +125,28 @@ class CalibratedDisplaySpeed {
     _chipCumulative = 0;
     _ema = null;
     _emaAt = null;
+  }
+
+  /// Adds one segment to both calibration ledgers, or to neither. The ratio
+  /// must compare path and chip distance over the *same* segments: a
+  /// segment counted on one side only (a dropout, a stopped fix with no
+  /// chip speed) would skew it for the next 60 s.
+  void _creditSegment(TrackPoint previous, TrackPoint point) {
+    final dt = _seconds(previous.timestamp, point.timestamp);
+    if (dt <= 0 || dt > _maxChipIntegrationGapSeconds) return;
+    final previousSpeed = _chipSpeed(previous);
+    final speed = _chipSpeed(point);
+    if (previousSpeed == null || speed == null) return;
+
+    final chipMeters = (previousSpeed + speed) / 2 * dt;
+    final pathMeters = haversineDistanceMeters(previous, point);
+    // A position jump far beyond what the chip measured is a bad fix, which
+    // MetricsEngine drops from Distance too. Generous, so ordinary ~1 m
+    // per-fix jitter (a few m/s of apparent excess at 1 Hz) still counts.
+    if (pathMeters / dt - chipMeters / dt > _maxPathExcessMps) return;
+
+    _pathCumulative += pathMeters;
+    _chipCumulative += chipMeters;
   }
 
   double _updateEma(double speed, DateTime at) {

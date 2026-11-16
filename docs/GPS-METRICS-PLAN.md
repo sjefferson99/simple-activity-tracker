@@ -316,8 +316,10 @@ display = EMA(chipSpeed, τ) × clamp(pathDist_60s / chipDist_60s, 0.8, 1.3)
 - Falls back to the 6 s path window during warm-up (≤ 20 m of path in the 60 s window)
   and on any fix without a chip speed. `hasSpeed` is `speed > 0` on Android, so a
   stopped phone also uses the window and settles toward zero.
-- Chip distance credits a segment only when both ends have a chip speed and the gap is
-  ≤ 5 s. All state resets on start, pause and resume.
+- The ratio compares path and chip distance over the *same* segments: one counts only
+  when both ends have a chip speed, the gap is ≤ 5 s, and its position-implied speed
+  isn't more than 10 m/s above the chip's (a GPS jump, which `MetricsEngine` drops from
+  Distance too). All state resets on start, pause and resume.
 
 Replay (`dart run tool/replay_display_speed.dart <gpx>...` from `mobile/`), against a
 non-causal centred 30 s path speed while moving, on 7 captures from 2026-09-13 to

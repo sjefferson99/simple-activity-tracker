@@ -166,22 +166,43 @@ void main() {
       );
     });
 
-    test('a gap over 5 s credits no chip distance across it', () {
+    test(
+      'a dropout over 5 s is left out of both ledgers, so it does not skew '
+      'the calibration',
+      () {
+        final estimator = CalibratedDisplaySpeed(smoothingSeconds: 3);
+        // Calibrate with the chip reading 10% low.
+        _steadyRun(estimator, trueMps: 2, seconds: 40, chipFactor: 0.9);
+        // A 10 s dropout covering 50 m, then the same pace. Counting the
+        // gap's path but not its chip distance (or vice versa) would push
+        // the ratio well away from 1/0.9.
+        final readings = _steadyRun(
+          estimator,
+          trueMps: 2,
+          seconds: 5,
+          chipFactor: 0.9,
+          startSecond: 49,
+          startMeters: 2 * 39 + 50,
+        );
+        expect(readings.last, closeTo(2.0, 0.02));
+      },
+    );
+
+    test('a GPS jump is left out of the calibration', () {
       final estimator = CalibratedDisplaySpeed(smoothingSeconds: 3);
-      // Warm up and calibrate at ratio 1.
-      _steadyRun(estimator, trueMps: 2, seconds: 40);
-      // A 10 s dropout, then resume at the same pace. Crediting chip
-      // distance across the gap would add 20 m of chip against 20 m of
-      // path, but the gap's path is still counted, so the ratio rises above
-      // 1 only if the gap's chip distance was (correctly) skipped.
+      _steadyRun(estimator, trueMps: 2, seconds: 40, chipFactor: 0.9);
+      // One fix 200 m off in 1 s, then back on track: the path ledger would
+      // gain ~400 m against ~4 m of chip and pin the ratio at the 1.3 clamp.
+      estimator.addPoint(_point(2.0 * 40 + 200, 40, chipMps: 1.8));
       final readings = _steadyRun(
         estimator,
         trueMps: 2,
-        seconds: 5,
-        startSecond: 49,
-        startMeters: 2 * 49,
+        seconds: 10,
+        chipFactor: 0.9,
+        startSecond: 41,
+        startMeters: 2.0 * 41,
       );
-      expect(readings.last, greaterThan(2.0 * 1.05));
+      expect(readings.last, closeTo(2.0, 0.02));
     });
 
     test('reset clears everything, so warm-up starts again', () {
