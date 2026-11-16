@@ -48,14 +48,32 @@ version later: `docker compose pull app && docker compose up -d`.
 
 `app` tracks `:latest`, so `docker compose pull app && docker compose up -d`
 always picks up the newest build from `main`. `docker compose ps` should show
-both services `healthy` within a few seconds; if not, `docker compose logs app`
+both services `healthy` within about 30 seconds; if not, `docker compose logs app`
 first (migrations run at startup and fail loudly on a real problem).
 
+An update that includes a database migration first writes a backup (see
+"Backups and migration safety"), then migrates, and only then starts serving.
+On a large instance that can take a few minutes. Meanwhile `app` shows
+`(health: starting)`, not `(unhealthy)`, because the image's healthcheck
+allows up to 10 minutes for startup. `docker compose up -d` waits for it before
+starting `proxy`.
+
 When an update changes what the server derives from a GPX (it bumps
-`ANALYSIS_VERSION` in `server/app/analysis/v1.py` — the release notes / PR will
-say so), stored analyses stay on the old version until you re-run them; the web
-UI reads them as-is, so new fields (e.g. the split markers on the map and chart
-added in #45) stay missing on existing activities until then:
+`ANALYSIS_VERSION` in `server/app/analysis/v1.py`; the release notes / PR will
+say so), the app reanalyses the affected activities **in the background after
+it starts serving** (`SR_AUTO_REANALYZE`, below). The site is up straight away,
+and each activity shows its previous analysis until its turn comes. On a few
+hundred activities this takes a few minutes. The logs show progress:
+
+```
+... INFO app.reanalysis Reanalyzing 344 activity(ies) at analysis_version=14...
+... INFO app.reanalysis   <activity id>: done
+... INFO app.reanalysis Reanalysis finished: 344 done, 0 failed, 0 skipped, 0 errors.
+```
+
+Each activity is saved as soon as it's done. If the container is stopped or
+restarted partway, the next start carries on with the ones left. To run it by
+hand instead (e.g. with `SR_AUTO_REANALYZE=false`):
 
 ```bash
 docker compose exec app simple-activity-tracker-server reanalyze --all
@@ -207,9 +225,9 @@ docker compose up -d
 
 **`SR_AUTO_REANALYZE`** (default `true`) controls whether `run` also reruns
 the analyzer against every activity whose stored analysis predates the
-current analyzer version, right after migrating and before the app starts
-serving — the same work `simple-activity-tracker-server reanalyze --all`
-does by hand, and a fast no-op once nothing is stale. This is what applies
+current analyzer version, in the background once the app is serving. It's
+the same work `simple-activity-tracker-server reanalyze --all` does by hand,
+and a fast no-op once nothing is stale. This is what applies
 an analyzer bugfix or algorithm change (e.g. corrected GPS-jump/accuracy
 filtering) to activities uploaded before the upgrade, automatically, without
 the phone re-uploading anything. Set to `false` to leave stored analyses

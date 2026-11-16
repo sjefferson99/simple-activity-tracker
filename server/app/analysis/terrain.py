@@ -27,6 +27,7 @@ import logging
 import math
 import statistics
 import struct
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -133,6 +134,7 @@ class TileCache:
         self._clock = clock
         self._unpacked: OrderedDict[str, tuple[bytes, int]] = OrderedDict()
         self._failed_at: dict[str, float] = {}
+        self._lock = threading.Lock()
 
     def elevation_at(self, lat: float, lon: float) -> float | None:
         """Bilinear-interpolated terrain height in metres, or None where the
@@ -157,6 +159,14 @@ class TileCache:
         return a * (1 - dx) * (1 - dy) + b * dx * (1 - dy) + c * (1 - dx) * dy + d * dx * dy
 
     def _tile(self, name: str) -> tuple[bytes, int] | None:
+        # One cache per process, used by upload requests and the background
+        # startup reanalysis at once (issue #206): without the lock, an
+        # eviction can race a lookup, and two threads can download the same
+        # tile onto the same .tmp path.
+        with self._lock:
+            return self._tile_locked(name)
+
+    def _tile_locked(self, name: str) -> tuple[bytes, int] | None:
         if name in self._unpacked:
             self._unpacked.move_to_end(name)
             return self._unpacked[name]
