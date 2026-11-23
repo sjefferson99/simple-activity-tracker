@@ -86,3 +86,4 @@ Directional only. The numbers behind these are in `TUNING-LOG.md`.
 - The #181 GPS filter is too heavy for barometer data: it drops about half of a bike computer's own climb.
 - The wind effect is small (1–2 m at 10 m/s) and consistent.
 - Squeezing or blowing on the phone barely moved the reading on the test phone.
+- Two phone models carried the same way on the same run agreed with each other and with the watch, so the device doesn't seem to matter; the carry position does.
