@@ -8,6 +8,7 @@
       <td>{{ config.plan | split_plan_summary }}</td>
       <td class="text-right">
         <a class="secondary button" href="/split-configs/{{ config.id }}/edit">Edit</a>
+        <a class="secondary button" href="/split-configs/{{ config.id }}/duplicate">Duplicate</a>
         <button class="danger"
                 hx-delete="/split-configs/{{ config.id }}"
                 hx-target="#split-config-list"
