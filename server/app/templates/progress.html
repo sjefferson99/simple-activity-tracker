@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+{% block title %}Progress — Simple Activity Tracker{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+{% endblock %}
+{% block content %}
+{% set type_names = {"cycling": "Cycling", "running": "Running", "walking": "Walking"} %}
+{% set period_names = {"week": ("This week", "last week"), "month": ("This month", "last month"), "year": ("This year", "last year")} %}
+{% macro speed(mps) %}{% if show_pace %}{{ mps | pace }}{% else %}{{ mps | kmh }}{% endif %}{% endmacro %}
+<div class="card">
+  <h1>Progress</h1>
+  {% if not types %}
+  <p class="empty-state" data-testid="progress-empty">No analysed activities yet. Upload or record one and your totals, trends and records will appear here.</p>
+  {% else %}
+  <nav class="sort-controls" aria-label="Activity type" data-testid="progress-type-tabs">
+    {% for t in types %}
+    <a class="sort-link{% if t == activity_type %} active{% endif %}"
+       href="/progress?type={{ t | urlencode }}&tz={{ tz_name | urlencode }}"
+       {% if t == activity_type %}aria-current="page"{% endif %}>{{ type_names.get(t, t | capitalize) }}</a>
+    {% endfor %}
+    {% if show_all_tab %}
+    <a class="sort-link{% if is_all %} active{% endif %}"
+       href="/progress?type=all&tz={{ tz_name | urlencode }}"
+       {% if is_all %}aria-current="page"{% endif %}>All activities</a>
+    {% endif %}
+  </nav>
+  {% if is_all %}
+  <p class="muted">Your own activities of every type. Speed trends and records compare like with like, so they're on each type's own tab. Periods use your timezone ({{ tz_name }}); weeks start on Monday.</p>
+  {% else %}
+  <p class="muted">Your own {{ type_names.get(activity_type, activity_type) | lower }} activities only. Periods use your timezone ({{ tz_name }}); weeks start on Monday.</p>
+  {% endif %}
+  {% endif %}
+</div>
+
+{% if types %}
+<div class="card" data-testid="progress-comparisons">
+  <h2>So far</h2>
+  <table>
+    <thead>
+      <tr><th></th><th class="text-right">Activities</th><th class="text-right">Distance</th><th class="text-right">Moving time</th><th class="text-right">Elevation gain</th></tr>
+    </thead>
+    <tbody>
+      {% for c in comparisons %}
+      {% set names = period_names[c.granularity.value] %}
+      <tr data-testid="comparison-{{ c.granularity.value }}">
+        <th scope="row">{{ names[0] }}<div class="muted">vs {{ names[1] }} at this point</div></th>
+        <td class="text-right">{{ c.current.count }}<div class="muted">{{ c.previous.count }}</div></td>
+        <td class="text-right">{{ c.current.distance_m | distance_km }}<div class="muted">{{ c.previous.distance_m | distance_km }}</div></td>
+        <td class="text-right">{{ c.current.moving_s | duration }}<div class="muted">{{ c.previous.moving_s | duration }}</div></td>
+        <td class="text-right">{{ "%.0f" | format(c.current.gain_m) }} m<div class="muted">{{ "%.0f" | format(c.previous.gain_m) }} m</div></td>
+      </tr>
+      {% endfor %}
+      <tr data-testid="comparison-lifetime">
+        <th scope="row">All time{% if first_started_at %}<div class="muted">since <time datetime="{{ first_started_at.isoformat() }}" class="local-time" data-format="date">{{ first_started_at.date().isoformat() }}</time></div>{% endif %}</th>
+        <td class="text-right">{{ lifetime.count }}</td>
+        <td class="text-right">{{ lifetime.distance_m | distance_km }}</td>
+        <td class="text-right">{{ lifetime.moving_s | duration }}</td>
+        <td class="text-right">{{ "%.0f" | format(lifetime.gain_m) }} m</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Totals by period</h2>
+  <div class="form-row chart-controls">
+    <div>
+      <label for="period_granularity">Per</label>
+      <select id="period_granularity" aria-label="Period length">
+        <option value="week">Week</option>
+        <option value="month" selected>Month</option>
+        <option value="year">Year</option>
+      </select>
+    </div>
+    <div>
+      <label for="period_metric">Show</label>
+      <select id="period_metric" aria-label="Period metric">
+        <option value="distance_km" selected>Distance (km)</option>
+        <option value="moving_h">Moving time (h)</option>
+        <option value="gain_m">Elevation gain (m)</option>
+        <option value="count">Activities</option>
+      </select>
+    </div>
+  </div>
+  <div class="chart-container"><div id="period-chart"></div></div>
+</div>
+
+{% if not is_all %}
+<div class="card">
+  <h2>Trend</h2>
+  {% if trend_points | length > 1 %}
+  <div class="form-row chart-controls">
+    <div>
+      <label for="trend_metric">Show</label>
+      <select id="trend_metric" aria-label="Trend metric">
+        <option value="speed" selected>{% if show_pace %}Average pace{% else %}Average speed{% endif %}</option>
+        <option value="distance">Distance</option>
+      </select>
+    </div>
+  </div>
+  <p class="muted">Each dot is one outdoor activity (1 km or longer); the line is the average of the last {{ rolling_window }}. Virtual activities are left out.</p>
+  <div class="chart-container"><div id="trend-chart"></div></div>
+  {% else %}
+  <p class="muted">A trend needs at least two activities of 1 km or longer.</p>
+  {% endif %}
+</div>
+
+<div class="card" data-testid="progress-records">
+  <h2>Records</h2>
+  <p class="muted">Outdoor activities only. Totals above include virtual ones.</p>
+  {% if effort_records %}
+  <h3>Best efforts</h3>
+  <table>
+    <thead><tr><th>Distance</th><th>Time</th><th>{% if show_pace %}Pace{% else %}Speed{% endif %}</th><th>Activity</th></tr></thead>
+    <tbody>
+      {% for r in effort_records %}
+      <tr>
+        <td>{{ r.distance_m | effort_distance }}</td>
+        <td>{{ r.duration_s | duration }}</td>
+        <td>{{ speed(r.avg_speed_mps) }}</td>
+        <td><a href="/activities/{{ r.activity_id }}">{{ r.activity_title or "Untitled" }}</a> <span class="muted">· <time datetime="{{ r.started_at.isoformat() }}" class="local-time" data-format="date">{{ r.started_at.date().isoformat() }}</time></span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% if activity_records %}
+  <h3>Other records</h3>
+  <table>
+    <tbody>
+      {% for r in activity_records %}
+      <tr data-testid="record-{{ r.key }}">
+        <th scope="row">{{ r.label }}</th>
+        <td>
+          {% if r.key == "distance" %}{{ r.value | distance_km }}
+          {% elif r.key == "moving_time" %}{{ r.value | duration }}
+          {% elif r.key == "climb" %}{{ "%.0f" | format(r.value) }} m
+          {% else %}{{ speed(r.value) }}{% endif %}
+        </td>
+        <td><a href="/activities/{{ r.activity.id }}">{{ r.activity.title or "Untitled" }}</a> <span class="muted">· <time datetime="{{ r.activity.started_at.isoformat() }}" class="local-time" data-format="date">{{ r.activity.started_at.date().isoformat() }}</time></span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce(request) }}">
+  (function () {
+    // Periods are bucketed in the viewer's timezone (D2), which only the
+    // browser knows. A visit without ?tz= is reloaded once with it.
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const url = new URL(window.location.href);
+    if (tz && !url.searchParams.has('tz')) {
+      url.searchParams.set('tz', tz);
+      window.location.replace(url.toString());
+    }
+  })();
+</script>
+{% if types %}
+<script src="/static/vendor/uplot/uPlot.iife.min.js"></script>
+<script nonce="{{ csp_nonce(request) }}">
+  (function () {
+    const buckets = {{ buckets | tojson }};
+    const trendPoints = {{ trend_points | tojson }};
+    const showPace = {{ show_pace | tojson }};
+
+    function formatPace(kmh) {
+      if (!kmh || kmh <= 0) return '--';
+      const secPerKm = Math.round(3600 / kmh);
+      return `${Math.floor(secPerKm / 60)}:${String(secPerKm % 60).padStart(2, '0')}`;
+    }
+
+    function widthOf(el) {
+      return el.clientWidth || 600;
+    }
+
+    // --- Totals by period: bars, one per week/month/year ------------------
+    const periodEl = document.getElementById('period-chart');
+    const granularitySelect = document.getElementById('period_granularity');
+    const metricSelect = document.getElementById('period_metric');
+    const metricLabels = {
+      distance_km: 'Distance (km)',
+      moving_h: 'Moving time (h)',
+      gain_m: 'Elevation gain (m)',
+      count: 'Activities',
+    };
+    let periodChart = null;
+
+    function buildPeriodChart() {
+      const rows = buckets[granularitySelect.value];
+      const metric = metricSelect.value;
+      const xs = rows.map((_, i) => i);
+      const ys = rows.map((r) => r[metric]);
+      if (periodChart) periodChart.destroy();
+      periodChart = new uPlot(
+        {
+          width: widthOf(periodEl),
+          height: 260,
+          scales: { x: { time: false, range: (u, min, max) => [min - 0.5, max + 0.5] } },
+          series: [
+            { label: 'Period', value: (u, v) => (v == null ? '--' : rows[v].label) },
+            {
+              label: metricLabels[metric],
+              stroke: '#0f766e',
+              fill: 'rgba(15, 118, 110, 0.35)',
+              paths: uPlot.paths.bars({ size: [0.7, 48] }),
+              points: { show: false },
+            },
+          ],
+          axes: [
+            {
+              splits: () => xs,
+              values: (u, splits) => {
+                // Thin the labels so they never overlap.
+                const every = Math.max(1, Math.ceil(splits.length / 8));
+                return splits.map((i) => (i % every === 0 && rows[i] ? rows[i].label : ''));
+              },
+            },
+            {},
+          ],
+          legend: { live: true },
+        },
+        [xs, ys],
+        periodEl
+      );
+    }
+    granularitySelect.addEventListener('change', buildPeriodChart);
+    metricSelect.addEventListener('change', buildPeriodChart);
+    buildPeriodChart();
+
+    // --- Trend: a dot per activity plus a rolling average line ------------
+    const trendEl = document.getElementById('trend-chart');
+    const trendSelect = document.getElementById('trend_metric');
+    let trendChart = null;
+
+    function buildTrendChart() {
+      const metric = trendSelect.value;
+      const isSpeed = metric === 'speed';
+      const xs = trendPoints.map((p) => p.t);
+      const dots = trendPoints.map((p) => (isSpeed ? p.speed_kmh : p.distance_km));
+      const line = trendPoints.map((p) => (isSpeed ? p.rolling_speed_kmh : p.rolling_distance_km));
+      // Pace is plotted as speed (up is faster) with pace-formatted values,
+      // so improvement always reads as the line going up.
+      const fmt = isSpeed && showPace ? formatPace : (v) => (v == null ? '--' : v.toFixed(isSpeed ? 1 : 2));
+      const unitLabel = isSpeed ? (showPace ? 'Pace (min/km)' : 'Speed (km/h)') : 'Distance (km)';
+      if (trendChart) trendChart.destroy();
+      trendChart = new uPlot(
+        {
+          width: widthOf(trendEl),
+          height: 280,
+          series: [
+            {},
+            {
+              label: unitLabel,
+              stroke: '#0f766e',
+              paths: () => null,
+              points: { show: true, size: 5, fill: '#0f766e' },
+              value: (u, v) => fmt(v),
+            },
+            {
+              label: 'Average of last {{ rolling_window }}',
+              stroke: '#c2410c',
+              width: 2,
+              points: { show: false },
+              value: (u, v) => fmt(v),
+            },
+          ],
+          axes: [{}, { values: (u, ticks) => ticks.map(fmt) }],
+          cursor: { points: { show: false } },
+        },
+        [xs, dots, line],
+        trendEl
+      );
+    }
+    if (trendEl) {
+      trendSelect.addEventListener('change', buildTrendChart);
+      buildTrendChart();
+    }
+
+    window.addEventListener('resize', () => {
+      if (periodChart) periodChart.setSize({ width: widthOf(periodEl), height: 260 });
+      if (trendChart) trendChart.setSize({ width: widthOf(trendEl), height: 280 });
+    });
+  })();
+</script>
+{% endif %}
+{% endblock %}

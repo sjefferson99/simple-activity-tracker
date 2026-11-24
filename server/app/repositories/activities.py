@@ -286,7 +286,11 @@ class SqlAlchemyActivityRepository:
         if per_page is not None:
             stmt = stmt.limit(per_page)
 
-        activities = [tuple(row) for row in self._session.execute(stmt).all()]
+        # ActivityAnalysis is outer-joined, so it can be None at runtime even
+        # though the select's static row type says otherwise.
+        activities: list[tuple[Activity, ActivityAnalysis | None]] = [
+            (activity, analysis) for activity, analysis in self._session.execute(stmt).tuples()
+        ]
         return ActivityListPage(
             activities=activities,
             total=total,
@@ -295,7 +299,7 @@ class SqlAlchemyActivityRepository:
             total_pages=total_pages,
         )
 
-    def _filtered_base(self, scope: Any, filters: ActivityListFilters) -> Select[tuple[str]]:
+    def _filtered_base(self, scope: Any, filters: ActivityListFilters) -> Select[str]:
         """The set of activity ids matching `scope` (whose activities) plus every active
         filter — the single source of truth both the count and the page
         query in list_for_user_page build on, so they can't disagree about
@@ -402,7 +406,11 @@ class SqlAlchemyActivityRepository:
             .limit(1)
         )
         row = self._session.execute(stmt).first()
-        return (row[0], row[1]) if row is not None else None
+        # The where() above already excludes nulls; this narrows the
+        # Optional column types for mypy without changing behaviour.
+        if row is None or row[0] is None or row[1] is None:
+            return None
+        return (row[0], row[1])
 
     def delete(self, activity: Activity) -> None:
         self._session.delete(activity)

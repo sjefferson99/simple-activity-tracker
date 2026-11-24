@@ -324,6 +324,132 @@ class TestPerUserIsolation:
         assert "5k tempo" not in listed.text
         assert "No saved split configs yet" in listed.text
 
+    def test_other_user_cannot_duplicate_a_config(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        _create(client)
+        config_id = _edit_ids(client.get("/split-configs").text)[0]
+
+        from datetime import UTC, datetime
+
+        from app.auth.passwords import hash_password
+        from app.db import get_session_factory
+        from app.models.user import User
+        from app.repositories.users import SqlAlchemyUserRepository
+
+        with get_session_factory()() as session:
+            now = datetime.now(UTC)
+            SqlAlchemyUserRepository(session).add(
+                User(
+                    email="other-dup@example.com",
+                    password_hash=hash_password("other-password-123"),
+                    display_name="Other",
+                    is_admin=False,
+                    sessions_invalidated_at=now,
+                    created_at=now,
+                )
+            )
+            session.commit()
+
+        other_client = _login_cookie_client(
+            app_client, "other-dup@example.com", "other-password-123"
+        )
+        response = other_client.get(f"/split-configs/{config_id}/duplicate")
+        assert response.status_code == 404
+        assert "5k tempo" not in response.text
+
+
+class TestDuplicate:
+    """Issue #231: Duplicate opens the editor pre-filled as a new config."""
+
+    def _custom(self, client, name="Intervals"):
+        return client.post(
+            "/split-configs",
+            headers=HTMX_HEADERS,
+            data={
+                "config_id": "",
+                "name": name,
+                "split_type": "time_min",
+                "split_value": "1",
+                "targets_as": "speed",
+                "plan_kind": "custom",
+                "rolling_target": "",
+                "split_size": ["5:00", "33:00", "5:00"],
+                "split_target": ["6.0", "8.0", "6.0"],
+            },
+        )
+
+    def test_list_has_duplicate_link(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        _create(client)
+        listed = client.get("/split-configs")
+        config_id = _edit_ids(listed.text)[0]
+        assert f'href="/split-configs/{config_id}/duplicate"' in listed.text
+
+    def test_duplicate_prefills_plan_as_a_new_config(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        self._custom(client)
+        config_id = _edit_ids(client.get("/split-configs").text)[0]
+
+        page = client.get(f"/split-configs/{config_id}/duplicate")
+        assert page.status_code == 200
+        assert "New split config" in page.text
+        assert 'name="config_id" value=""' in page.text
+        assert 'value="Intervals (copy)"' in page.text
+        assert 'value="33:00"' in page.text
+        assert 'value="8"' in page.text
+        assert 'name="plan_kind" value="custom" checked' in page.text
+
+    def test_viewing_duplicate_saves_nothing(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        _create(client)
+        config_id = _edit_ids(client.get("/split-configs").text)[0]
+        client.get(f"/split-configs/{config_id}/duplicate")
+        assert len(_edit_ids(client.get("/split-configs").text)) == 1
+
+    def test_saving_the_copy_keeps_the_original(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        _create(client)
+        response = _create(client, name="5k tempo (copy)", rolling_target="4:45")
+        assert response.status_code == 200
+        listed = client.get("/split-configs").text
+        assert "<td>5k tempo</td>" in listed
+        assert "<td>5k tempo (copy)</td>" in listed
+
+    def test_copy_name_skips_taken_names(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        _create(client)
+        _create(client, name="5k tempo (copy)")
+        listed = client.get("/split-configs").text
+        original_id = next(
+            i
+            for i in _edit_ids(listed)
+            if 'value="5k tempo"' in client.get(f"/split-configs/{i}/edit").text
+        )
+        page = client.get(f"/split-configs/{original_id}/duplicate")
+        assert 'value="5k tempo (copy 2)"' in page.text
+
+    def test_copy_name_fits_the_length_limit(self):
+        from app.validation import SPLIT_CONFIG_NAME_MAX_LENGTH
+        from app.web.split_configs import _copy_name
+
+        name = "x" * SPLIT_CONFIG_NAME_MAX_LENGTH
+        copy = _copy_name(name, set())
+        assert len(copy) == SPLIT_CONFIG_NAME_MAX_LENGTH
+        assert copy.endswith(" (copy)")
+        assert _copy_name(name, {copy}).endswith(" (copy 2)")
+
+    def test_unknown_config_is_404(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = client.get("/split-configs/00000000-0000-0000-0000-000000000000/duplicate")
+        assert response.status_code == 404
+
+    def test_signed_out_redirects_to_login(self, app_client):
+        response = app_client.get(
+            "/split-configs/00000000-0000-0000-0000-000000000000/duplicate",
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
 
 class TestRateLimiting:
     """A code-review finding (2026-09-22): the whole web split_configs.py

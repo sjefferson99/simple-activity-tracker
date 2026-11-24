@@ -43,6 +43,13 @@ class ActivityAnalysis(Base):
     start_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
     end_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     end_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Denormalized copies of result["elapsed_seconds"] and
+    # result["elevation"]["gain_m"] (issue #190) so the Progress page can
+    # total them per period without loading every result. Null for
+    # pending/failed analyses, and gain is null for a track with no altitude.
+    # Kept in sync by app.analysis.v1.elapsed_and_gain_from_result().
+    elapsed_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    elevation_gain_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     computed_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
     # Cached output of sample_track() at DEFAULT_MAX_POINTS, computed once at
     # upload/reanalyze time instead of re-parsing the full GPX blob on every

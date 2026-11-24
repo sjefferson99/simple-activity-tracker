@@ -43,6 +43,9 @@ _TYPE_TO_ACTIVITY_TYPE_AND_TAG = {
     "Run": ("running", "running"),
 }
 STRAVA_TAG_NAME = "Strava"
+# Imported with Activity.is_virtual set (issue #190), so these never hold an
+# outdoor record.
+_VIRTUAL_TYPES = frozenset({"Virtual Ride", "Virtual Run"})
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,7 @@ class StravaActivityInserter(Protocol):
         title: str | None,
         tags: list[str],
         gpx_bytes: bytes,
+        is_virtual: bool = False,
     ) -> bool: ...
 
 
@@ -346,6 +350,7 @@ def run_strava_import(
                     row.name,
                     tags,
                     gpx_bytes,
+                    is_virtual=row.activity_type in _VIRTUAL_TYPES,
                 )
         except Exception as exc:  # one bad row must not abort the whole import batch
             items.append(

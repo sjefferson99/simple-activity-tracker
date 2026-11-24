@@ -1,9 +1,13 @@
+import threading
+import uuid
+
 import pytest
 
 from app.analysis.v1 import ANALYSIS_VERSION
 from app.cli import reanalyze
 from app.db import get_session_factory
 from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
+from app.reanalysis import BACKGROUND_THREAD_NAME
 from tests.conftest import upload_sample_activity
 
 
@@ -16,6 +20,37 @@ def _stale_the_analysis(activity_id: str, *, version: int = 0) -> None:
         analysis.analysis_version = version
         analysis.result = {"analysis_version": version, "stale": True}
         session.commit()
+
+
+def _reanalysis_threads() -> list[threading.Thread]:
+    return [t for t in threading.enumerate() if t.name == BACKGROUND_THREAD_NAME]
+
+
+def _serve_until_reanalysis_finishes(*_args: object, **_kwargs: object) -> None:
+    """Stands in for uvicorn.run(): "serves" until the background startup
+    reanalysis is done, as the real server would, rather than returning
+    straight away (which tells run() to stop the reanalysis)."""
+    for thread in _reanalysis_threads():
+        thread.join(timeout=30)
+        assert not thread.is_alive()
+
+
+def _upload_stale(app_client, auth_headers, gpx: bytes, count: int) -> list[str]:
+    ids = []
+    for index in range(count):
+        upload = upload_sample_activity(
+            app_client, auth_headers, gpx, client_activity_id=str(uuid.UUID(int=index + 1))
+        )
+        ids.append(upload.json()["id"])
+        _stale_the_analysis(ids[-1])
+    return sorted(ids)  # reanalyze_stale() works through them in id order
+
+
+def _version_of(activity_id: str) -> int:
+    with get_session_factory()() as session:
+        analysis = session.get(ActivityAnalysis, activity_id)
+        assert analysis is not None
+        return analysis.analysis_version
 
 
 def test_reanalyze_single_activity_updates_it_to_the_current_version(
@@ -299,7 +334,7 @@ def test_run_reanalyzes_stale_activities_by_default(
     # real /backups, which doesn't exist in this test environment.
     monkeypatch.setenv("SR_BACKUP_DIR", str(tmp_path / "backups"))
     get_settings.cache_clear()
-    monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
+    monkeypatch.setattr("uvicorn.run", _serve_until_reanalysis_finishes)
 
     try:
         run()
@@ -326,7 +361,7 @@ def test_run_skips_reanalysis_when_auto_reanalyze_is_disabled(
     monkeypatch.setenv("SR_AUTO_REANALYZE", "false")
     monkeypatch.setenv("SR_BACKUP_DIR", str(tmp_path / "backups"))
     get_settings.cache_clear()
-    monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
+    monkeypatch.setattr("uvicorn.run", _serve_until_reanalysis_finishes)
 
     try:
         run()
@@ -362,3 +397,237 @@ def test_reanalyze_repopulates_the_cached_track(app_client, auth_headers, sample
         assert analysis is not None
         assert analysis.track is not None
         assert len(analysis.track["segments"]) == 2
+
+
+# --- issue #212: one transaction per activity ---------------------------------
+
+
+class _Killed(BaseException):
+    """Stands in for the process dying (an OOM kill, a restart) mid-run:
+    a BaseException, so nothing in reanalyze_stale() swallows it."""
+
+
+def test_reanalyze_all_keeps_progress_when_killed_partway(
+    app_client, auth_headers, sample_gpx_bytes, monkeypatch
+) -> None:
+    """Issue #212: everything used to be committed once, at the end, so an
+    OOM kill partway lost all progress and the next start redid it all (and
+    was killed again). Each activity now commits on its own."""
+    from app.analysis.v1 import AnalyzerV1
+
+    ids = _upload_stale(app_client, auth_headers, sample_gpx_bytes, 3)
+    real_analyze = AnalyzerV1.analyze
+    calls = []
+
+    def analyze_then_die(self, *args, **kwargs):
+        calls.append(1)
+        if len(calls) == 2:
+            raise _Killed
+        return real_analyze(self, *args, **kwargs)
+
+    monkeypatch.setattr(AnalyzerV1, "analyze", analyze_then_die)
+    with pytest.raises(_Killed):
+        reanalyze(activity_id=None, all_activities=True)
+
+    assert [_version_of(i) for i in ids] == [ANALYSIS_VERSION, 0, 0]
+    with get_session_factory()() as session:
+        first = session.get(ActivityAnalysis, ids[0])
+        assert first is not None
+        first_computed_at = first.computed_at
+
+    # The "restart": only the two left behind are picked up again.
+    monkeypatch.setattr(AnalyzerV1, "analyze", real_analyze)
+    reanalyze(activity_id=None, all_activities=True)
+
+    assert [_version_of(i) for i in ids] == [ANALYSIS_VERSION] * 3
+    with get_session_factory()() as session:
+        first = session.get(ActivityAnalysis, ids[0])
+        assert first is not None
+        assert first.computed_at == first_computed_at
+
+
+def test_an_unexpected_error_on_one_activity_does_not_stop_the_rest(
+    app_client, auth_headers, sample_gpx_bytes, monkeypatch
+) -> None:
+    from app.analysis.v1 import AnalyzerV1
+    from app.reanalysis import Outcome, reanalyze_stale
+
+    ids = _upload_stale(app_client, auth_headers, sample_gpx_bytes, 3)
+    real_analyze = AnalyzerV1.analyze
+    calls = []
+
+    def analyze_with_a_bug(self, *args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise TypeError("analyzer bug")
+        return real_analyze(self, *args, **kwargs)
+
+    monkeypatch.setattr(AnalyzerV1, "analyze", analyze_with_a_bug)
+    counts = reanalyze_stale()
+
+    assert counts[Outcome.error] == 1
+    assert counts[Outcome.done] == 2
+    # Left as it was (not stored as FAILED), so the next run retries it.
+    assert [_version_of(i) for i in ids] == [0, ANALYSIS_VERSION, ANALYSIS_VERSION]
+
+
+def test_reanalysis_does_not_overwrite_an_analysis_changed_meanwhile(
+    app_client, auth_headers, sample_gpx_bytes, monkeypatch
+) -> None:
+    """Startup reanalysis now runs while the app serves (issue #206), so a
+    request can replace an activity's analysis while the background thread
+    is computing a new one for it. The request's write must win."""
+    from datetime import UTC, datetime
+
+    import app.reanalysis as reanalysis
+    from app.reanalysis import Outcome, reanalyze_stale
+
+    [activity_id] = _upload_stale(app_client, auth_headers, sample_gpx_bytes, 1)
+    real_analyze = reanalysis._analyze
+
+    def analyze_while_a_request_writes(activity, previous, blob_store):
+        computed = real_analyze(activity, previous, blob_store)
+        with get_session_factory()() as other:
+            analysis = other.get(ActivityAnalysis, activity_id)
+            assert analysis is not None
+            analysis.analysis_version = ANALYSIS_VERSION
+            analysis.result = {"written_by": "request"}
+            analysis.computed_at = datetime.now(UTC)
+            other.commit()
+        return computed
+
+    monkeypatch.setattr(reanalysis, "_analyze", analyze_while_a_request_writes)
+    counts = reanalyze_stale()
+
+    assert counts[Outcome.skipped] == 1
+    with get_session_factory()() as session:
+        analysis = session.get(ActivityAnalysis, activity_id)
+        assert analysis is not None
+        assert analysis.result == {"written_by": "request"}
+
+
+def test_reanalysis_skips_an_activity_deleted_meanwhile(
+    app_client, auth_headers, sample_gpx_bytes, monkeypatch
+) -> None:
+    import app.reanalysis as reanalysis
+    from app.reanalysis import Outcome, reanalyze_stale
+
+    [activity_id] = _upload_stale(app_client, auth_headers, sample_gpx_bytes, 1)
+    real_analyze = reanalysis._analyze
+
+    def analyze_while_deleted(activity, previous, blob_store):
+        computed = real_analyze(activity, previous, blob_store)
+        response = app_client.delete(f"/api/v1/activities/{activity_id}", headers=auth_headers)
+        assert response.status_code == 204
+        return computed
+
+    monkeypatch.setattr(reanalysis, "_analyze", analyze_while_deleted)
+    counts = reanalyze_stale()
+
+    assert counts[Outcome.skipped] == 1
+    with get_session_factory()() as session:
+        assert session.get(ActivityAnalysis, activity_id) is None
+
+
+def test_reanalysis_stops_after_the_current_activity_when_asked(
+    app_client, auth_headers, sample_gpx_bytes, monkeypatch
+) -> None:
+    import app.reanalysis as reanalysis
+    from app.reanalysis import reanalyze_stale
+
+    ids = _upload_stale(app_client, auth_headers, sample_gpx_bytes, 3)
+    stop = threading.Event()
+    real_analyze = reanalysis._analyze
+
+    def analyze_then_shut_down(activity, previous, blob_store):
+        stop.set()  # shutdown arrives while the first activity is in progress
+        return real_analyze(activity, previous, blob_store)
+
+    monkeypatch.setattr(reanalysis, "_analyze", analyze_then_shut_down)
+    reanalyze_stale(stop)
+
+    assert [_version_of(i) for i in ids] == [ANALYSIS_VERSION, 0, 0]
+
+
+# --- issues #206/#213: serve first, reanalyse in the background ---------------
+
+
+def test_run_serves_before_the_startup_reanalysis_finishes(
+    app_client, auth_headers, sample_gpx_bytes, monkeypatch, tmp_path
+) -> None:
+    """Issues #206/#213: a long startup reanalysis used to run before uvicorn
+    started, so /healthz stayed silent until it was done and the container
+    went unhealthy. run() must reach uvicorn.run() while it's still going."""
+    import app.reanalysis as reanalysis
+    from app.cli import run
+    from app.config import get_settings
+
+    [activity_id] = _upload_stale(app_client, auth_headers, sample_gpx_bytes, 1)
+    release = threading.Event()
+    real_analyze = reanalysis._analyze
+
+    def slow_analyze(activity, previous, blob_store):
+        assert release.wait(timeout=30)
+        return real_analyze(activity, previous, blob_store)
+
+    monkeypatch.setattr(reanalysis, "_analyze", slow_analyze)
+    served_while_stale = []
+
+    def serve(*args: object, **kwargs: object) -> None:
+        served_while_stale.append(_version_of(activity_id) == 0)
+        assert app_client.get("/healthz").status_code == 200
+        release.set()
+        _serve_until_reanalysis_finishes()
+
+    monkeypatch.setenv("SR_BACKUP_DIR", str(tmp_path / "backups"))
+    get_settings.cache_clear()
+    monkeypatch.setattr("uvicorn.run", serve)
+    try:
+        run()
+    finally:
+        release.set()
+        get_settings.cache_clear()
+
+    assert served_while_stale == [True]
+    assert _version_of(activity_id) == ANALYSIS_VERSION
+
+
+def test_run_stops_the_background_reanalysis_on_shutdown(
+    app_client, auth_headers, sample_gpx_bytes, monkeypatch, tmp_path
+) -> None:
+    """When uvicorn returns (SIGTERM), run() asks the reanalysis to stop after
+    the activity in progress and waits for it, so that one commits and the
+    rest are left for the next start."""
+    import app.reanalysis as reanalysis
+    from app.cli import run
+    from app.config import get_settings
+
+    ids = _upload_stale(app_client, auth_headers, sample_gpx_bytes, 3)
+    started = threading.Event()
+    release = threading.Event()
+    real_analyze = reanalysis._analyze
+
+    def slow_analyze(activity, previous, blob_store):
+        started.set()
+        assert release.wait(timeout=30)
+        return real_analyze(activity, previous, blob_store)
+
+    monkeypatch.setattr(reanalysis, "_analyze", slow_analyze)
+
+    def serve_then_shut_down(*args: object, **kwargs: object) -> None:
+        assert started.wait(timeout=30)
+        # Let the in-progress activity finish only after this "server" has
+        # returned, i.e. once run() has asked the thread to stop.
+        threading.Timer(0.2, release.set).start()
+
+    monkeypatch.setenv("SR_BACKUP_DIR", str(tmp_path / "backups"))
+    get_settings.cache_clear()
+    monkeypatch.setattr("uvicorn.run", serve_then_shut_down)
+    try:
+        run()
+    finally:
+        release.set()
+        get_settings.cache_clear()
+
+    assert not _reanalysis_threads()
+    assert [_version_of(i) for i in ids] == [ANALYSIS_VERSION, 0, 0]

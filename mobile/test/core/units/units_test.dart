@@ -56,6 +56,39 @@ void main() {
     });
   });
 
+  group('formatCountdown', () {
+    test('keeps exact seconds unchanged', () {
+      expect(formatCountdown(const Duration(minutes: 5)), '5:00');
+      expect(formatCountdown(const Duration(seconds: 1)), '0:01');
+      expect(
+        formatCountdown(const Duration(hours: 1, minutes: 2, seconds: 35)),
+        '1:02:35',
+      );
+    });
+
+    test('rounds any fraction of a second up', () {
+      expect(
+        formatCountdown(
+          const Duration(minutes: 4, seconds: 59, milliseconds: 700),
+        ),
+        '5:00',
+      );
+      expect(formatCountdown(const Duration(milliseconds: 200)), '0:01');
+      expect(formatCountdown(const Duration(microseconds: 1)), '0:01');
+      expect(
+        formatCountdown(
+          const Duration(minutes: 59, seconds: 59, milliseconds: 1),
+        ),
+        '1:00:00',
+      );
+    });
+
+    test('reads 0:00 at zero and below', () {
+      expect(formatCountdown(Duration.zero), '0:00');
+      expect(formatCountdown(const Duration(milliseconds: -300)), '0:00');
+    });
+  });
+
   group('formatDistanceKm', () {
     test('formats meters as km with two decimals', () {
       expect(formatDistanceKm(5210), '5.21');

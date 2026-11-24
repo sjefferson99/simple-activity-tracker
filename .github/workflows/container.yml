@@ -11,13 +11,20 @@ on:
     tags:
       - "v*.*.*"
     # Applies to both branches and tags above (GitHub ANDs paths with
-    # branches/tags) — fine in practice since a release tag is only ever cut
-    # right after a merge that changed the server, so the diff always
-    # includes server/** even if the tagged commit itself is a no-op.
+    # branches/tags). This filter now also decides whether a release moves
+    # `:latest` (see "Compute tags" below): a release tag whose push doesn't
+    # run this workflow leaves `:latest` on the previous release. Release
+    # tags are cut right after a merge that changed the server, so in
+    # practice the build runs. If it ever doesn't, run this workflow by hand
+    # (workflow_dispatch below) and pick the release tag (not main) under
+    # "Use workflow from": that builds and pushes X.Y.Z, X.Y and latest.
     paths:
       - "server/**"
       - "deploy/**"
       - ".github/workflows/container.yml"
+  # Manual fallback for a release whose tag build was skipped (see above).
+  # Run from main it publishes edge + sha-…, the same as a merge.
+  workflow_dispatch:
 
 env:
   IMAGE_NAME: ghcr.io/sjefferson99/simple-activity-tracker-server
@@ -199,27 +206,37 @@ jobs:
           docker network rm nginx-check
 
       - name: Log in to GHCR
-        if: github.event_name == 'push'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compute tags and OCI labels
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE_NAME }}
+          # Tag scheme (README "Image tags"):
+          #   push to main      -> edge, sha-…
+          #   tag vX.Y.Z        -> X.Y.Z, X.Y, latest, sha-…
+          #   tag vX.Y.Z-rc1    -> X.Y.Z-rc1, sha-… (pre-releases never get
+          #                        X.Y or latest; metadata-action skips both)
+          # `latest` deliberately has no tag rule of its own: latest=auto adds
+          # it only when a semver tag is generated, i.e. on a stable release
+          # tag push, so it means "newest release", never "newest main".
+          flavor: |
+            latest=auto
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=edge
             type=sha,prefix=sha-,format=short
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
       - name: Push to GHCR
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: server

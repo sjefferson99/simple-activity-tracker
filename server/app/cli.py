@@ -1,17 +1,22 @@
 import argparse
+import re
 import shutil
 import sqlite3
 import sys
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
 from alembic.config import Config
-from sqlalchemy import select
 
 from alembic import command
 from app.config import get_settings
 
 _SERVER_DIR = Path(__file__).resolve().parent.parent
+
+# How long `run` waits on shutdown for the background reanalysis to finish
+# the activity it's on. Inside Docker's default 10 s stop grace period.
+_REANALYSIS_SHUTDOWN_GRACE_SECONDS = 5.0
 
 
 def _alembic_config() -> Config:
@@ -40,6 +45,49 @@ def _is_database_at_head() -> bool:
     with get_engine().connect() as connection:
         current = MigrationContext.configure(connection).get_current_revision()
     return current == head
+
+
+def _unknown_database_revisions() -> list[str]:
+    """The database's current migration revision(s) that this image's
+    migration scripts don't contain, i.e. revisions written by a *newer*
+    server version (issue #218). Empty for a fresh database, one at head, or
+    one merely behind."""
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+
+    from app.db import get_engine
+
+    # First boot: don't connect. Connecting makes SQLite create an empty
+    # database file, which `run` would then mistake for an existing database
+    # that needs a pre-migration backup.
+    database_url = get_settings().database_url
+    if database_url.startswith("sqlite:///") and not _database_path(database_url).exists():
+        return []
+
+    script = ScriptDirectory.from_config(_alembic_config())
+    known = {revision.revision for revision in script.walk_revisions()}
+    with get_engine().connect() as connection:
+        current = MigrationContext.configure(connection).get_current_heads()
+    return [revision for revision in current if revision not in known]
+
+
+def _refuse_if_database_is_newer() -> None:
+    """Exits before anything touches the database or the backups when it was
+    migrated by a newer server version (e.g. switching from `:edge` back to
+    `:latest`, or rolling back an image). Must run before the pre-migration
+    backup: otherwise each restart of a crash-looping container writes
+    another backup and prunes an older one, deleting the backups from before
+    the switch, which are the ones a rollback needs (issue #218)."""
+    unknown = _unknown_database_revisions()
+    if unknown:
+        sys.exit(
+            f"The database is at migration {', '.join(unknown)}, which this server "
+            "version doesn't know: a newer version has already upgraded it. "
+            "Refusing to start; nothing was changed and no backup was written. "
+            "Run that newer version (e.g. the image tag you used before, such as "
+            "`edge`), or restore a backup taken before it upgraded the database "
+            "(see deploy/standalone-tls/README.md 'Backups and migration safety')."
+        )
 
 
 def migrate() -> None:
@@ -71,132 +119,64 @@ def backup(target_dir: str) -> Path:
     return dest
 
 
-def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
-    """Reruns AnalyzerV1 against stored activities, per docs/WEB-PLAN.md §5.4:
-    the extensibility hook for algorithm changes (a bumped ANALYSIS_VERSION, a
-    fixed bug in the analyzer) to reach activities that were already analysed
-    under an older version, without needing a re-upload from the phone —
-    the GPX itself never changes, only what's derived from it. Exactly one
-    of activity_id/all_activities must be given by the caller (main() enforces
-    this).
+# Matches only the names backup() creates (`backup-` + the fixed-width
+# `%Y%m%dT%H%M%S%fZ` timestamp), so pruning never touches anything else an
+# admin keeps in the backup directory. Fixed width also means sorting the
+# names sorts them oldest-first.
+_BACKUP_NAME_RE = re.compile(r"^backup-\d{8}T\d{12}Z$")
+
+
+def prune_backups(target_dir: str, keep: int, *, protect: Path | None = None) -> list[Path]:
+    """Deletes the oldest `backup-<timestamp>` directories in target_dir
+    beyond the newest `keep` (issue #207). `keep=0` keeps everything.
+    `protect` (the backup just written) is never deleted and counts as one
+    of the kept: with a clock that has gone backwards its name could sort
+    older than existing backups, and it's the one about to matter.
+    Best-effort: a failure is reported and skipped, never raised, so a
+    pruning problem can't stop the server starting. Returns what was deleted.
     """
-    from app.analysis.gpx_parser import GpxParseError, parse_gpx, parse_split_plan
-    from app.analysis.track_sampling import DEFAULT_MAX_POINTS, sample_track
-    from app.analysis.v1 import (
-        ANALYSIS_VERSION,
-        AnalyzerV1,
-        distance_and_duration_from_result,
-        endpoints_from_result,
-    )
-    from app.api.v1.activities import _split_plan_to_json
-    from app.db import get_session_factory
-    from app.models.activity import Activity
-    from app.models.activity_analysis import ActivityAnalysis, AnalysisStatus
-    from app.storage.blob_store import LocalFileBlobStore
-    from app.terrain import terrain_correct
-
-    blob_store = LocalFileBlobStore(Path(get_settings().data_dir))
-    analyzer = AnalyzerV1()
-
-    with get_session_factory()() as session:
-        if activity_id is not None:
-            activity = session.get(Activity, activity_id)
-            activities = [activity] if activity is not None else []
-            if not activities:
-                sys.exit(f"No activity found with id {activity_id}")
-        else:
-            assert all_activities  # noqa: S101 -- enforced by main()'s mutually-exclusive group
-            stale = (ActivityAnalysis.activity_id.is_(None)) | (
-                ActivityAnalysis.analysis_version < ANALYSIS_VERSION
-            )
-            if get_settings().terrain_correction:
-                # Issue #5: retry a correction whose tile couldn't be fetched
-                # last time, and correct what was analysed while it was off.
-                terrain_status = ActivityAnalysis.result["elevation"]["terrain"]["status"]
-                stale = stale | terrain_status.as_string().in_(("pending", "disabled"))
-            stmt = (
-                select(Activity)
-                .outerjoin(ActivityAnalysis, ActivityAnalysis.activity_id == Activity.id)
-                .where(stale)
-            )
-            activities = list(session.execute(stmt).scalars())
-
-        print(
-            f"Reanalyzing {len(activities)} activity(ies) at analysis_version={ANALYSIS_VERSION}..."
+    if keep <= 0:
+        return []
+    try:
+        backups = sorted(
+            entry
+            for entry in Path(target_dir).iterdir()
+            if _BACKUP_NAME_RE.match(entry.name) and entry.is_dir() and not entry.is_symlink()
         )
-        for activity in activities:
-            try:
-                gpx_bytes = blob_store.get(activity.gpx_blob_key)
-                track = parse_gpx(gpx_bytes)
-                # Reanalyze refreshes the derived ActivityAnalysis.result —
-                # it deliberately does not touch activity.split_type/split_value,
-                # which were set once at upload time and stay upload-time-fixed
-                # (see docs history: pre-existing defaults aren't backfilled).
-                # The plan is re-parsed from the GPX itself (issue #100) rather
-                # than read from the stored column, for the same reason
-                # split_type/split_value are re-derived here too. Unlike those
-                # two, activity.split_plan IS backfilled below when it's still
-                # null — an activity uploaded after the phone started writing
-                # the plan extensions (#99) but before the server understood
-                # them (#100) would otherwise have a plan-aware splits table
-                # (from `split_plan` passed to analyze() here) but no
-                # Activity.split_plan row, so the web page's "reset to my
-                # uploaded plan" control and the custom-plan heading/controls
-                # fix would never appear for it — the exact gap this closes.
-                split_plan = parse_split_plan(gpx_bytes)
-                if split_plan is not None and activity.split_plan is None:
-                    activity.split_plan = _split_plan_to_json(split_plan)
-                previous = session.get(ActivityAnalysis, activity.id)
-                corrected, terrain = terrain_correct(
-                    track, previous.result if previous is not None else None
-                )
-                result = (
-                    analyzer.analyze(
-                        corrected,
-                        split_plan.split_type,
-                        split_plan.split_value,
-                        activity_type=activity.activity_type,
-                        split_plan=split_plan,
-                        terrain=terrain,
-                    )
-                    if split_plan
-                    else analyzer.analyze(
-                        corrected, activity_type=activity.activity_type, terrain=terrain
-                    )
-                )
-                cached_track = sample_track(track, max_points=DEFAULT_MAX_POINTS)
-                status = AnalysisStatus.done
-                error = None
-            except (GpxParseError, OSError, ValueError) as exc:
-                result = None
-                cached_track = None
-                status = AnalysisStatus.failed
-                error = str(exc)
-                print(f"  {activity.id}: FAILED — {exc}")
+    except OSError as exc:
+        print(f"Warning: could not list {target_dir} to prune old backups: {exc}")
+        return []
 
-            distance_meters, moving_seconds = distance_and_duration_from_result(result)
-            start_lat, start_lon, end_lat, end_lon = endpoints_from_result(result)
-            existing = session.get(ActivityAnalysis, activity.id)
-            if existing is None:
-                existing = ActivityAnalysis(activity_id=activity.id, computed_at=datetime.now(UTC))
-                session.add(existing)
-            existing.analysis_version = ANALYSIS_VERSION
-            existing.status = status
-            existing.result = result
-            existing.distance_meters = distance_meters
-            existing.moving_seconds = moving_seconds
-            existing.start_lat = start_lat
-            existing.start_lon = start_lon
-            existing.end_lat = end_lat
-            existing.end_lon = end_lon
-            existing.track = cached_track
-            existing.error = error
-            existing.computed_at = datetime.now(UTC)
+    keep_others = keep
+    if protect is not None and protect in backups:
+        backups.remove(protect)
+        keep_others -= 1
+    removed = []
+    for old in backups[: max(len(backups) - keep_others, 0)]:
+        try:
+            shutil.rmtree(old)
+        except OSError as exc:
+            print(f"Warning: could not remove old backup {old}: {exc}")
+            continue
+        removed.append(old)
+    if removed:
+        print(f"Pruned {len(removed)} old backup(s) from {target_dir}, keeping the newest {keep}")
+    return removed
 
-            if status == AnalysisStatus.done:
-                print(f"  {activity.id}: done")
 
-        session.commit()
+def reanalyze(*, activity_id: str | None, all_activities: bool) -> None:
+    """Reruns AnalyzerV1 against stored activities (see app/reanalysis.py).
+    Exactly one of activity_id/all_activities must be given by the caller
+    (main() enforces this). --all only touches stale activities and commits
+    each one as it goes (issue #212), so it can be stopped and rerun."""
+    from app.reanalysis import reanalyze_activity, reanalyze_stale
+
+    if activity_id is not None:
+        if reanalyze_activity(activity_id) is None:
+            sys.exit(f"No activity found with id {activity_id}")
+        return
+    assert all_activities  # noqa: S101 -- enforced by main()'s mutually-exclusive group
+    reanalyze_stale()
 
 
 def gc(*, apply: bool) -> None:
@@ -241,8 +221,8 @@ def gc(*, apply: bool) -> None:
 
 
 def run() -> None:
-    """validate config -> migrate (or refuse to start if behind) -> reanalyze
-    stale activities -> bootstrap admin -> serve."""
+    """validate config -> migrate (or refuse to start if behind) -> bootstrap
+    admin -> serve, reanalysing stale activities in the background."""
     import uvicorn
     from pydantic import ValidationError
 
@@ -257,10 +237,17 @@ def run() -> None:
 
     configure_logging(settings.log_level)
 
+    _refuse_if_database_is_newer()
     if settings.auto_migrate:
-        if settings.backup_before_migrate and _database_path(settings.database_url).exists():
+        # Only back up when there's a migration to protect against (issue
+        # #207): an up-to-date database starts without writing a full copy.
+        if (
+            settings.backup_before_migrate
+            and _database_path(settings.database_url).exists()
+            and not _is_database_at_head()
+        ):
             try:
-                backup(settings.backup_dir)
+                written = backup(settings.backup_dir)
             except OSError as exc:
                 sys.exit(
                     f"Pre-migration backup to {settings.backup_dir!r} failed: {exc}. "
@@ -268,6 +255,7 @@ def run() -> None:
                     "deploy/standalone-tls/README.md 'Backups and migration safety'), "
                     "or set SR_BACKUP_BEFORE_MIGRATE=false to skip it (not recommended)."
                 )
+            prune_backups(settings.backup_dir, settings.backup_keep, protect=written)
         migrate()
     elif not _is_database_at_head():
         sys.exit(
@@ -275,32 +263,43 @@ def run() -> None:
             "refusing to start. Run `simple-activity-tracker-server migrate` first."
         )
 
-    if settings.auto_reanalyze:
-        # Picks up any activity whose stored ActivityAnalysis predates the
-        # current ANALYSIS_VERSION (a bumped analyzer version ships in the
-        # same release as the code that reads it) — an analyzer bugfix or
-        # algorithm change (e.g. issue #83) then reaches every existing
-        # user's already-uploaded activities on upgrade, with no manual CLI
-        # step and no re-upload from the phone. A no-op, fast pass when
-        # nothing is stale (see reanalyze()'s docstring/query). Runs before
-        # the app starts serving, same as migrate() above, so no one can
-        # load a page showing analysis computed under an old, possibly-wrong
-        # algorithm right after an upgrade.
-        reanalyze(activity_id=None, all_activities=True)
-
     with get_session_factory()() as session:
         bootstrap_admin_if_needed(session)
 
-    settings = get_settings()
+    reanalysis_stop = threading.Event()
+    reanalysis_thread = None
+    if settings.auto_reanalyze:
+        # Picks up any activity whose stored ActivityAnalysis predates the
+        # current ANALYSIS_VERSION (a bumped analyzer version ships in the
+        # same release as the code that reads it), so an analyzer bugfix or
+        # algorithm change (e.g. issue #83) reaches every existing user's
+        # already-uploaded activities on upgrade, with no manual CLI step
+        # and no re-upload from the phone. A fast no-op when nothing is
+        # stale. Runs in the background while the app serves (issues #206,
+        # #213): on a large account it takes minutes, and blocking until it
+        # finished left /healthz silent long enough for the container to be
+        # marked unhealthy and compose to never start the proxy. Pages show
+        # an activity's previous analysis until its turn comes.
+        from app.reanalysis import start_background_reanalysis
+
+        reanalysis_thread = start_background_reanalysis(reanalysis_stop)
+
     forwarded_allow_ips = settings.trusted_proxies or None
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",  # noqa: S104 -- must bind all interfaces inside the container to be reachable
-        port=8000,
-        log_level=settings.log_level,
-        proxy_headers=bool(forwarded_allow_ips),
-        forwarded_allow_ips=forwarded_allow_ips,
-    )
+    try:
+        uvicorn.run(
+            "app.main:app",
+            host="0.0.0.0",  # noqa: S104 -- must bind all interfaces inside the container to be reachable
+            port=8000,
+            log_level=settings.log_level,
+            proxy_headers=bool(forwarded_allow_ips),
+            forwarded_allow_ips=forwarded_allow_ips,
+        )
+    finally:
+        # Let the activity in progress commit rather than dying mid-way;
+        # anything left is picked up on the next start (issue #212).
+        reanalysis_stop.set()
+        if reanalysis_thread is not None:
+            reanalysis_thread.join(timeout=_REANALYSIS_SHUTDOWN_GRACE_SECONDS)
 
 
 def main() -> None:
@@ -340,18 +339,36 @@ def main() -> None:
     backup_parser.add_argument(
         "directory", help="Directory the timestamped backup subdirectory is created under."
     )
+    backup_parser.add_argument(
+        "--keep",
+        type=int,
+        metavar="N",
+        default=None,
+        help=(
+            "After backing up, keep only the newest N backup-<timestamp> directories "
+            "there (0 keeps all). Defaults to SR_BACKUP_KEEP (5)."
+        ),
+    )
 
     args = parser.parse_args()
     if args.command == "run":
         run()
     elif args.command == "migrate":
+        _refuse_if_database_is_newer()
         migrate()
     elif args.command == "reanalyze":
+        from app.audit import configure_logging
+
+        configure_logging(get_settings().log_level)  # progress is logged under app.reanalysis
         reanalyze(activity_id=args.activity, all_activities=args.all)
     elif args.command == "gc":
         gc(apply=args.apply)
     elif args.command == "backup":
-        backup(args.directory)
+        if args.keep is not None and args.keep < 0:
+            parser.error("--keep must be 0 or more")
+        written = backup(args.directory)
+        keep = args.keep if args.keep is not None else get_settings().backup_keep
+        prune_backups(args.directory, keep, protect=written)
     else:  # pragma: no cover - argparse enforces this
         sys.exit(f"Unknown command: {args.command}")
 

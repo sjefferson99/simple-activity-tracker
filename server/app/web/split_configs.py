@@ -366,6 +366,43 @@ def edit_split_config_page(
     return templates.TemplateResponse(request, "split_config_form.html", _attach_preview(context))
 
 
+def _copy_name(name: str, taken: set[str]) -> str:
+    """First free "<name> (copy)", "<name> (copy 2)", … for the user, with the
+    original name shortened if needed so the suffix still fits the limit."""
+    n = 1
+    while True:
+        suffix = " (copy)" if n == 1 else f" (copy {n})"
+        candidate = name[: SPLIT_CONFIG_NAME_MAX_LENGTH - len(suffix)].rstrip() + suffix
+        if candidate not in taken:
+            return candidate
+        n += 1
+
+
+@router.get("/split-configs/{config_id}/duplicate")
+def duplicate_split_config_page(
+    config_id: str,
+    request: Request,
+    user: WebUser,
+    session: Annotated[Session, Depends(db_session)],
+) -> Response:
+    """Opens the editor as a *new* config pre-filled from an existing one
+    (issue #231). Nothing is saved until Save, which goes through the normal
+    create path (validation, name-collision handling), so abandoning the
+    page leaves no stray copy behind."""
+    repo = SqlAlchemySplitConfigRepository(session)
+    config = repo.get_for_user(user.id, config_id)
+    if config is None:
+        return Response(status_code=404)
+    taken = {c.name for c in repo.list_for_user(user.id)}
+    context = {
+        "user": user,
+        **_form_context_from_config(config),
+        "config_id": None,
+        "name": _copy_name(config.name, taken),
+    }
+    return templates.TemplateResponse(request, "split_config_form.html", _attach_preview(context))
+
+
 @router.post("/split-configs/custom-rows", dependencies=[Depends(require_htmx_header)])
 def add_custom_row(
     request: Request,

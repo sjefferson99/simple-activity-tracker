@@ -377,6 +377,8 @@ class ExportManifestEntry(BaseModel):
     source_platform: str
     source_app_version: str
     gpx_filename: str
+    # Issue #190. Defaulted so archives from older servers still import.
+    is_virtual: bool = False
 
 
 class ExportManifest(BaseModel):

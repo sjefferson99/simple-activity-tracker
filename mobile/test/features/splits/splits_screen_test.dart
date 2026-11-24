@@ -583,4 +583,127 @@ void main() {
       );
     },
   );
+
+  group('repeat blocks (issue #225)', () {
+    const time = SplitPreference(kind: SplitKind.timeMin, value: 1);
+    const warm = PlannedSplit(size: 300);
+    const work = PlannedSplit(size: 180, targetSpeedMps: 10 / 3.6);
+    const rest = PlannedSplit(size: 120, targetSpeedMps: 7 / 3.6);
+    final intervals = const SplitPlan(base: time).copyWith(
+      customEntries: const [
+        SingleSplitEntry(warm),
+        RepeatBlock(count: 5, splits: [work, rest]),
+        SingleSplitEntry(warm),
+      ],
+    );
+
+    Finder repeatCountField() {
+      final wrapper = find.byWidgetPredicate(
+        (widget) =>
+            widget.key is ValueKey<String> &&
+            (widget.key! as ValueKey<String>).value.startsWith(
+              'repeat_count-1-',
+            ),
+      );
+      return find.descendant(of: wrapper, matching: find.byType(TextFormField));
+    }
+
+    SplitPlan currentPlan(WidgetTester tester) =>
+        ProviderScope.containerOf(tester.element(find.byType(SplitsScreen)))
+            .read(splitPlanControllerProvider);
+
+    testWidgets('a plan with a repeat shows the block and the expanded count', (
+      tester,
+    ) async {
+      await _pumpWithPlan(tester, intervals);
+
+      expect(find.text('12 of 50 splits after repeats'), findsOneWidget);
+      expect(find.text('Number of splits'), findsNothing);
+      expect(find.text('Repeat'), findsOneWidget);
+      expect(find.text('times (splits #2–#11)'), findsOneWidget);
+      // Singles keep their flat numbers; the trailing warm-down is #12.
+      expect(find.text('#1'), findsOneWidget);
+      expect(find.text('#12'), findsOneWidget);
+      expect(find.text('a'), findsOneWidget);
+      expect(find.text('b'), findsOneWidget);
+    });
+
+    testWidgets('changing the repeat count re-expands the plan', (
+      tester,
+    ) async {
+      await _pumpWithPlan(tester, intervals);
+      await tester.ensureVisible(repeatCountField());
+      await tester.pumpAndSettle();
+
+      await tester.enterText(repeatCountField(), '8');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      final plan = currentPlan(tester);
+      expect(plan.customSplits, hasLength(18));
+      expect(
+        plan.customLayout[1],
+        const RepeatBlock(count: 8, splits: [work, rest]),
+      );
+    });
+
+    testWidgets('a repeat count that would pass 50 splits is refused', (
+      tester,
+    ) async {
+      await _pumpWithPlan(tester, intervals);
+      await tester.ensureVisible(repeatCountField());
+      await tester.pumpAndSettle();
+
+      // 2 singles + 25 x 2 = 52 > 50.
+      await tester.enterText(repeatCountField(), '25');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(currentPlan(tester), intervals);
+      expect(
+        tester.widget<TextFormField>(repeatCountField()).controller!.text,
+        '5',
+      );
+    });
+
+    testWidgets('Add repeat appends 2 x [last split, last split]', (
+      tester,
+    ) async {
+      await _pumpWithPlan(
+        tester,
+        const SplitPlan(base: time, customSplits: [warm, work]),
+      );
+      await tester.dragUntilVisible(
+        find.text('Add repeat'),
+        find.byType(ListView),
+        const Offset(0, -100),
+      );
+
+      await tester.tap(find.text('Add repeat'));
+      await tester.pumpAndSettle();
+
+      final plan = currentPlan(tester);
+      expect(plan.customSplits, [warm, work, work, work, work, work]);
+      expect(
+        plan.customEntries.last,
+        const RepeatBlock(count: 2, splits: [work, work]),
+      );
+    });
+
+    testWidgets('deleting the repeat leaves a plain list of splits', (
+      tester,
+    ) async {
+      await _pumpWithPlan(tester, intervals);
+      final delete = find.byTooltip('Delete repeat');
+      await tester.ensureVisible(delete);
+      await tester.pumpAndSettle();
+
+      await tester.tap(delete);
+      await tester.pumpAndSettle();
+
+      final plan = currentPlan(tester);
+      expect(plan.customSplits, [warm, warm]);
+      expect(plan.hasRepeatBlocks, isFalse);
+    });
+  });
 }

@@ -35,7 +35,7 @@ import '../../domain/models/sync_status.dart';
 import '../../domain/models/track_point.dart';
 import '../../domain/tracking/activity_mode.dart';
 import '../../domain/tracking/metrics_engine.dart';
-import '../../domain/tracking/display_speed_window.dart';
+import '../../domain/tracking/calibrated_display_speed.dart';
 import '../../domain/tracking/motion_window.dart';
 import '../../domain/tracking/pressure_window.dart';
 import '../../domain/tracking/run_clock.dart';
@@ -87,11 +87,13 @@ class LiveRunController extends Notifier<LiveRunState> {
   Duration tickInterval = const Duration(seconds: 1);
 
   StreamSubscription<LocationSample>? _subscription;
+  /// Replaced at each start() to pick up the run's activity mode.
+  CalibratedDisplaySpeed _displaySpeed =
+      CalibratedDisplaySpeed.forMode(ActivityMode.running);
   StreamSubscription<double>? _barometerSubscription;
   final PressureWindow _pressureWindow = PressureWindow();
   StreamSubscription<double>? _motionSubscription;
   final MotionWindow _motionWindow = MotionWindow();
-  final DisplaySpeedWindow _displaySpeedWindow = DisplaySpeedWindow();
   MetricsEngine? _metricsEngine;
   RunClock? _runClock;
   RunGpxLog? _gpxLog;
@@ -112,6 +114,10 @@ class LiveRunController extends Notifier<LiveRunState> {
   // or verdict-change transition. Reset to null at the start of every run so
   // a cue can never fire comparing across two different runs.
   LiveMetrics? _previousMetricsForAudio;
+  // The split time at which the current split's last verdict cue fired, so
+  // an off-target verdict can repeat every minute (issue #201). Cleared on
+  // every split change and run start/stop.
+  Duration? _lastVerdictCueElapsed;
   SplitAudioSettings? _audioSettings;
 
   // The split in progress's live verdict, with hysteresis (issue #154) —
@@ -178,7 +184,6 @@ class LiveRunController extends Notifier<LiveRunState> {
     _startedAt = DateTime.now().toUtc();
     _runClock = RunClock(startedAt: _startedAt!);
 
-    _displaySpeedWindow.reset();
     // Fixed for the run's duration — read once here, not from a live
     // `ref.watch`, so switching the home screen toggle mid-run (which the UI
     // already disables, but this is the actual guarantee) can't change which
@@ -186,6 +191,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     // captured value is reused at stop() for the RunRecord/RunSummary, since
     // the toggle may have moved on by then.
     _activityMode = ref.read(activityModeControllerProvider);
+    _displaySpeed = CalibratedDisplaySpeed.forMode(_activityMode!);
     _splitPlan = ref.read(splitPlanControllerProvider);
     // Fixed for the run's duration, same rationale as _activityMode/
     // _splitPlan above — a mid-run settings change on the Splits screen
@@ -199,6 +205,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     await ref.read(splitAudioSettingsControllerProvider.notifier).ensureLoaded();
     _audioSettings = ref.read(splitAudioSettingsControllerProvider);
     _previousMetricsForAudio = null;
+    _lastVerdictCueElapsed = null;
     _splitVerdictTracker.reset();
     // Shares _runClock, so splits are timed on exactly the clock the Time
     // tile shows and pause() stops (issue #161).
@@ -292,7 +299,7 @@ class LiveRunController extends Notifier<LiveRunState> {
 
   void pause() {
     if (_phase != RunPhase.tracking) return;
-    _displaySpeedWindow.reset();
+    _displaySpeed.reset();
     _runClock?.pause(DateTime.now().toUtc());
     _emitActive(RunPhase.paused, speedMps: null, accuracyMeters: null);
     ref.read(liveUploadServiceProvider).pause();
@@ -300,7 +307,7 @@ class LiveRunController extends Notifier<LiveRunState> {
 
   void resume() {
     if (_phase != RunPhase.paused) return;
-    _displaySpeedWindow.reset();
+    _displaySpeed.reset();
     _runClock?.resume(DateTime.now().toUtc());
     _metricsEngine?.resetSegmentAnchor();
     _gpxLog?.startNewSegment();
@@ -359,6 +366,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     _splitPlan = null;
     _audioSettings = null;
     _previousMetricsForAudio = null;
+    _lastVerdictCueElapsed = null;
     _splitVerdictTracker.reset();
 
     state = LiveRunFinished(
@@ -460,18 +468,16 @@ class LiveRunController extends Notifier<LiveRunState> {
     _gpxLog?.addPoint(point);
     ref.read(liveUploadServiceProvider).addPoint(point);
 
-    // Display-only, position-derived speed (issue #50 follow-up): a
-    // measured test found the GPS chip's own speed field reading ~13% low
-    // throughout, while position-derived distance/pace matched a stopwatch
-    // almost exactly — see DisplaySpeedWindow's doc. Windowed over the last
-    // ~3s so it's steady enough to aim a split at, without depending on the
-    // chip's speed field at all. The engine's own distance/average/split
-    // math is unaffected — it never used chip speed for its own numbers.
-    final windowedSpeed = _displaySpeedWindow.addPoint(point);
+    // Display-only (issue #153): smoothed chip speed, rescaled over the last
+    // 60 s to agree with position-derived distance, falling back to a 6 s
+    // path window during warm-up and on fixes without a chip speed — see
+    // CalibratedDisplaySpeed's doc. The engine's own distance/average/split
+    // math is unaffected.
+    final displaySpeed = _displaySpeed.addPoint(point);
 
     _emitActive(
       RunPhase.tracking,
-      speedMps: windowedSpeed,
+      speedMps: displaySpeed,
       accuracyMeters: sample.accuracyMeters,
     );
   }
@@ -591,8 +597,12 @@ class LiveRunController extends Notifier<LiveRunState> {
     final cue = detectSplitAudioCue(
       previous: _previousMetricsForAudio,
       current: metrics,
+      lastVerdictCueElapsed: _lastVerdictCueElapsed,
     );
     if (cue == null) return;
+    _lastVerdictCueElapsed = cue.kind == SplitAudioCueKind.verdict
+        ? metrics.currentSplitElapsed
+        : null;
 
     final audio = ref.read(splitAudioServiceProvider);
     switch (cue.kind) {
