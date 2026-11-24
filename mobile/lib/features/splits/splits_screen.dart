@@ -118,8 +118,9 @@ class _AudioCuesSection extends ConsumerWidget {
           contentPadding: EdgeInsets.zero,
           title: const Text('Beep on target correction'),
           subtitle: const Text(
-            'Two beeps too fast, three too slow, one long beep back on '
-            'target — only fires for a split with a target set.',
+            'Two beeps too fast, three too slow (repeated every minute '
+            'while off target), one long beep back on target — only fires '
+            'for a split with a target set.',
           ),
           value: settings.beepOnVerdictChange,
           onChanged: (value) =>
@@ -140,8 +141,9 @@ class _AudioCuesSection extends ConsumerWidget {
           contentPadding: EdgeInsets.zero,
           title: const Text('Announce pace correction'),
           subtitle: const Text(
-            'Speak too-fast/too-slow, by how much, and the target — or '
-            '"back on target" — only fires for a split with a target set.',
+            'Speak too-fast/too-slow, by how much, and the target (repeated '
+            'every minute while off target) — or "back on target" — only '
+            'fires for a split with a target set.',
           ),
           value: settings.announceVerdictCorrection,
           onChanged: (value) => notifier.update(

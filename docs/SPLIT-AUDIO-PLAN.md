@@ -117,6 +117,13 @@ involved) through `detectSplitAudioCue`, covering:
 - Same verdict sustained across many ticks → null every time after the first transition
   (this is the "don't re-beep every second while off pace" requirement — the whole reason
   this is a diff against `previous`, not a level check against `current` alone).
+- **Repeat while off target (issue #201):** an unchanged `tooFast`/`tooSlow` verdict
+  re-fires the same `verdict` cue (beeps and/or speech, per the toggles) once
+  `splitVerdictRepeatInterval` (1 minute of split time) has passed since that split's
+  last verdict cue. The caller passes that time in as `lastVerdictCueElapsed`, setting it
+  on every verdict cue and clearing it on every `splitChanged` cue, so any new cue
+  restarts the minute. `onTarget` is never repeated. `tool/replay_split_audio.dart`
+  deliberately counts transitions only (it tunes the hysteresis), so it doesn't pass it.
 
 ## 4. TTS content
 
@@ -237,7 +244,8 @@ own shape) holds the five booleans above plus `SplitPlan.defaultPlan`-style defa
   - Beep fires exactly once at each split boundary, with no cue lost or duplicated when a
     boundary and a verdict transition would otherwise coincide (D2).
   - Correct beep count/pattern entering too-fast vs too-slow, and the single long beep on
-    recovering to on-target — not a beep every tick while sustained off-target.
+    recovering to on-target — not a beep every tick while sustained off-target, but a
+    repeat every minute of it (issue #201).
   - No audio cues at all in cycling mode (D3) — confirm silence, not just "tiles hidden".
   - TTS phrasing is intelligible and its timing doesn't collide with or get cut off by a
     beep (§4's ordering).

@@ -86,6 +86,12 @@ class SplitAudioCue {
 /// waiting 60 s only saved ~30 more and silenced a third of short splits.
 const Duration splitVerdictAudioGrace = Duration(seconds: 30);
 
+/// While a split stays too fast or too slow, its verdict cue repeats this
+/// often (issue #201), measured in split time from the last verdict cue, so
+/// a runner who missed the first correction still hears it. Back on target
+/// is never repeated: there's nothing to correct.
+const Duration splitVerdictRepeatInterval = Duration(minutes: 1);
+
 /// True iff [split] is the exact roll-on tick — see
 /// [SplitAudioCue.rolledOntoRollingSplits].
 bool _isRollOnTick(CurrentSplitInfo split) =>
@@ -99,7 +105,7 @@ bool _isRollOnTick(CurrentSplitInfo split) =>
 /// many consecutive ticks while a runner is off pace, and re-announcing that
 /// every tick would be constant beeping rather than a correction cue. Only a
 /// genuine transition (including the grace period elapsing, i.e. null →
-/// non-null) produces a cue.
+/// non-null) produces a cue, plus the once-a-minute off-target repeat below.
 ///
 /// Split-boundary changes always take priority over a same-tick verdict
 /// change (issue #125 plan §1 D2) — playing both would overlap two beep
@@ -108,7 +114,13 @@ bool _isRollOnTick(CurrentSplitInfo split) =>
 ///
 /// Verdict cues are held until [splitVerdictAudioGrace]; the tick that
 /// crosses it announces the verdict in force then (even if it was already
-/// showing on screen), and only genuine transitions after that.
+/// showing on screen), and only genuine transitions (and repeats) after that.
+///
+/// An off-target verdict that hasn't changed is repeated once
+/// [splitVerdictRepeatInterval] has passed since [lastVerdictCueElapsed],
+/// the [LiveMetrics.currentSplitElapsed] at which the last verdict cue for
+/// *this* split fired (null if none has yet). The caller tracks it: set it
+/// on every verdict cue, clear it on every split-changed cue.
 ///
 /// [previous] being null (the very first tick of a run) never itself
 /// produces a cue — split 1's start is announced separately and immediately
@@ -118,6 +130,7 @@ bool _isRollOnTick(CurrentSplitInfo split) =>
 SplitAudioCue? detectSplitAudioCue({
   required LiveMetrics? previous,
   required LiveMetrics current,
+  Duration? lastVerdictCueElapsed,
 }) {
   if (previous == null) return null;
 
@@ -137,7 +150,9 @@ SplitAudioCue? detectSplitAudioCue({
   // On the tick that crosses the audio grace, nothing has been announced
   // for this split yet, so the verdict in force is news whatever it was.
   final crossedAudioGrace = previous.currentSplitElapsed < splitVerdictAudioGrace;
-  if (!crossedAudioGrace && currentVerdict == previous.currentSplitVerdict) {
+  if (!crossedAudioGrace &&
+      currentVerdict == previous.currentSplitVerdict &&
+      !_repeatDue(currentVerdict, current.currentSplitElapsed, lastVerdictCueElapsed)) {
     return null;
   }
 
@@ -147,3 +162,10 @@ SplitAudioCue? detectSplitAudioCue({
     avgSpeedMps: currentSplitAvgSpeedMps(current),
   );
 }
+
+/// Whether an unchanged [verdict] is due its repeat (issue #201): off target,
+/// already announced in this split, and [splitVerdictRepeatInterval] since.
+bool _repeatDue(SplitVerdict verdict, Duration elapsed, Duration? lastCueElapsed) =>
+    verdict != SplitVerdict.onTarget &&
+    lastCueElapsed != null &&
+    elapsed - lastCueElapsed >= splitVerdictRepeatInterval;
