@@ -87,23 +87,88 @@
       ({{ "size as mm:ss" if split_type == "time_min" else "size in " + ("mi" if split_type == "distance_mi" else "km") }},
       target {{ "as mm:ss pace, optional" if targets_as == "pace" else "in km/h, optional" }})
     </legend>
-    {% for row in custom_rows %}
+    {% if has_repeats %}
+    <p class="muted">{{ expanded_total }} of {{ max_splits }} splits after repeats</p>
+    {% endif %}
+    {#
+      Issue #233: entries are single splits or repeat blocks. The rows post as
+      one flat split_size/split_target list; entry_kind/entry_repeat/entry_rows
+      (one of each per entry, in order) say how the rows group.
+    #}
+    {% for entry in custom_entries %}
+    {% set entry_index = loop.index0 %}
+    <input type="hidden" name="entry_kind" value="{{ 'repeat' if entry.is_repeat else 'split' }}">
+    <input type="hidden" name="entry_rows" value="{{ entry.rows | length }}">
+    {% if entry.is_repeat %}
+    <div class="repeat-block">
+      <div class="toolbar">
+        <label for="entry_repeat_{{ entry_index }}">Repeat</label>
+        <input type="number" id="entry_repeat_{{ entry_index }}" name="entry_repeat"
+               class="repeat-count" min="1" max="{{ max_splits }}" value="{{ entry.repeat }}"
+               hx-post="/split-configs/custom-rows" hx-target="#split-config-form-area"
+               hx-include="#split-config-form" hx-trigger="change">
+        <span class="muted">
+          times{% if entry.first_number %} (splits #{{ entry.first_number }}–#{{ entry.last_number }}){% endif %}
+        </span>
+        {% if custom_entries | length > 1 %}
+        <button type="submit" name="remove_entry" value="{{ entry_index }}" formnovalidate
+                formaction="/split-configs/custom-rows" formmethod="post" class="secondary">
+          Delete repeat
+        </button>
+        {% endif %}
+      </div>
+      {% for row in entry.rows %}
+      <div class="toolbar custom-split-row">
+        <span class="muted">{{ row.label }}</span>
+        <input type="text" name="split_size" value="{{ row.size }}"
+               placeholder="{{ '1:30' if split_type == 'time_min' else '1.0' }}" aria-label="Repeat {{ entry_index + 1 }} split {{ row.label }} size">
+        <input type="text" name="split_target" value="{{ row.target }}"
+               placeholder="{{ '5:00' if targets_as == 'pace' else '12.0' }}" aria-label="Repeat {{ entry_index + 1 }} split {{ row.label }} target">
+        {% if entry.rows | length > 1 %}
+        <button type="submit" name="remove_row" value="{{ row.index }}" formnovalidate
+                formaction="/split-configs/custom-rows" formmethod="post" class="secondary">
+          Remove
+        </button>
+        {% endif %}
+      </div>
+      {% endfor %}
+      <button type="submit" name="add_to_block" value="{{ entry_index }}" formnovalidate
+              formaction="/split-configs/custom-rows" formmethod="post" class="secondary"
+              {% if expanded_total + entry.add_cost > max_splits %}disabled{% endif %}>
+        Add split to repeat
+      </button>
+    </div>
+    {% else %}
+    <input type="hidden" name="entry_repeat" value="">
+    {% for row in entry.rows %}
     <div class="toolbar custom-split-row">
-      <span class="muted">#{{ loop.index }}</span>
+      <span class="muted">{{ row.label }}</span>
       <input type="text" name="split_size" value="{{ row.size }}"
-             placeholder="{{ '1:30' if split_type == 'time_min' else '1.0' }}" aria-label="Split {{ loop.index }} size">
+             placeholder="{{ '1:30' if split_type == 'time_min' else '1.0' }}" aria-label="Split {{ row.label }} size">
       <input type="text" name="split_target" value="{{ row.target }}"
-             placeholder="{{ '5:00' if targets_as == 'pace' else '12.0' }}" aria-label="Split {{ loop.index }} target">
-      <button type="submit" name="remove_row" value="{{ loop.index0 }}" formnovalidate
+             placeholder="{{ '5:00' if targets_as == 'pace' else '12.0' }}" aria-label="Split {{ row.label }} target">
+      <button type="submit" name="remove_row" value="{{ row.index }}" formnovalidate
               formaction="/split-configs/custom-rows" formmethod="post" class="secondary">
         Remove
       </button>
     </div>
     {% endfor %}
-    <button type="submit" name="row_action" value="add" formnovalidate
-            formaction="/split-configs/custom-rows" formmethod="post" class="secondary">
-      Add split
-    </button>
+    {% endif %}
+    {% endfor %}
+    <div class="toolbar">
+      <button type="submit" name="row_action" value="add" formnovalidate
+              formaction="/split-configs/custom-rows" formmethod="post" class="secondary"
+              {% if expanded_total >= max_splits %}disabled{% endif %}>
+        Add split
+      </button>
+      {# A new block starts as 2 x [two splits], same as the phone: the
+         smallest block that's a repeat of a work/rest pair. #}
+      <button type="submit" name="row_action" value="add_repeat" formnovalidate
+              formaction="/split-configs/custom-rows" formmethod="post" class="secondary"
+              {% if expanded_total + 4 > max_splits %}disabled{% endif %}>
+        Add repeat
+      </button>
+    </div>
   </fieldset>
   {% endif %}
 

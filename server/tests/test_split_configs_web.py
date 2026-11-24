@@ -6,6 +6,7 @@ redirect — all behaved as intended); this file locks that behaviour in.
 """
 
 import re
+from typing import ClassVar
 
 HTMX_HEADERS = {"X-Requested-With": "htmx"}
 
@@ -736,3 +737,169 @@ class TestFormRefresh:
             split_target=["7"],
         )
         assert 'name="split_size" value="1:30"' in back.text
+
+
+class TestRepeatBlocks:
+    """Issue #233: repeat blocks in the web editor, saved as a layout."""
+
+    # Warm-up, 3 x [3:00 @ 10 km/h, 2:00 @ 7 km/h], cool-down.
+    _FORM: ClassVar[dict[str, object]] = {
+        "config_id": "",
+        "name": "Reps",
+        "split_type": "time_min",
+        "split_value": "1",
+        "targets_as": "speed",
+        "plan_kind": "custom",
+        "rolling_target": "",
+        "prev_targets_as": "speed",
+        "prev_split_type": "time_min",
+        "split_size": ["10:00", "3:00", "2:00", "5:00"],
+        "split_target": ["", "10", "7", ""],
+        "entry_kind": ["split", "repeat", "split"],
+        "entry_repeat": ["", "3", ""],
+        "entry_rows": ["1", "2", "1"],
+    }
+
+    def _post(self, client, path, **fields):
+        payload = {**self._FORM, **fields}
+        return client.post(path, headers=HTMX_HEADERS, data=payload)
+
+    def _stored_plan(self):
+        from app.db import get_session_factory
+        from app.models.split_config import SplitConfig
+
+        with get_session_factory()() as session:
+            return session.query(SplitConfig).one().plan
+
+    def test_add_repeat_appends_a_two_row_block(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._post(
+            client,
+            "/split-configs/custom-rows",
+            split_size=["1:00"],
+            split_target=[""],
+            entry_kind=["split"],
+            entry_repeat=[""],
+            entry_rows=["1"],
+            row_action="add_repeat",
+        )
+        assert response.status_code == 200
+        assert response.text.count('name="split_size"') == 3
+        assert 'name="entry_kind" value="repeat"' in response.text
+        assert 'name="entry_repeat"' in response.text
+        assert "(splits #2–#5)" in response.text  # noqa: RUF001
+        assert "5 of 50 splits after repeats" in response.text
+
+    def test_save_stores_layout_and_expanded_splits(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._post(client, "/split-configs")
+        assert response.status_code == 200
+        plan = self._stored_plan()
+        assert len(plan["custom_splits"]) == 8
+        assert plan["custom_splits"][1:3] == [[180.0, 10 / 3.6], [120.0, 7 / 3.6]] * 1
+        assert plan["layout"][1]["repeat"] == 3
+        assert plan["layout"][0] == {"split": [600.0, None]}
+
+        listed = client.get("/split-configs")
+        assert "Custom, 8 splits" in listed.text
+        config_id = _edit_ids(listed.text)[0]
+        page = client.get(f"/split-configs/{config_id}/edit").text
+        assert 'name="entry_repeat"' in page
+        assert 'value="3"' in page
+        assert "(splits #2–#7)" in page  # noqa: RUF001
+        # Cool-down is numbered after the expanded block.
+        assert "#8" in page
+        assert page.count('name="split_size"') == 4
+
+    def test_duplicate_keeps_the_blocks(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        self._post(client, "/split-configs")
+        config_id = _edit_ids(client.get("/split-configs").text)[0]
+        page = client.get(f"/split-configs/{config_id}/duplicate").text
+        assert 'name="entry_kind" value="repeat"' in page
+
+    def test_plan_of_single_splits_stores_no_layout(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        self._post(
+            client,
+            "/split-configs",
+            entry_kind=["split", "split", "split", "split"],
+            entry_repeat=["", "", "", ""],
+            entry_rows=["1", "1", "1", "1"],
+        )
+        assert "layout" not in self._stored_plan()
+
+    def test_add_to_block_and_remove_rows(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        added = self._post(client, "/split-configs/custom-rows", add_to_block="1")
+        assert added.text.count('name="split_size"') == 5
+        assert 'name="entry_rows" value="3"' in added.text
+
+        # Flat row 1 is the block's first row.
+        removed = self._post(client, "/split-configs/custom-rows", remove_row="1")
+        assert removed.text.count('name="split_size"') == 3
+        assert 'value="3:00"' not in removed.text
+        assert 'name="entry_kind" value="repeat"' in removed.text
+
+    def test_delete_repeat_removes_the_whole_block(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._post(client, "/split-configs/custom-rows", remove_entry="1")
+        assert response.text.count('name="split_size"') == 2
+        assert 'name="entry_kind" value="repeat"' not in response.text
+
+    def test_expanded_plan_over_the_cap_is_rejected(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._post(client, "/split-configs", entry_repeat=["", "25", ""])
+        assert response.status_code == 400
+        assert "at most 50 splits after repeats" in response.text
+
+    def test_add_buttons_disabled_at_the_cap(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        # 1 + 24*2 + 1 = 50 expanded splits.
+        response = self._post(client, "/split-configs/custom-rows", entry_repeat=["", "24", ""])
+        assert "50 of 50 splits after repeats" in response.text
+        assert re.search(r'value="add"[^>]*disabled', response.text)
+        assert re.search(r'value="add_repeat"[^>]*disabled', response.text)
+        assert re.search(r'name="add_to_block"[^>]*disabled', response.text)
+
+    def test_invalid_repeat_count_is_reported(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._post(client, "/split-configs", entry_repeat=["", "0", ""])
+        assert response.status_code == 400
+        assert "Repeat counts must be whole numbers of at least 1" in response.text
+        assert 'value="0"' in response.text
+
+    def test_preview_multiplies_block_totals(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._post(
+            client, "/split-configs/preview", split_target=["12", "10", "7", "12"]
+        )
+        # 10:00 + 3 x (3:00 + 2:00) + 5:00 = 30:00.
+        assert "Time: 30:00" in response.text
+        # Listed in full, as if typed out: #1, then 3 x (#a, #b), then #8.
+        labels = re.findall(r"<td>(#\d+)</td>", response.text)
+        assert labels == [f"#{n}" for n in range(1, 9)]
+        # 3:00 @ 10 km/h = 500 m, 2:00 @ 7 km/h = 233 m, repeating.
+        assert response.text.count("<td>500 m</td>") == 3
+        assert response.text.count("<td>233 m</td>") == 3
+
+    def test_preview_does_not_expand_past_the_cap(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._post(client, "/split-configs/preview", entry_repeat=["", "1000000", ""])
+        assert response.status_code == 200
+        assert "Over the 50-split limit" in response.text
+        assert len(re.findall(r"<td>#\d+</td>", response.text)) == 4
+
+    def test_unit_change_keeps_the_blocks(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._post(client, "/split-configs/custom-rows", split_type="distance_km")
+        assert 'name="entry_kind" value="repeat"' in response.text
+        # 3:00 @ 10 km/h = 0.5 km.
+        assert 'name="split_size" value="0.5"' in response.text
+
+    def test_inconsistent_entry_fields_fall_back_to_single_splits(self, app_client, auth_headers):
+        client = _login_cookie_client(app_client)
+        response = self._post(client, "/split-configs/custom-rows", entry_rows=["1", "5", "1"])
+        assert response.status_code == 200
+        assert 'name="entry_kind" value="repeat"' not in response.text
+        assert response.text.count('name="split_size"') == 4

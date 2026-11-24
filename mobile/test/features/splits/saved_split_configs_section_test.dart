@@ -5,10 +5,12 @@ import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage
 import 'package:flutter_test/flutter_test.dart';
 import 'package:simple_activity_tracker/core/api/api_client.dart';
 import 'package:simple_activity_tracker/core/api/api_exception.dart';
+import 'package:simple_activity_tracker/core/api/dto/server_info_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/split_config_dto.dart';
 import 'package:simple_activity_tracker/core/auth/auth_state.dart';
 import 'package:simple_activity_tracker/core/auth/auth_state_controller.dart';
 import 'package:simple_activity_tracker/core/tracking/split_plan_controller.dart';
+import 'package:simple_activity_tracker/core/version/api_compat.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_plan.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_preference.dart';
 import 'package:simple_activity_tracker/features/splits/splits_screen.dart';
@@ -193,6 +195,115 @@ void main() {
     expect(loaded.base.kind, SplitKind.distanceMi);
     expect(loaded.rollingTargetSpeedMps, 3.0);
     expect(find.textContaining('Loaded "5k tempo"'), findsOneWidget);
+  });
+
+  group('repeat blocks (issue #233)', () {
+    final reps =
+        const SplitPlan(
+          base: SplitPreference(kind: SplitKind.timeMin, value: 1),
+        ).copyWith(
+          customEntries: const [
+            SingleSplitEntry(PlannedSplit(size: 600)),
+            RepeatBlock(
+              count: 3,
+              splits: [
+                PlannedSplit(size: 180, targetSpeedMps: 2.78),
+                PlannedSplit(size: 120, targetSpeedMps: 1.94),
+              ],
+            ),
+          ],
+        );
+
+    FakeApiClient fakeWithReps() => FakeApiClient()
+      ..listSplitConfigsHandler = ({required baseUrl, required token}) async =>
+          [
+            SplitConfigDto(
+              id: 'r',
+              name: 'Reps',
+              plan: reps,
+              createdAt: DateTime.utc(2026),
+              updatedAt: DateTime.utc(2026),
+            ),
+          ];
+
+    Future<void> loadThenSave(WidgetTester tester) async {
+      await tester.tap(find.text('Reps'));
+      await tester.pumpAndSettle();
+      // Clear the "Loaded" snackbar so the save's own one shows next.
+      tester
+          .state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))
+          .removeCurrentSnackBar();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save as…'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(TextField),
+        ),
+        'Copy',
+      );
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('loading a config keeps its repeat blocks', (tester) async {
+      await _pumpSignedIn(tester, fakeWithReps());
+      await tester.tap(find.text('Reps'));
+      await tester.pumpAndSettle();
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(SplitsScreen)),
+      );
+      final loaded = container.read(splitPlanControllerProvider);
+      expect(loaded.hasRepeatBlocks, isTrue);
+      expect(loaded.customEntries, reps.customEntries);
+    });
+
+    testWidgets('saving to a current server sends the layout', (tester) async {
+      final fake = fakeWithReps();
+      await _pumpSignedIn(tester, fake);
+      await loadThenSave(tester);
+
+      final request = fake.saveSplitConfigCalls.single;
+      expect(request.sendsLayout, isTrue);
+      expect(
+        (request.toJson()['plan'] as Map<String, dynamic>)['layout'],
+        hasLength(2),
+      );
+      expect(find.text('Saved "Copy"'), findsOneWidget);
+    });
+
+    testWidgets('saving to an older server sends the flat list and says so', (
+      tester,
+    ) async {
+      final fake = fakeWithReps()
+        ..getServerInfoHandler = ({required baseUrl, required token}) async =>
+            const ServerInfoDto(
+              version: '1.4.0',
+              apiLevel: ApiLevels.liveTracking,
+              minAppApiLevel: 0,
+            );
+      await _pumpSignedIn(tester, fake);
+      await loadThenSave(tester);
+
+      final request = fake.saveSplitConfigCalls.single;
+      expect(request.sendsLayout, isFalse);
+      expect(request.toJson()['plan'], isNot(contains('layout')));
+      expect(find.textContaining('without its repeat groups'), findsOneWidget);
+    });
+
+    testWidgets('a legacy server (404 on server-info) gets the flat list', (
+      tester,
+    ) async {
+      final fake = fakeWithReps()
+        ..getServerInfoHandler = ({required baseUrl, required token}) async =>
+            ServerInfoDto.legacy;
+      await _pumpSignedIn(tester, fake);
+      await loadThenSave(tester);
+
+      expect(fake.saveSplitConfigCalls.single.sendsLayout, isFalse);
+    });
   });
 
   testWidgets('shows an error with retry when the list fails to load', (

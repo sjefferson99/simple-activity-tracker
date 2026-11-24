@@ -17,14 +17,16 @@
       <thead><tr><th>Split</th><th>{{ preview.derived_label }}</th></tr></thead>
       <tbody>
         {% for row in preview.rows %}
-        <tr><td>#{{ row.number }}</td><td>{{ row.equivalent or "—" }}</td></tr>
+        <tr><td>{{ row.label }}</td><td>{{ row.equivalent or "—" }}</td></tr>
         {% endfor %}
       </tbody>
       <tfoot>
         <tr>
           <th>Plan total</th>
           <td>
-            {% if preview.invalid %}
+            {% if preview.over_cap %}
+              <span class="muted">Over the 50-split limit once repeats are expanded</span>
+            {% elif preview.invalid %}
               <span class="muted">Totals appear once every size and target is valid</span>
             {% else %}
               Distance: {{ preview.total_distance or "—" }} ·

@@ -403,6 +403,103 @@ class TestValidation:
         assert "unexpected" not in response.json()
 
 
+def _layout_plan(**overrides: object) -> dict[str, object]:
+    """Warm-up, 3 x [3:00 @ 10 km/h, 2:00 @ 7 km/h], cool-down (issue #233)."""
+    work, rest = [180.0, 2.78], [120.0, 1.94]
+    plan = _custom_plan(
+        custom_splits=[[600.0, None], *([work, rest] * 3), [300.0, None]],
+        layout=[
+            {"split": [600.0, None]},
+            {"repeat": 3, "splits": [work, rest]},
+            {"split": [300.0, None]},
+        ],
+    )
+    plan.update(overrides)
+    return plan
+
+
+class TestLayout:
+    """Repeat-block layouts on saved configs (issue #233)."""
+
+    def _create(self, app_client, auth_headers, plan):
+        return app_client.post(
+            "/api/v1/split-configs", headers=auth_headers, json={"name": "Reps", "plan": plan}
+        )
+
+    def test_layout_round_trips_and_is_stored(self, app_client, auth_headers):
+        create = self._create(app_client, auth_headers, _layout_plan())
+        assert create.status_code == 200
+        layout = create.json()["plan"]["layout"]
+        assert layout[1] == {"repeat": 3, "splits": [[180.0, 2.78], [120.0, 1.94]]}
+        assert layout[0] == {"split": [600.0, None]}
+        config_id = create.json()["id"]
+        fetched = app_client.get(f"/api/v1/split-configs/{config_id}", headers=auth_headers)
+        assert fetched.json()["plan"]["layout"] == layout
+        assert len(fetched.json()["plan"]["custom_splits"]) == 8
+
+    def test_config_without_layout_returns_null(self, app_client, auth_headers):
+        create = self._create(app_client, auth_headers, _custom_plan())
+        assert create.json()["plan"]["layout"] is None
+
+    def test_layout_without_repeat_is_dropped(self, app_client, auth_headers):
+        plan = _custom_plan(
+            layout=[{"split": [90.0, 4.0]}, {"split": [60.0, 6.0]}, {"split": [90.0, None]}]
+        )
+        create = self._create(app_client, auth_headers, plan)
+        assert create.status_code == 200
+        assert create.json()["plan"]["layout"] is None
+        from app.db import get_session_factory
+        from app.models.split_config import SplitConfig
+
+        with get_session_factory()() as session:
+            stored = session.get(SplitConfig, create.json()["id"])
+            assert stored is not None
+            assert "layout" not in stored.plan
+
+    def test_layout_not_matching_custom_splits_is_422(self, app_client, auth_headers):
+        plan = _layout_plan(
+            layout=[{"split": [600.0, None]}, {"repeat": 2, "splits": [[180.0, 2.78]]}]
+        )
+        assert self._create(app_client, auth_headers, plan).status_code == 422
+
+    def test_layout_with_same_length_but_different_splits_is_422(self, app_client, auth_headers):
+        plan = _layout_plan()
+        plan["layout"][1]["splits"][0] = [181.0, 2.78]  # type: ignore[index]
+        assert self._create(app_client, auth_headers, plan).status_code == 422
+
+    def test_huge_repeat_count_is_422(self, app_client, auth_headers):
+        plan = _layout_plan(layout=[{"repeat": 10**9, "splits": [[180.0, 2.78]]}])
+        assert self._create(app_client, auth_headers, plan).status_code == 422
+
+    def test_zero_repeat_or_empty_block_is_422(self, app_client, auth_headers):
+        for bad in (
+            [{"repeat": 0, "splits": [[90.0, 4.0]]}],
+            [{"repeat": 2, "splits": []}],
+        ):
+            response = self._create(app_client, auth_headers, _custom_plan(layout=bad))
+            assert response.status_code == 422
+
+    def test_layout_on_rolling_plan_is_422(self, app_client, auth_headers):
+        plan = _rolling_plan(layout=[{"repeat": 2, "splits": [[1000.0, None]]}])
+        assert self._create(app_client, auth_headers, plan).status_code == 422
+
+    def test_patch_replaces_layout(self, app_client, auth_headers):
+        config_id = self._create(app_client, auth_headers, _layout_plan()).json()["id"]
+        patched = app_client.patch(
+            f"/api/v1/split-configs/{config_id}",
+            headers=auth_headers,
+            json={"plan": _custom_plan()},
+        )
+        assert patched.status_code == 200
+        assert patched.json()["plan"]["layout"] is None
+
+    def test_old_app_payload_without_layout_still_accepted(self, app_client, auth_headers):
+        # A level-0..2 app never sends layout; the flat list alone still saves.
+        plan = _layout_plan()
+        del plan["layout"]
+        assert self._create(app_client, auth_headers, plan).status_code == 200
+
+
 class TestRateLimiting:
     """A code-review finding (2026-09-22): delete_split_config never called
     _require_rate_limit, unlike create/patch on the same router, despite

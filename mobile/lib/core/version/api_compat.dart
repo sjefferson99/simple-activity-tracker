@@ -8,7 +8,7 @@ library;
 /// The server API level this app was built against. Always equal to the
 /// server's `API_LEVEL` in the same commit (`server/app/api_compat.py`) —
 /// test/core/version/api_compat_test.dart fails if they drift.
-const kAppApiLevel = 2;
+const kAppApiLevel = 3;
 
 /// The oldest server API level this app still supports. Raise it only when
 /// deliberately dropping support for older servers — every server release so
@@ -31,6 +31,10 @@ abstract final class ApiLevels {
   /// Live tracking and sharing (issue #130): `/live/...`, `/users`,
   /// `/me/shares`, `/me/live-sharing`.
   static const liveTracking = 2;
+
+  /// Saved split configs store an optional repeat-block `layout` beside the
+  /// flat `custom_splits` (issue #233).
+  static const splitConfigLayout = 3;
 }
 
 enum ServerCompatibility {

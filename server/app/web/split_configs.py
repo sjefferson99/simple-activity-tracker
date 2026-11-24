@@ -19,7 +19,12 @@ from app.auth.rate_limit import account_action_rate_limiter
 from app.deps import db_session
 from app.models.split_config import SplitConfig
 from app.repositories.split_configs import SqlAlchemySplitConfigRepository
-from app.validation import SPLIT_CONFIG_NAME_MAX_LENGTH, ValidationFailedError, validate_name
+from app.validation import (
+    SPLIT_CONFIG_MAX_CUSTOM_SPLITS,
+    SPLIT_CONFIG_NAME_MAX_LENGTH,
+    ValidationFailedError,
+    validate_name,
+)
 from app.web.deps import WebUser, require_htmx_header
 from app.web.formatting import format_duration
 from app.web.split_config_forms import (
@@ -39,11 +44,35 @@ _METERS_PER_MILE = 1609.344
 class _CustomRow:
     size: str
     target: str
+    # Set by _number_entries for rendering: "#3" for a single split, "a",
+    # "b", … inside a repeat block, and the row's flat position in the form.
+    label: str = ""
+    index: int = 0
+
+
+@dataclass
+class _Entry:
+    """One entry of a custom plan as the editor lays it out (issue #233): a
+    single split, or a repeat block of rows run `repeat` times. `repeat` is
+    the typed text (None for a single split), so an invalid count survives a
+    re-render for Save to report."""
+
+    rows: list[_CustomRow]
+    repeat: str | None = None
+    # "splits #first-#last" for a block, when every count before it parses.
+    first_number: int | None = None
+    last_number: int | None = None
+    # Expanded splits one more row in this block adds (its repeat count).
+    add_cost: int = 1
+
+    @property
+    def is_repeat(self) -> bool:
+        return self.repeat is not None
 
 
 @dataclass
 class _PreviewRow:
-    number: int
+    label: str
     equivalent: str
 
 
@@ -63,6 +92,120 @@ class _Preview:
     total_time: str = ""
     untargeted: int = 0
     invalid: bool = False
+    over_cap: bool = False
+
+
+_MAX_SPLITS = SPLIT_CONFIG_MAX_CUSTOM_SPLITS
+
+
+def _parse_repeat(raw: str | None) -> int | None:
+    """A block's repeat count, or None when it isn't a whole number >= 1."""
+    try:
+        count = int((raw or "").strip())
+    except ValueError:
+        return None
+    return count if count >= 1 else None
+
+
+def _row_letter(j: int) -> str:
+    # Same labels as mobile's repeat block rows: a…z, then numbers.
+    return chr(ord("a") + j) if j < 26 else str(j + 1)
+
+
+def _entries_from_form(
+    sizes: list[str],
+    targets: list[str],
+    entry_kind: list[str] | None,
+    entry_repeat: list[str] | None,
+    entry_rows: list[str] | None,
+) -> list[_Entry]:
+    """Rebuilds the editor's entries from the posted form. The rows arrive
+    as one flat list (DOM order); entry_kind/entry_repeat/entry_rows say how
+    many of them each entry takes. Anything inconsistent (or a form from
+    before issue #233) falls back to one single split per row."""
+    rows = [_CustomRow(size=s, target=t) for s, t in zip(sizes, targets, strict=False)]
+    kinds = entry_kind or []
+    repeats = entry_repeat or []
+    try:
+        counts = [int(c) for c in entry_rows or []]
+    except ValueError:
+        counts = []
+    if (
+        not kinds
+        or not (len(kinds) == len(repeats) == len(counts))
+        or any(c < 1 for c in counts)
+        or sum(counts) != len(rows)
+    ):
+        return [_Entry(rows=[r]) for r in rows]
+    entries: list[_Entry] = []
+    position = 0
+    for kind, repeat, count in zip(kinds, repeats, counts, strict=True):
+        chunk = rows[position : position + count]
+        position += count
+        if kind == "repeat":
+            entries.append(_Entry(rows=chunk, repeat=repeat))
+        else:
+            entries.extend(_Entry(rows=[r]) for r in chunk)
+    return entries
+
+
+def _entries_from_plan(plan: dict[str, object]) -> list[_Entry]:
+    """A saved plan's entries: its stored layout when it has one (issue
+    #233), else one single split per custom split."""
+
+    def row(pair: object) -> _CustomRow:
+        size, target = pair[0], pair[1]  # type: ignore[index]
+        return _CustomRow(
+            size=_display_size(plan, float(size)),
+            target=_display_target(plan, float(target) if target is not None else None),
+        )
+
+    layout = plan.get("layout")
+    if isinstance(layout, list) and layout:
+        entries: list[_Entry] = []
+        for item in layout:
+            if "repeat" in item:
+                entries.append(
+                    _Entry(rows=[row(p) for p in item["splits"]], repeat=str(item["repeat"]))
+                )
+            else:
+                entries.append(_Entry(rows=[row(item["split"])]))
+        return entries
+    custom_splits: list[object] = plan.get("custom_splits") or []  # type: ignore[assignment]
+    return [_Entry(rows=[row(pair)]) for pair in custom_splits]
+
+
+def _number_entries(entries: list[_Entry]) -> int:
+    """Labels every row for rendering and returns the expanded split count
+    (an unparseable repeat count counts as 1, so the cap checks still work
+    while it's being typed)."""
+    total = 0
+    numbering_ok = True
+    index = 0
+    for entry in entries:
+        if entry.is_repeat:
+            count = _parse_repeat(entry.repeat)
+            entry.add_cost = count or 1
+            size = entry.add_cost * len(entry.rows)
+            if count is None:
+                numbering_ok = False
+            entry.first_number = total + 1 if numbering_ok else None
+            entry.last_number = total + size if numbering_ok else None
+            for j, r in enumerate(entry.rows):
+                r.label, r.index = _row_letter(j), index
+                index += 1
+            total += size
+        else:
+            for r in entry.rows:
+                r.label = f"#{total + 1}" if numbering_ok else "#?"
+                r.index = index
+                index += 1
+                total += 1
+    return total
+
+
+def _flat_rows(entries: list[_Entry]) -> list[_CustomRow]:
+    return [r for e in entries for r in e.rows]
 
 
 def _trim_decimal(value: float) -> str:
@@ -114,11 +257,12 @@ def _build_preview(
     targets_as: str,
     plan_kind: str,
     rolling_target_raw: str,
-    split_sizes: list[str],
-    split_targets: list[str],
+    entries: list[_Entry],
 ) -> _Preview:
     """Best-effort: an unparseable field just leaves its estimate blank
-    rather than erroring — reporting validation errors is Save's job."""
+    rather than erroring — reporting validation errors is Save's job. One
+    row per editor row; a repeat block's rows count `repeat` times in the
+    totals."""
     distance_unit = "mi" if split_type == "distance_mi" else "km"
     is_time = split_type == "time_min"
     preview = _Preview(
@@ -150,33 +294,56 @@ def _build_preview(
 
     total_distance = 0.0
     total_duration = 0.0
-    for i, (size_raw, target_raw) in enumerate(zip(split_sizes, split_targets, strict=False)):
-        if not size_raw.strip():
-            continue
-        try:
-            size = (
-                parse_mm_ss(size_raw, field=f"split_size_{i}")
-                if is_time
-                else parse_distance_size_to_meters(
-                    size_raw, field=f"split_size_{i}", distance_unit=distance_unit
+    number = 0  # the split's position in the expanded plan, as it will run
+    for entry in entries:
+        # Each row's estimate, worked out once: (equivalent, distance,
+        # duration, targeted), or None when it doesn't parse.
+        estimates: list[tuple[str, float | None, float | None, bool] | None] = []
+        for r in entry.rows:
+            if not r.size.strip():
+                continue
+            try:
+                size = (
+                    parse_mm_ss(r.size, field="")
+                    if is_time
+                    else parse_distance_size_to_meters(
+                        r.size, field="", distance_unit=distance_unit
+                    )
                 )
-            )
-            target = target_or_none(target_raw, f"split_target_{i}")
-        except SplitConfigFormError:
-            preview.invalid = True
-            preview.rows.append(_PreviewRow(number=i + 1, equivalent=""))
-            continue
-        distance, duration = _estimate(split_type, size, target)
-        if target is None:
-            preview.untargeted += 1
-        total_distance += distance or 0.0
-        total_duration += duration or 0.0
-        preview.rows.append(
-            _PreviewRow(
-                number=i + 1,
-                equivalent=_format_derived(split_type, distance_unit, distance, duration),
-            )
-        )
+                target = target_or_none(r.target, "")
+            except SplitConfigFormError:
+                preview.invalid = True
+                estimates.append(None)
+                continue
+            distance, duration = _estimate(split_type, size, target)
+            equivalent = _format_derived(split_type, distance_unit, distance, duration)
+            estimates.append((equivalent, distance, duration, target is not None))
+        times = 1
+        if entry.is_repeat:
+            parsed = _parse_repeat(entry.repeat)
+            if parsed is None:
+                # Can't expand without a count: show the rows once, no totals.
+                preview.invalid = True
+            elif number + parsed * len(estimates) > _MAX_SPLITS:
+                # Over the cap (Save will refuse it): don't expand a huge
+                # typed count, just show the rows once and say why.
+                preview.invalid = preview.over_cap = True
+                parsed = None
+            times = parsed or 1
+        # A repeat block is listed in full, one row per split it runs, as if
+        # every repetition had been typed out (issue #233).
+        for _ in range(times):
+            for estimate in estimates:
+                number += 1
+                if estimate is None:
+                    preview.rows.append(_PreviewRow(label=f"#{number}", equivalent=""))
+                    continue
+                equivalent, distance, duration, targeted = estimate
+                if not targeted:
+                    preview.untargeted += 1
+                total_distance += distance or 0.0
+                total_duration += duration or 0.0
+                preview.rows.append(_PreviewRow(label=f"#{number}", equivalent=equivalent))
     if not preview.rows or preview.invalid:
         return preview
     if not is_time or preview.untargeted == 0:
@@ -187,32 +354,21 @@ def _build_preview(
 
 
 def _attach_preview(context: dict[str, object]) -> dict[str, object]:
-    rows: list[_CustomRow] = context["custom_rows"]  # type: ignore[assignment]
+    """Adds the estimate panel plus what the entry list needs to render: row
+    labels, the expanded split count and the 50-split cap."""
+    entries: list[_Entry] = context["custom_entries"]  # type: ignore[assignment]
     context["preview"] = _build_preview(
         split_type=str(context["split_type"]),
         split_value_raw=str(context["split_value"]),
         targets_as=str(context["targets_as"]),
         plan_kind=str(context["plan_kind"]),
         rolling_target_raw=str(context["rolling_target"]),
-        split_sizes=[r.size for r in rows],
-        split_targets=[r.target for r in rows],
+        entries=entries,
     )
+    context["expanded_total"] = _number_entries(entries)
+    context["has_repeats"] = any(e.is_repeat for e in entries)
+    context["max_splits"] = _MAX_SPLITS
     return context
-
-
-def _rows_from_plan(plan: dict[str, object]) -> list[_CustomRow]:
-    custom_splits_raw = plan.get("custom_splits") or []
-    custom_splits: list[list[object]] = custom_splits_raw  # type: ignore[assignment]
-    rows = []
-    for entry in custom_splits:
-        size, target = float(entry[0]), entry[1]  # type: ignore[arg-type]
-        rows.append(
-            _CustomRow(
-                size=_display_size(plan, size),
-                target=_display_target(plan, float(target) if target is not None else None),  # type: ignore[arg-type]
-            )
-        )
-    return rows
 
 
 def _display_size(plan: dict[str, object], size_value: float) -> str:
@@ -306,7 +462,7 @@ def _default_form_context(user: object) -> dict[str, object]:
         "targets_as": "pace",
         "plan_kind": "rolling",
         "rolling_target": "",
-        "custom_rows": [_CustomRow(size="", target="")],
+        "custom_entries": [_Entry(rows=[_CustomRow(size="", target="")])],
         "error": None,
         "name_conflict": None,
     }
@@ -319,7 +475,9 @@ def _form_context_from_config(config: SplitConfig) -> dict[str, object]:
     rolling_target = ""
     if rolling_target_mps is not None:
         rolling_target = _display_target(plan, float(rolling_target_mps))
-    rows = _rows_from_plan(plan) if is_custom else [_CustomRow(size="", target="")]
+    entries = (
+        _entries_from_plan(plan) if is_custom else [_Entry(rows=[_CustomRow(size="", target="")])]
+    )
     return {
         "config_id": config.id,
         "name": config.name,
@@ -328,7 +486,7 @@ def _form_context_from_config(config: SplitConfig) -> dict[str, object]:
         "targets_as": plan.get("targets_as") or "pace",
         "plan_kind": "custom" if is_custom else "rolling",
         "rolling_target": rolling_target,
-        "custom_rows": rows,
+        "custom_entries": entries,
         "error": None,
         "name_conflict": None,
     }
@@ -416,7 +574,12 @@ def add_custom_row(
     rolling_target: Annotated[str, Form()] = "",
     split_size: Annotated[list[str] | None, Form()] = None,
     split_target: Annotated[list[str] | None, Form()] = None,
+    entry_kind: Annotated[list[str] | None, Form()] = None,
+    entry_repeat: Annotated[list[str] | None, Form()] = None,
+    entry_rows: Annotated[list[str] | None, Form()] = None,
     remove_row: Annotated[int | None, Form()] = None,
+    remove_entry: Annotated[int | None, Form()] = None,
+    add_to_block: Annotated[int | None, Form()] = None,
     row_action: Annotated[str, Form()] = "refresh",
     prev_targets_as: Annotated[str, Form()] = "",
     prev_split_type: Annotated[str, Form()] = "",
@@ -430,16 +593,42 @@ def add_custom_row(
     same pattern as partials/activity_search_form.html's hidden filter
     fields. No validation here: rows are just text until Save is pressed,
     except that typed targets are converted when the pace/speed or km/mi
-    setting changes (see _convert_target_text)."""
-    sizes = split_size or []
-    targets = split_target or []
-    rows = [_CustomRow(size=s, target=t) for s, t in zip(sizes, targets, strict=False)]
-    if remove_row is not None and 0 <= remove_row < len(rows):
-        rows.pop(remove_row)
+    setting changes (see _convert_target_text).
+
+    Repeat blocks (issue #233): row_action=add_repeat appends a block of
+    2 x [two blank rows]; add_to_block / remove_entry name an entry by its
+    position, remove_row a row by its flat position. A block whose last
+    row is removed goes with it. The 50-split cap applies to the expanded
+    plan, so the add buttons are disabled at the cap and Save rejects a
+    plan over it."""
+    entries = _entries_from_form(
+        split_size or [], split_target or [], entry_kind, entry_repeat, entry_rows
+    )
+    if remove_row is not None:
+        position = 0
+        for entry in entries:
+            if remove_row < position + len(entry.rows):
+                if remove_row >= position:
+                    entry.rows.pop(remove_row - position)
+                break
+            position += len(entry.rows)
+        entries = [e for e in entries if e.rows]
+    elif remove_entry is not None and 0 <= remove_entry < len(entries):
+        entries.pop(remove_entry)
+    elif add_to_block is not None and 0 <= add_to_block < len(entries):
+        entries[add_to_block].rows.append(_CustomRow(size="", target=""))
     elif row_action == "add":
-        rows.append(_CustomRow(size="", target=""))
-    if not rows:
-        rows = [_CustomRow(size="", target="")]
+        entries.append(_Entry(rows=[_CustomRow(size="", target="")]))
+    elif row_action == "add_repeat":
+        entries.append(
+            _Entry(
+                rows=[_CustomRow(size="", target=""), _CustomRow(size="", target="")],
+                repeat="2",
+            )
+        )
+    if not entries:
+        entries = [_Entry(rows=[_CustomRow(size="", target="")])]
+    rows = _flat_rows(entries)
 
     if (prev_targets_as and prev_targets_as != targets_as) or (
         prev_split_type and prev_split_type != split_type
@@ -456,20 +645,16 @@ def add_custom_row(
                 to_plan=to_plan,
             )
 
-        rows = [
-            _CustomRow(
-                size=_convert_size_text(
-                    r.size,
-                    target_mps=_parse_target_or_none(
-                        r.target, targets_as=from_targets_as, split_type=from_split_type
-                    ),
-                    from_split_type=from_split_type,
-                    to_split_type=split_type,
+        for r in rows:
+            r.size = _convert_size_text(
+                r.size,
+                target_mps=_parse_target_or_none(
+                    r.target, targets_as=from_targets_as, split_type=from_split_type
                 ),
-                target=convert(r.target),
+                from_split_type=from_split_type,
+                to_split_type=split_type,
             )
-            for r in rows
-        ]
+            r.target = convert(r.target)
         rolling_target = convert(rolling_target)
 
     context: dict[str, object] = {
@@ -481,7 +666,7 @@ def add_custom_row(
         "targets_as": targets_as,
         "plan_kind": plan_kind,
         "rolling_target": rolling_target,
-        "custom_rows": rows,
+        "custom_entries": entries,
         "error": None,
         "name_conflict": None,
     }
@@ -501,6 +686,9 @@ def split_config_preview(
     rolling_target: Annotated[str, Form()] = "",
     split_size: Annotated[list[str] | None, Form()] = None,
     split_target: Annotated[list[str] | None, Form()] = None,
+    entry_kind: Annotated[list[str] | None, Form()] = None,
+    entry_repeat: Annotated[list[str] | None, Form()] = None,
+    entry_rows: Annotated[list[str] | None, Form()] = None,
 ) -> Response:
     """Re-renders just the estimate panel as the user types (issue #134) —
     swapping only this panel, not the whole form, keeps focus in whichever
@@ -511,8 +699,9 @@ def split_config_preview(
         targets_as=targets_as,
         plan_kind=plan_kind,
         rolling_target_raw=rolling_target,
-        split_sizes=split_size or [],
-        split_targets=split_target or [],
+        entries=_entries_from_form(
+            split_size or [], split_target or [], entry_kind, entry_repeat, entry_rows
+        ),
     )
     return templates.TemplateResponse(
         request, "partials/split_config_preview.html", {"user": user, "preview": preview}
@@ -526,8 +715,7 @@ def _build_plan_json(
     targets_as: str,
     plan_kind: str,
     rolling_target_raw: str,
-    split_sizes: list[str],
-    split_targets: list[str],
+    entries: list[_Entry],
 ) -> dict[str, object]:
     try:
         split_value = int(split_value_raw)
@@ -539,34 +727,68 @@ def _build_plan_json(
     distance_unit = "mi" if split_type == "distance_mi" else "km"
 
     if plan_kind == "custom":
-        custom_splits: list[list[float | None]] = []
-        for i, (size_raw, target_raw) in enumerate(zip(split_sizes, split_targets, strict=False)):
-            if not size_raw.strip():
-                continue
+
+        def parse_row(r: _CustomRow, i: int) -> list[float | None]:
             if split_type == "time_min":
-                size = parse_mm_ss(size_raw, field=f"split_size_{i}")
+                size = parse_mm_ss(r.size, field=f"split_size_{i}")
             else:
                 size = parse_distance_size_to_meters(
-                    size_raw, field=f"split_size_{i}", distance_unit=distance_unit
+                    r.size, field=f"split_size_{i}", distance_unit=distance_unit
                 )
             target: float | None = None
-            if target_raw.strip():
+            if r.target.strip():
                 target = parse_target_to_mps(
-                    target_raw,
+                    r.target,
                     field=f"split_target_{i}",
                     targets_as=targets_as,
                     distance_unit=distance_unit,
                 )
-            custom_splits.append([size, target])
+            return [size, target]
+
+        too_many = SplitConfigFormError(
+            "custom_rows", f"A plan can have at most {_MAX_SPLITS} splits after repeats"
+        )
+        custom_splits: list[list[float | None]] = []
+        layout: list[dict[str, object]] = []
+        index = 0
+        for e, entry in enumerate(entries):
+            parsed = []
+            for r in entry.rows:
+                if r.size.strip():
+                    parsed.append(parse_row(r, index))
+                index += 1
+            if not parsed:
+                continue
+            if not entry.is_repeat:
+                for pair in parsed:
+                    layout.append({"split": pair})
+                    custom_splits.append(pair)
+                continue
+            count = _parse_repeat(entry.repeat)
+            if count is None:
+                raise SplitConfigFormError(
+                    f"entry_repeat_{e}", "Repeat counts must be whole numbers of at least 1"
+                )
+            # Check the size before expanding, so a huge count never
+            # allocates a huge list.
+            if len(custom_splits) + count * len(parsed) > _MAX_SPLITS:
+                raise too_many
+            layout.append({"repeat": count, "splits": parsed})
+            custom_splits.extend(parsed * count)
         if not custom_splits:
             raise SplitConfigFormError("custom_rows", "Add at least one custom split")
-        return {
+        if len(custom_splits) > _MAX_SPLITS:
+            raise too_many
+        plan: dict[str, object] = {
             "split_type": split_type,
             "split_value": split_value,
             "rolling_target_mps": None,
             "custom_splits": custom_splits,
             "targets_as": targets_as,
         }
+        if any("repeat" in item for item in layout):
+            plan["layout"] = layout
+        return plan
 
     rolling_target_mps = None
     if rolling_target_raw.strip():
@@ -599,15 +821,20 @@ def create_or_update_split_config(
     rolling_target: Annotated[str, Form()] = "",
     split_size: Annotated[list[str] | None, Form()] = None,
     split_target: Annotated[list[str] | None, Form()] = None,
+    entry_kind: Annotated[list[str] | None, Form()] = None,
+    entry_repeat: Annotated[list[str] | None, Form()] = None,
+    entry_rows: Annotated[list[str] | None, Form()] = None,
     overwrite: Annotated[bool, Form()] = False,
 ) -> Response:
+    def form_entries() -> list[_Entry]:
+        return _entries_from_form(
+            split_size or [], split_target or [], entry_kind, entry_repeat, entry_rows
+        )
+
     def _rerender(
         error: str, *, name_conflict: str | None = None, status_code: int = 400
     ) -> Response:
-        rows = [
-            _CustomRow(size=s, target=t)
-            for s, t in zip(split_size or [], split_target or [], strict=False)
-        ] or [_CustomRow(size="", target="")]
+        entries = form_entries() or [_Entry(rows=[_CustomRow(size="", target="")])]
         context: dict[str, object] = {
             "user": user,
             "config_id": config_id or None,
@@ -617,7 +844,7 @@ def create_or_update_split_config(
             "targets_as": targets_as,
             "plan_kind": plan_kind,
             "rolling_target": rolling_target,
-            "custom_rows": rows,
+            "custom_entries": entries,
             "error": error,
             "name_conflict": name_conflict,
         }
@@ -639,14 +866,13 @@ def create_or_update_split_config(
         return _rerender(str(exc))
 
     try:
-        plan_json = _build_plan_json(
+        plan_input = _build_plan_json(
             split_type=split_type,
             split_value_raw=split_value,
             targets_as=targets_as,
             plan_kind=plan_kind,
             rolling_target_raw=rolling_target,
-            split_sizes=split_size or [],
-            split_targets=split_target or [],
+            entries=form_entries(),
         )
     except SplitConfigFormError as exc:
         return _rerender(str(exc))
@@ -654,11 +880,11 @@ def create_or_update_split_config(
     # Reuse SplitPlanIn's own validation as the final boundary — same
     # checks as the JSON API, so a web-saved config can never be stricter
     # or looser than one saved from the phone (docs/SPLIT-CONFIGS-PLAN.md
-    # §1).
-    from app.api.v1.schemas import SplitPlanIn
+    # §1) — and its storage shape too.
+    from app.api.v1.schemas import SplitPlanIn, split_plan_in_to_json
 
     try:
-        SplitPlanIn.model_validate(plan_json)
+        plan_json = split_plan_in_to_json(SplitPlanIn.model_validate(plan_input))
     except ValidationError as exc:
         return _rerender(str(exc.errors()[0]["msg"]) if exc.errors() else "Invalid split plan")
 

@@ -212,6 +212,26 @@ class SplitPlanOut(BaseModel):
     targets_as: Literal["pace", "speed"]
 
 
+class SplitLayoutSplit(BaseModel):
+    """One single split in a saved config's editor layout (issue #233)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    split: tuple[float, float | None]
+
+
+class SplitLayoutRepeat(BaseModel):
+    """`repeat x [splits...]` in a saved config's editor layout (issue #233),
+    e.g. 5 x [3:00 @ 10 km/h, 2:00 @ 7 km/h]."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    repeat: int = Field(ge=1, le=SPLIT_CONFIG_MAX_CUSTOM_SPLITS)
+    splits: list[tuple[float, float | None]] = Field(
+        min_length=1, max_length=SPLIT_CONFIG_MAX_CUSTOM_SPLITS
+    )
+
+
 class SplitPlanIn(BaseModel):
     """A client-supplied split plan (issue #126) — the same five fields as
     SplitPlanOut/app.analysis.gpx_parser.SplitPlanData, but as an untrusted
@@ -232,6 +252,14 @@ class SplitPlanIn(BaseModel):
         default_factory=list, max_length=SPLIT_CONFIG_MAX_CUSTOM_SPLITS
     )
     targets_as: Literal["pace", "speed"] = "pace"
+    # How an editor groups custom_splits into repeat blocks (issue #233).
+    # custom_splits stays the expanded list that runs, so older apps and the
+    # analyzer never need this; when given it must expand to exactly
+    # custom_splits. A layout with no repeat block carries nothing the flat
+    # list doesn't, so it's normalised to None.
+    layout: list[SplitLayoutSplit | SplitLayoutRepeat] | None = Field(
+        default=None, max_length=SPLIT_CONFIG_MAX_CUSTOM_SPLITS
+    )
 
     @field_validator("custom_splits")
     @classmethod
@@ -256,6 +284,59 @@ class SplitPlanIn(BaseModel):
         if self.custom_splits and self.rolling_target_mps is not None:
             raise ValueError("rolling_target_mps must not be set when custom_splits is non-empty")
         return self
+
+    @model_validator(mode="after")
+    def _validate_layout(self) -> "SplitPlanIn":
+        if self.layout is None:
+            return self
+        if not any(isinstance(e, SplitLayoutRepeat) for e in self.layout):
+            self.layout = None
+            return self
+        if not self.custom_splits:
+            raise ValueError("layout must not be set for a rolling plan")
+        # Check the size arithmetically before expanding, so a huge repeat
+        # count can't allocate a huge list.
+        expanded_length = sum(
+            e.repeat * len(e.splits) if isinstance(e, SplitLayoutRepeat) else 1 for e in self.layout
+        )
+        if expanded_length != len(self.custom_splits) or (
+            expand_layout(self.layout) != list(self.custom_splits)
+        ):
+            raise ValueError("layout must expand to exactly custom_splits")
+        return self
+
+
+def split_plan_in_to_json(plan: SplitPlanIn) -> dict[str, object]:
+    """The JSON stored in SplitConfig.plan. `layout` is only written when the
+    plan has repeat blocks, so a flat plan is stored exactly as before."""
+    stored: dict[str, object] = {
+        "split_type": plan.split_type,
+        "split_value": plan.split_value,
+        "rolling_target_mps": plan.rolling_target_mps,
+        "custom_splits": [[size, target] for size, target in plan.custom_splits],
+        "targets_as": plan.targets_as,
+    }
+    if plan.layout is not None:
+        stored["layout"] = [
+            {"repeat": e.repeat, "splits": [[size, target] for size, target in e.splits]}
+            if isinstance(e, SplitLayoutRepeat)
+            else {"split": [e.split[0], e.split[1]]}
+            for e in plan.layout
+        ]
+    return stored
+
+
+def expand_layout(
+    layout: list[SplitLayoutSplit | SplitLayoutRepeat],
+) -> list[tuple[float, float | None]]:
+    """The flat custom_splits a layout stands for, in run order."""
+    expanded: list[tuple[float, float | None]] = []
+    for entry in layout:
+        if isinstance(entry, SplitLayoutRepeat):
+            expanded.extend(list(entry.splits) * entry.repeat)
+        else:
+            expanded.append(entry.split)
+    return expanded
 
 
 class SplitConfigOut(BaseModel):

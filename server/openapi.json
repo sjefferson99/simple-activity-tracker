@@ -1127,6 +1127,80 @@
         "title": "SplitConfigPatchRequest",
         "type": "object"
       },
+      "SplitLayoutRepeat": {
+        "description": "`repeat x [splits...]` in a saved config's editor layout (issue #233),\ne.g. 5 x [3:00 @ 10 km/h, 2:00 @ 7 km/h].",
+        "properties": {
+          "repeat": {
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Repeat",
+            "type": "integer"
+          },
+          "splits": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "type": "array"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Splits",
+            "type": "array"
+          }
+        },
+        "required": [
+          "repeat",
+          "splits"
+        ],
+        "title": "SplitLayoutRepeat",
+        "type": "object"
+      },
+      "SplitLayoutSplit": {
+        "description": "One single split in a saved config's editor layout (issue #233).",
+        "properties": {
+          "split": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            ],
+            "title": "Split",
+            "type": "array"
+          }
+        },
+        "required": [
+          "split"
+        ],
+        "title": "SplitLayoutSplit",
+        "type": "object"
+      },
       "SplitPlanIn": {
         "description": "A client-supplied split plan (issue #126) \u2014 the same five fields as\nSplitPlanOut/app.analysis.gpx_parser.SplitPlanData, but as an untrusted\nwrite-side model with real validation, used to create/update a\nSplitConfig. Unlike SplitPlanOut (built server-side from a parsed GPX,\nnever re-validated) this is the boundary that stops a malformed plan \u2014\nnegative sizes, an over-long custom list, both/neither of rolling vs\ncustom \u2014 from ever reaching the database. Mirrors mobile's\nSplitPlan.fromJson validation exactly (see\ndocs/SPLIT-CONFIGS-PLAN.md \u00a72.2).",
         "properties": {
@@ -1154,6 +1228,28 @@
             "maxItems": 50,
             "title": "Custom Splits",
             "type": "array"
+          },
+          "layout": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SplitLayoutSplit"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SplitLayoutRepeat"
+                    }
+                  ]
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layout"
           },
           "rolling_target_mps": {
             "anyOf": [
@@ -1551,7 +1647,7 @@
   },
   "info": {
     "title": "Simple Activity Tracker Server",
-    "version": "2"
+    "version": "3"
   },
   "openapi": "3.1.0",
   "paths": {

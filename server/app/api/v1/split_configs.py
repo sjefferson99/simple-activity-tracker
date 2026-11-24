@@ -22,6 +22,7 @@ from app.api.v1.schemas import (
     SplitConfigOut,
     SplitConfigPatchRequest,
     SplitPlanIn,
+    split_plan_in_to_json,
 )
 from app.auth.current_user import CurrentUser
 from app.auth.rate_limit import account_action_rate_limiter
@@ -37,13 +38,7 @@ def _client_ip(request: Request) -> str:
 
 
 def _plan_to_json(plan: SplitPlanIn) -> dict[str, object]:
-    return {
-        "split_type": plan.split_type,
-        "split_value": plan.split_value,
-        "rolling_target_mps": plan.rolling_target_mps,
-        "custom_splits": [[size, target] for size, target in plan.custom_splits],
-        "targets_as": plan.targets_as,
-    }
+    return split_plan_in_to_json(plan)
 
 
 def _config_out(config: SplitConfig) -> SplitConfigOut:

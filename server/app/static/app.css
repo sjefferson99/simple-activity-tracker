@@ -115,6 +115,24 @@ fieldset button:first-child { margin-top: 0; }
    their natural width. */
 .custom-split-row input[type="text"] { width: 8rem; flex: 0 0 auto; margin-bottom: 0; }
 .custom-split-row { margin-bottom: 0.75rem; }
+/* Buttons sharing a row with inputs (Remove, Delete repeat, Add split/Add
+   repeat) must not take the stacked-button margin above, or they sit lower
+   than their neighbours. A fixed-width label ("#1", "#17", "a") keeps every
+   row's inputs and Remove buttons in the same columns. */
+fieldset .toolbar button { margin-top: 0; }
+.custom-split-row > span:first-child { min-width: 2.25rem; }
+
+/* A repeat block (issue #233): its count and its own rows, boxed like the
+   phone's repeat card so it reads as one group. */
+.repeat-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin: 0 0 0.75rem;
+}
+.repeat-block > .toolbar:first-child { margin-bottom: 0.75rem; }
+.repeat-block label { margin: 0; }
+.repeat-block input.repeat-count { width: 4.5rem; margin-bottom: 0; }
 
 .activity-list-controls {
   justify-content: space-between;
