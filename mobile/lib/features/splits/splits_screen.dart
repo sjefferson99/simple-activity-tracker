@@ -391,8 +391,9 @@ class _PlanTypeSection extends StatelessWidget {
         Text(
           plan.isCustom
               ? 'A custom plan: each split below can have its own size and '
-                    'target. Once the plan ends, splits continue at the base '
-                    'size above with no target.'
+                    'target, and a repeat runs a group of splits several '
+                    'times (intervals). Once the plan ends, splits continue '
+                    'at the base size above with no target.'
               : 'A rolling plan: every split is the base size above, '
                     'optionally with one target that applies to all of them.',
           style: Theme.of(context).textTheme.bodySmall,
@@ -535,72 +536,141 @@ class _CustomPlanSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final unit = _targetUnit(plan);
+    final entries = plan.customEntries;
+    final total = plan.customSplits.length;
+    final firstSplit = plan.customSplits.first;
+    final last = plan.customSplits.last;
+
+    void selectEntries(List<PlanEntry> updated) =>
+        notifier.select(plan.copyWith(customEntries: updated));
+
+    void replaceEntry(int e, PlanEntry? updated) {
+      final next = [...entries];
+      if (updated == null) {
+        next.removeAt(e);
+      } else {
+        next[e] = updated;
+      }
+      selectEntries(next);
+    }
+
+    // "Apply target to all" sits on the plan's first row, whichever kind of
+    // entry that is.
+    final VoidCallback? applyFirstTargetToAll =
+        firstSplit.targetSpeedMps == null
+        ? null
+        : () {
+            PlannedSplit withTarget(PlannedSplit s) =>
+                s.copyWith(targetSpeedMps: firstSplit.targetSpeedMps);
+            selectEntries([
+              for (final entry in entries)
+                switch (entry) {
+                  SingleSplitEntry(:final split) => SingleSplitEntry(
+                    withTarget(split),
+                  ),
+                  RepeatBlock() => entry.copyWith(
+                    splits: [for (final s in entry.splits) withTarget(s)],
+                  ),
+                },
+            ]);
+          };
+
+    final rows = <Widget>[];
+    var position = 0; // 0-based flat index of the entry's first split
+    for (var e = 0; e < entries.length; e++) {
+      final entry = entries[e];
+      final isFirst = e == 0;
+      switch (entry) {
+        case SingleSplitEntry(:final split):
+          final index = position;
+          rows.add(
+            _CustomSplitRow(
+              key: ValueKey(index),
+              id: '$index',
+              label: '#${index + 1}',
+              split: split,
+              plan: plan,
+              unit: unit,
+              onChanged: (updated) =>
+                  replaceEntry(e, SingleSplitEntry(updated)),
+              onDelete: entries.length > 1 ? () => replaceEntry(e, null) : null,
+              onApplyTargetToAll: isFirst ? applyFirstTargetToAll : null,
+            ),
+          );
+        case RepeatBlock():
+          rows.add(
+            _RepeatBlockCard(
+              key: ValueKey('repeat_block-$e'),
+              blockIndex: e,
+              firstPosition: position,
+              block: entry,
+              plan: plan,
+              unit: unit,
+              onChanged: (updated) => replaceEntry(e, updated),
+              onDelete: entries.length > 1 ? () => replaceEntry(e, null) : null,
+              onApplyTargetToAll: isFirst ? applyFirstTargetToAll : null,
+            ),
+          );
+      }
+      position += entry.expand().length;
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            const Text('Number of splits'),
-            const SizedBox(width: 8),
-            SizedBox(
-              width: 64,
-              child: _CommittingTextField(
-                key: ValueKey(plan.customSplits.length),
-                initialValue: '${plan.customSplits.length}',
-                parse: (text) => int.tryParse(text)
-                    ?.let((v) => (v > 0 && v <= maxCustomSplits) ? v : null),
-                format: (v) => '$v',
-                onCommit: (count) => _changeCount(context, count),
+        // The count field resizes a flat list of splits; once the plan has
+        // a repeat block, "how many splits" is the blocks' business, so
+        // just show the expanded total against the cap.
+        if (plan.hasRepeatBlocks)
+          Text(
+            '$total of $maxCustomSplits splits after repeats',
+            key: const ValueKey('custom_plan_expanded_count'),
+          )
+        else
+          Row(
+            children: [
+              const Text('Number of splits'),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 64,
+                child: _CommittingTextField(
+                  key: ValueKey(plan.customSplits.length),
+                  initialValue: '${plan.customSplits.length}',
+                  parse: (text) => int.tryParse(text)
+                      ?.let((v) => (v > 0 && v <= maxCustomSplits) ? v : null),
+                  format: (v) => '$v',
+                  onCommit: (count) => _changeCount(context, count),
+                ),
               ),
+            ],
+          ),
+        const SizedBox(height: 12),
+        ...rows,
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: total >= maxCustomSplits
+                  ? null
+                  : () => selectEntries([...entries, SingleSplitEntry(last)]),
+              icon: const Icon(Icons.add),
+              label: const Text('Add split'),
+            ),
+            // A new block starts as 2 x [last split, last split]: the
+            // smallest block that's actually a repeat of a work/rest pair.
+            OutlinedButton.icon(
+              onPressed: total + 4 > maxCustomSplits
+                  ? null
+                  : () => selectEntries([
+                      ...entries,
+                      RepeatBlock(count: 2, splits: [last, last]),
+                    ]),
+              icon: const Icon(Icons.repeat),
+              label: const Text('Add repeat'),
             ),
           ],
-        ),
-        const SizedBox(height: 12),
-        for (var i = 0; i < plan.customSplits.length; i++)
-          _CustomSplitRow(
-            key: ValueKey(i),
-            index: i,
-            split: plan.customSplits[i],
-            plan: plan,
-            unit: unit,
-            onChanged: (updated) {
-              final splits = [...plan.customSplits];
-              splits[i] = updated;
-              notifier.select(plan.copyWith(customSplits: splits));
-            },
-            onDelete: plan.customSplits.length > 1
-                ? () {
-                    final splits = [...plan.customSplits]..removeAt(i);
-                    notifier.select(plan.copyWith(customSplits: splits));
-                  }
-                : null,
-            onApplyTargetToAll:
-                i == 0 && plan.customSplits[i].targetSpeedMps != null
-                ? () {
-                    final target = plan.customSplits[i].targetSpeedMps;
-                    final splits = [
-                      for (final s in plan.customSplits)
-                        s.copyWith(targetSpeedMps: target),
-                    ];
-                    notifier.select(plan.copyWith(customSplits: splits));
-                  }
-                : null,
-          ),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: plan.customSplits.length >= maxCustomSplits
-              ? null
-              : () {
-                  final last = plan.customSplits.isEmpty
-                      ? PlannedSplit(size: _rollingSizeInPlanUnits(plan.base))
-                      : plan.customSplits.last;
-                  notifier.select(
-                    plan.copyWith(customSplits: [...plan.customSplits, last]),
-                  );
-                },
-          icon: const Icon(Icons.add),
-          label: const Text('Add split'),
         ),
         const SizedBox(height: 12),
         _CustomPlanTotals(plan: plan),
@@ -686,8 +756,132 @@ class _CustomPlanTotals extends StatelessWidget {
   }
 }
 
+/// Issue #225: one `N x [split, split, ...]` entry of a custom plan, drawn
+/// as an outlined box holding its repeat count and its own split rows. The
+/// 50-split cap applies to the expanded plan, so the count and "Add split
+/// to repeat" both refuse anything that would push the total past it.
+class _RepeatBlockCard extends StatelessWidget {
+  final int blockIndex;
+
+  /// 0-based flat index of this block's first split in the expanded plan.
+  final int firstPosition;
+  final RepeatBlock block;
+  final SplitPlan plan;
+  final SpeedUnit unit;
+  final ValueChanged<RepeatBlock> onChanged;
+  final VoidCallback? onDelete;
+  final VoidCallback? onApplyTargetToAll;
+
+  const _RepeatBlockCard({
+    super.key,
+    required this.blockIndex,
+    required this.firstPosition,
+    required this.block,
+    required this.plan,
+    required this.unit,
+    required this.onChanged,
+    required this.onDelete,
+    required this.onApplyTargetToAll,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final total = plan.customSplits.length;
+    final others = total - block.count * block.splits.length;
+    final first = firstPosition + 1;
+    final lastPosition = firstPosition + block.count * block.splits.length;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.fromLTRB(8, 4, 0, 4),
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('Repeat'),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 48,
+                child: _CommittingTextField(
+                  key: ValueKey('repeat_count-$blockIndex-${block.count}'),
+                  initialValue: '${block.count}',
+                  parse: (text) => int.tryParse(text)?.let(
+                    (v) =>
+                        v >= 1 &&
+                            others + v * block.splits.length <= maxCustomSplits
+                        ? v
+                        : null,
+                  ),
+                  format: (v) => '$v',
+                  onCommit: (count) => onChanged(block.copyWith(count: count)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'times (splits #$first–#$lastPosition)',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+              if (onDelete != null)
+                IconButton(
+                  icon: const Icon(Icons.delete_sweep_outlined, size: 20),
+                  tooltip: 'Delete repeat',
+                  onPressed: onDelete,
+                ),
+            ],
+          ),
+          for (var j = 0; j < block.splits.length; j++)
+            _CustomSplitRow(
+              key: ValueKey('repeat_split-$blockIndex-$j'),
+              id: 'r$blockIndex.$j',
+              label: String.fromCharCode(0x61 + j % 26),
+              split: block.splits[j],
+              plan: plan,
+              unit: unit,
+              onChanged: (updated) {
+                final splits = [...block.splits];
+                splits[j] = updated;
+                onChanged(block.copyWith(splits: splits));
+              },
+              onDelete: block.splits.length > 1
+                  ? () {
+                      final splits = [...block.splits]..removeAt(j);
+                      onChanged(block.copyWith(splits: splits));
+                    }
+                  : null,
+              onApplyTargetToAll: j == 0 ? onApplyTargetToAll : null,
+            ),
+          TextButton.icon(
+            onPressed: total + block.count > maxCustomSplits
+                ? null
+                : () => onChanged(
+                    block.copyWith(
+                      splits: [...block.splits, block.splits.last],
+                    ),
+                  ),
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Add split to repeat'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CustomSplitRow extends StatelessWidget {
-  final int index;
+  /// Stable id for this row's field keys: the flat index for a single split
+  /// (`custom_size-3-…`), `r<block>.<split>` for a split inside a repeat.
+  final String id;
+
+  /// Shown at the row's start: `#4` for a single split, `a`/`b`/… inside a
+  /// repeat block.
+  final String label;
   final PlannedSplit split;
   final SplitPlan plan;
   final SpeedUnit unit;
@@ -697,7 +891,8 @@ class _CustomSplitRow extends StatelessWidget {
 
   const _CustomSplitRow({
     super.key,
-    required this.index,
+    required this.id,
+    required this.label,
     required this.split,
     required this.plan,
     required this.unit,
@@ -723,7 +918,7 @@ class _CustomSplitRow extends StatelessWidget {
               SizedBox(
                 width: 28,
                 child: Text(
-                  '#${index + 1}',
+                  label,
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
@@ -738,7 +933,7 @@ class _CustomSplitRow extends StatelessWidget {
                   // matched what was typed (a real bug found on-device: a
                   // custom split's size field silently reverted to an
                   // earlier value instead of the one just committed).
-                  key: ValueKey('custom_size-$index-${split.size}'),
+                  key: ValueKey('custom_size-$id-${split.size}'),
                   initialValue: isTimeKind
                       ? formatMinSec(
                           Duration(milliseconds: (split.size * 1000).round()),
@@ -771,7 +966,7 @@ class _CustomSplitRow extends StatelessWidget {
                 width: 80,
                 child: _CommittingTextField(
                   key: ValueKey(
-                    'custom_target-$index-${split.targetSpeedMps}-${unit.name}',
+                    'custom_target-$id-${split.targetSpeedMps}-${unit.name}',
                   ),
                   initialValue: split.targetSpeedMps != null
                       ? formatTargetForEditing(split.targetSpeedMps!, unit)

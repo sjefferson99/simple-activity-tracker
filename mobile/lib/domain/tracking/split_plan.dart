@@ -19,11 +19,16 @@ class PlannedSplit {
 
   const PlannedSplit({required this.size, this.targetSpeedMps});
 
-  PlannedSplit copyWith({double? size, double? targetSpeedMps, bool clearTarget = false}) =>
-      PlannedSplit(
-        size: size ?? this.size,
-        targetSpeedMps: clearTarget ? null : (targetSpeedMps ?? this.targetSpeedMps),
-      );
+  PlannedSplit copyWith({
+    double? size,
+    double? targetSpeedMps,
+    bool clearTarget = false,
+  }) => PlannedSplit(
+    size: size ?? this.size,
+    targetSpeedMps: clearTarget
+        ? null
+        : (targetSpeedMps ?? this.targetSpeedMps),
+  );
 
   Map<String, Object?> toJson() => {
     'size': size,
@@ -44,6 +49,96 @@ class PlannedSplit {
   @override
   int get hashCode => Object.hash(size, targetSpeedMps);
 }
+
+/// One entry of a custom plan as the editor lays it out (issue #225): a
+/// single split, or a [RepeatBlock] of several splits repeated N times.
+/// Entries only exist for editing: everything that runs, logs or uploads a
+/// plan reads the flat, expanded [SplitPlan.customSplits].
+sealed class PlanEntry {
+  const PlanEntry();
+
+  /// The flat splits this entry stands for, in run order.
+  List<PlannedSplit> expand();
+
+  Map<String, Object?> toJson();
+
+  /// Parses one persisted entry, or throws on malformed JSON (caught by
+  /// [SplitPlan.fromJson]).
+  static PlanEntry fromJson(Map<String, Object?> json) {
+    final repeat = json['repeat'];
+    if (repeat == null) {
+      return SingleSplitEntry(
+        PlannedSplit.fromJson(
+          Map<String, Object?>.from(json['split']! as Map<Object?, Object?>),
+        ),
+      );
+    }
+    return RepeatBlock(
+      count: repeat as int,
+      splits: [
+        for (final entry in json['splits']! as List<Object?>)
+          PlannedSplit.fromJson(
+            Map<String, Object?>.from(entry! as Map<Object?, Object?>),
+          ),
+      ],
+    );
+  }
+}
+
+/// A single split in the editor's layout.
+class SingleSplitEntry extends PlanEntry {
+  final PlannedSplit split;
+
+  const SingleSplitEntry(this.split);
+
+  @override
+  List<PlannedSplit> expand() => [split];
+
+  @override
+  Map<String, Object?> toJson() => {'split': split.toJson()};
+
+  @override
+  bool operator ==(Object other) =>
+      other is SingleSplitEntry && other.split == split;
+
+  @override
+  int get hashCode => split.hashCode;
+}
+
+/// `count x [splits...]`, e.g. 5 x [3:00 @ 10 km/h, 2:00 @ 7 km/h]
+/// (issue #225). [count] >= 1 and [splits] non-empty.
+class RepeatBlock extends PlanEntry {
+  final int count;
+  final List<PlannedSplit> splits;
+
+  const RepeatBlock({required this.count, required this.splits});
+
+  RepeatBlock copyWith({int? count, List<PlannedSplit>? splits}) =>
+      RepeatBlock(count: count ?? this.count, splits: splits ?? this.splits);
+
+  @override
+  List<PlannedSplit> expand() => [for (var i = 0; i < count; i++) ...splits];
+
+  @override
+  Map<String, Object?> toJson() => {
+    'repeat': count,
+    'splits': [for (final s in splits) s.toJson()],
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is RepeatBlock &&
+      other.count == count &&
+      _listEquals(other.splits, splits);
+
+  @override
+  int get hashCode => Object.hash(count, Object.hashAll(splits));
+}
+
+/// The flat split list [entries] expand to, in run order.
+List<PlannedSplit> expandPlanEntries(List<PlanEntry> entries) => [
+  for (final entry in entries) ...entry.expand(),
+];
 
 /// A run's full split configuration (issue #99): the split kind/size that
 /// was already configurable ([base]), plus optional targets and an optional
@@ -68,6 +163,13 @@ class SplitPlan {
   /// target once exhausted (see [sizeOf]/[targetOf]).
   final List<PlannedSplit> customSplits;
 
+  /// How the editor groups [customSplits] (issue #225): empty when the plan
+  /// is just a list of single splits (always the case for a plan from a
+  /// saved config or an older install), else entries whose expansion is
+  /// exactly [customSplits]. Local-only: never sent to the server or written
+  /// to the GPX. Read it through [customEntries].
+  final List<PlanEntry> customLayout;
+
   /// Whether targets are entered/displayed as pace (true) or speed (false).
   /// Display-only — targets are always stored as speed in m/s.
   final bool targetsAsPace;
@@ -76,6 +178,7 @@ class SplitPlan {
     required this.base,
     this.rollingTargetSpeedMps,
     this.customSplits = const [],
+    this.customLayout = const [],
     this.targetsAsPace = true,
   });
 
@@ -84,6 +187,15 @@ class SplitPlan {
   );
 
   bool get isCustom => customSplits.isNotEmpty;
+
+  /// The custom plan as the editor shows it: [customLayout] when it holds a
+  /// repeat block, else one [SingleSplitEntry] per custom split.
+  List<PlanEntry> get customEntries => customLayout.isNotEmpty
+      ? customLayout
+      : [for (final s in customSplits) SingleSplitEntry(s)];
+
+  /// Whether the custom plan contains at least one [RepeatBlock].
+  bool get hasRepeatBlocks => customLayout.any((e) => e is RepeatBlock);
 
   /// Number of splits explicitly planned for a custom plan (the "/6" in
   /// "Split 3/6"), or null for a rolling plan (which has no fixed count).
@@ -150,6 +262,8 @@ class SplitPlan {
     if (rollingTargetSpeedMps != null)
       'rollingTargetSpeedMps': rollingTargetSpeedMps,
     'customSplits': [for (final s in customSplits) s.toJson()],
+    if (customLayout.isNotEmpty)
+      'customLayout': [for (final e in customLayout) e.toJson()],
     'targetsAsPace': targetsAsPace,
   };
 
@@ -182,6 +296,7 @@ class SplitPlan {
         if (s.targetSpeedMps != null && s.targetSpeedMps! <= 0) return null;
       }
       if (customSplits.length > maxCustomSplits) return null;
+      final customLayout = _layoutFromJson(json['customLayout'], customSplits);
       final rollingTargetSpeedMps = (json['rollingTargetSpeedMps'] as num?)
           ?.toDouble();
       if (rollingTargetSpeedMps != null && rollingTargetSpeedMps <= 0) {
@@ -191,6 +306,7 @@ class SplitPlan {
         base: base,
         rollingTargetSpeedMps: rollingTargetSpeedMps,
         customSplits: customSplits,
+        customLayout: customLayout,
         targetsAsPace: json['targetsAsPace'] as bool? ?? true,
       );
     } catch (_) {
@@ -198,20 +314,76 @@ class SplitPlan {
     }
   }
 
+  /// The persisted editor layout, or empty when it's missing, malformed or
+  /// doesn't expand to exactly [customSplits]. The flat list is what runs,
+  /// so a bad layout only costs the grouping, never the plan itself.
+  static List<PlanEntry> _layoutFromJson(
+    Object? json,
+    List<PlannedSplit> customSplits,
+  ) {
+    if (json == null) return const [];
+    try {
+      final layout = [
+        for (final entry in json as List<Object?>)
+          PlanEntry.fromJson(
+            Map<String, Object?>.from(entry! as Map<Object?, Object?>),
+          ),
+      ];
+      for (final entry in layout) {
+        if (entry is RepeatBlock && (entry.count < 1 || entry.splits.isEmpty)) {
+          return const [];
+        }
+      }
+      if (!_listEquals(expandPlanEntries(layout), customSplits)) {
+        return const [];
+      }
+      return _normalizedLayout(layout);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Drops a layout with no repeat block, so a plan of single splits is
+  /// stored and compared the same way whether or not it came from entries.
+  static List<PlanEntry> _normalizedLayout(List<PlanEntry> entries) =>
+      entries.any((e) => e is RepeatBlock)
+      ? List.unmodifiable(entries)
+      : const [];
+
   SplitPlan copyWith({
     SplitPreference? base,
     double? rollingTargetSpeedMps,
     bool clearRollingTarget = false,
     List<PlannedSplit>? customSplits,
+    List<PlanEntry>? customEntries,
     bool? targetsAsPace,
-  }) => SplitPlan(
-    base: base ?? this.base,
-    rollingTargetSpeedMps: clearRollingTarget
-        ? null
-        : (rollingTargetSpeedMps ?? this.rollingTargetSpeedMps),
-    customSplits: customSplits ?? this.customSplits,
-    targetsAsPace: targetsAsPace ?? this.targetsAsPace,
-  );
+  }) {
+    // [customEntries] (the editor's grouped form) sets both the flat list
+    // and the layout; a bare [customSplits] replaces the plan with single
+    // splits, so any old grouping no longer applies.
+    assert(customSplits == null || customEntries == null);
+    final List<PlannedSplit> splits;
+    final List<PlanEntry> layout;
+    if (customEntries != null) {
+      splits = expandPlanEntries(customEntries);
+      layout = _normalizedLayout(customEntries);
+    } else if (customSplits != null) {
+      splits = customSplits;
+      layout = const [];
+    } else {
+      splits = this.customSplits;
+      layout = customLayout;
+    }
+    return SplitPlan(
+      base: base ?? this.base,
+      rollingTargetSpeedMps: clearRollingTarget
+          ? null
+          : (rollingTargetSpeedMps ?? this.rollingTargetSpeedMps),
+      customSplits: splits,
+      customLayout: layout,
+      targetsAsPace: targetsAsPace ?? this.targetsAsPace,
+    );
+  }
 
   @override
   bool operator ==(Object other) =>
@@ -219,6 +391,7 @@ class SplitPlan {
       other.base == base &&
       other.rollingTargetSpeedMps == rollingTargetSpeedMps &&
       _listEquals(other.customSplits, customSplits) &&
+      _listEquals(other.customLayout, customLayout) &&
       other.targetsAsPace == targetsAsPace;
 
   @override
@@ -226,11 +399,12 @@ class SplitPlan {
     base,
     rollingTargetSpeedMps,
     Object.hashAll(customSplits),
+    Object.hashAll(customLayout),
     targetsAsPace,
   );
 }
 
-bool _listEquals(List<PlannedSplit> a, List<PlannedSplit> b) {
+bool _listEquals<T>(List<T> a, List<T> b) {
   if (a.length != b.length) return false;
   for (var i = 0; i < a.length; i++) {
     if (a[i] != b[i]) return false;
