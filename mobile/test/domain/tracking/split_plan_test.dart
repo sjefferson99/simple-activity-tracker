@@ -258,6 +258,12 @@ void main() {
         [
           {'repeat': 'x'},
         ],
+        [
+          {
+            'repeat': 1000000000,
+            'splits': [warm.toJson()],
+          },
+        ],
       ]) {
         final json = const SplitPlan(base: time, customSplits: [warm]).toJson()
           ..['customLayout'] = bad;

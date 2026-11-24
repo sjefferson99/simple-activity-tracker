@@ -840,7 +840,7 @@ class _RepeatBlockCard extends StatelessWidget {
             _CustomSplitRow(
               key: ValueKey('repeat_split-$blockIndex-$j'),
               id: 'r$blockIndex.$j',
-              label: String.fromCharCode(0x61 + j % 26),
+              label: j < 26 ? String.fromCharCode(0x61 + j) : '${j + 1}',
               split: block.splits[j],
               plan: plan,
               unit: unit,

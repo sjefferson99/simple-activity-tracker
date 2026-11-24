@@ -329,11 +329,19 @@ class SplitPlan {
             Map<String, Object?>.from(entry! as Map<Object?, Object?>),
           ),
       ];
+      var expandedLength = 0;
       for (final entry in layout) {
-        if (entry is RepeatBlock && (entry.count < 1 || entry.splits.isEmpty)) {
-          return const [];
+        switch (entry) {
+          case RepeatBlock(:final count, :final splits):
+            if (count < 1 || splits.isEmpty) return const [];
+            expandedLength += count * splits.length;
+          case SingleSplitEntry():
+            expandedLength += 1;
         }
       }
+      // Check the size before expanding, so a corrupt huge repeat count
+      // can't allocate a huge list.
+      if (expandedLength != customSplits.length) return const [];
       if (!_listEquals(expandPlanEntries(layout), customSplits)) {
         return const [];
       }
