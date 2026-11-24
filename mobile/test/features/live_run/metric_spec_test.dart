@@ -515,6 +515,71 @@ void main() {
       expect(value, '0:20');
     });
 
+    // Issue #192: a countdown rounds up, so a 5:00 split starts at 5:00 (not
+    // 4:59) and reads 0:00 only at the boundary.
+    LiveMetrics fiveMinuteSplitAt(Duration splitElapsed) => LiveMetrics(
+      elapsed: splitElapsed,
+      distanceMeters: 1,
+      avgSpeedMps: 2.5,
+      completedSplits: const [],
+      currentSplitElapsed: splitElapsed,
+      currentSplitDistanceMeters: 1,
+      currentSplit: const CurrentSplitInfo(
+        index: 1,
+        plannedCount: null,
+        sizeKind: SplitSizeKind.durationSeconds,
+        size: 300,
+        targetSpeedMps: null,
+      ),
+    );
+
+    test('time-kind: shows the full split size just after the split starts', () {
+      final spec = _specFor('split_remaining', ActivityMode.running);
+      final value = spec.valueOf(
+        fiveMinuteSplitAt(const Duration(milliseconds: 300)),
+        null,
+        SpeedUnit.kmh,
+      );
+      expect(value, '5:00');
+    });
+
+    test('time-kind: reads 0:01 in the final second and 0:00 at the boundary', () {
+      final spec = _specFor('split_remaining', ActivityMode.running);
+      expect(
+        spec.valueOf(
+          fiveMinuteSplitAt(
+            const Duration(minutes: 4, seconds: 59, milliseconds: 500),
+          ),
+          null,
+          SpeedUnit.kmh,
+        ),
+        '0:01',
+      );
+      expect(
+        spec.valueOf(
+          fiveMinuteSplitAt(const Duration(minutes: 5)),
+          null,
+          SpeedUnit.kmh,
+        ),
+        '0:00',
+      );
+    });
+
+    test('distance-kind: the ETA rounds up too', () {
+      final spec = _specFor('split_remaining', ActivityMode.running);
+      // 1km split, 300m covered in 100s => 3 m/s, 700m left => 233.33s => 3:54.
+      final metrics = LiveMetrics(
+        elapsed: const Duration(seconds: 100),
+        distanceMeters: 300,
+        avgSpeedMps: 3,
+        completedSplits: const [],
+        currentSplitElapsed: const Duration(seconds: 100),
+        currentSplitDistanceMeters: 300,
+        currentSplit: _defaultCurrentSplit,
+      );
+      expect(spec.valueOf(metrics, null, SpeedUnit.kmh), contains('3:54'));
+    });
+
     test('time-kind: never goes negative once past the split boundary', () {
       final spec = _specFor('split_remaining', ActivityMode.running);
       final metrics = LiveMetrics(
