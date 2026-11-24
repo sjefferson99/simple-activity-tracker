@@ -327,8 +327,8 @@ A scrollable `ListView` (this screen may legitimately be long), sections top to 
      The grouping is kept locally in `SplitPlan.customLayout` (persisted with the plan,
      dropped if it doesn't expand to exactly `customSplits`). The 50-split cap applies to
      the expanded list; once a block exists, `Number of splits` becomes a read-only
-     `N of 50 splits after repeats`. Saved configs (#126) still store the flat list, so a
-     plan loaded from one shows single rows (storing the grouping there is a follow-up).
+     `N of 50 splits after repeats`. Saved configs (#126) keep the grouping as an optional
+     `layout` on servers at API level 3+ (issue #233, docs/SPLIT-CONFIGS-PLAN.md §2.2).
 7. Settings keeps a `ListTile("Splits", subtitle: summary, trailing chevron)` that pushes
    the same screen, and loses `_SplitPreferenceSection` entirely.
 

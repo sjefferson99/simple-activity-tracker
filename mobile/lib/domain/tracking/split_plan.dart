@@ -164,10 +164,11 @@ class SplitPlan {
   final List<PlannedSplit> customSplits;
 
   /// How the editor groups [customSplits] (issue #225): empty when the plan
-  /// is just a list of single splits (always the case for a plan from a
-  /// saved config or an older install), else entries whose expansion is
-  /// exactly [customSplits]. Local-only: never sent to the server or written
-  /// to the GPX. Read it through [customEntries].
+  /// is just a list of single splits (always the case for a plan from an
+  /// older install, or a saved config from an older server), else entries whose expansion is
+  /// exactly [customSplits]. Never written to the GPX or the upload; a saved
+  /// config carries it as `layout` on servers at API level 3+ (issue #233).
+  /// Read it through [customEntries].
   final List<PlanEntry> customLayout;
 
   /// Whether targets are entered/displayed as pace (true) or speed (false).
@@ -329,26 +330,37 @@ class SplitPlan {
             Map<String, Object?>.from(entry! as Map<Object?, Object?>),
           ),
       ];
-      var expandedLength = 0;
-      for (final entry in layout) {
-        switch (entry) {
-          case RepeatBlock(:final count, :final splits):
-            if (count < 1 || splits.isEmpty) return const [];
-            expandedLength += count * splits.length;
-          case SingleSplitEntry():
-            expandedLength += 1;
-        }
-      }
-      // Check the size before expanding, so a corrupt huge repeat count
-      // can't allocate a huge list.
-      if (expandedLength != customSplits.length) return const [];
-      if (!_listEquals(expandPlanEntries(layout), customSplits)) {
-        return const [];
-      }
-      return _normalizedLayout(layout);
+      return validLayout(layout, customSplits);
     } catch (_) {
       return const [];
     }
+  }
+
+  /// [layout] normalised for use as [customLayout], or empty when it
+  /// doesn't expand to exactly [customSplits] (or has no repeat block). Used
+  /// for both the local copy and a saved config's layout from the server
+  /// (issue #233): a bad layout only costs the grouping, never the plan.
+  static List<PlanEntry> validLayout(
+    List<PlanEntry> layout,
+    List<PlannedSplit> customSplits,
+  ) {
+    var expandedLength = 0;
+    for (final entry in layout) {
+      switch (entry) {
+        case RepeatBlock(:final count, :final splits):
+          if (count < 1 || splits.isEmpty) return const [];
+          expandedLength += count * splits.length;
+        case SingleSplitEntry():
+          expandedLength += 1;
+      }
+    }
+    // Check the size before expanding, so a corrupt huge repeat count
+    // can't allocate a huge list.
+    if (expandedLength != customSplits.length) return const [];
+    if (!_listEquals(expandPlanEntries(layout), customSplits)) {
+      return const [];
+    }
+    return _normalizedLayout(layout);
   }
 
   /// Drops a layout with no repeat block, so a plan of single splits is

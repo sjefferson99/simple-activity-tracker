@@ -146,6 +146,19 @@ at least sane defaults when fields are omitted. Reject with 422 (the
 existing `{"error": {"code","message"}}` contract) rather than silently
 coercing — a malformed config must never save partially.
 
+**Repeat groups (issue #233, API level 3).** A plan may also carry an
+optional `layout`, the editor's grouping of `custom_splits` into single
+splits and repeat blocks:
+`[{"split": [600, null]}, {"repeat": 5, "splits": [[180, 2.78], [120, 1.94]]}]`.
+`custom_splits` stays the expanded list that runs, so older apps, the GPX and
+the analyzer never need the layout. The server rejects (422) a layout that
+doesn't expand to exactly `custom_splits`, and stores none for a layout
+without a repeat block. The 50-split cap applies to the expanded list. The web
+editor adds, edits and deletes blocks. The phone sends the layout only to a
+level-3+ server; an older one gets the flat list, and the phone says the
+grouping wasn't kept. A config read from the server applies its layout when
+it's valid, else falls back to single splits.
+
 ### 2.3 Repository (`app/repositories/split_configs.py`, protocol + SQLAlchemy
 impl, same split as every other repository in `app/repositories/`)
 

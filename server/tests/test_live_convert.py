@@ -337,3 +337,22 @@ def test_a_cycling_conversion_has_no_split_plan(app_client, auth_headers):
     gpx = app_client.get(f"/api/v1/activities/{activity_id}/gpx", headers=auth_headers).content
     assert parse_split_plan(gpx) is None
     assert b"split_" not in gpx
+
+
+def test_live_session_does_not_store_a_repeat_layout(app_client, auth_headers):
+    # Issue #233: SplitPlanIn now carries an optional saved-config layout; a
+    # live session keeps only the flat plan, as before.
+    plan = {
+        **CUSTOM_PLAN,
+        "custom_splits": [[400, 3.5], [400, 3.5]],
+        "layout": [{"repeat": 2, "splits": [[400, 3.5]]}],
+    }
+    _start(app_client, auth_headers, split_plan=plan)
+    from app.db import get_session_factory
+    from app.models.live import LiveSession
+
+    with get_session_factory()() as session:
+        live = session.query(LiveSession).one()
+        assert live.split_plan is not None
+        assert "layout" not in live.split_plan
+        assert live.split_plan["custom_splits"] == [[400.0, 3.5], [400.0, 3.5]]

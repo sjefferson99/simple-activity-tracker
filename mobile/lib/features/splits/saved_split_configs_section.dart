@@ -7,6 +7,7 @@ import '../../core/api/dto/split_config_dto.dart';
 import '../../core/auth/auth_state.dart';
 import '../../core/auth/auth_state_controller.dart';
 import '../../core/tracking/split_plan_controller.dart';
+import '../../core/version/api_compat.dart';
 import '../../domain/tracking/split_plan.dart';
 import '../../domain/tracking/split_preference.dart';
 import '../settings/settings_screen.dart';
@@ -183,6 +184,19 @@ class _LoadFromSavedList extends ConsumerWidget {
   }
 }
 
+/// The server's API level, decided per save (issue #233). If it can't be
+/// fetched, assume level 0 and send the flat plan every server accepts.
+Future<int> _serverApiLevel(ApiClient api, String baseUrl, String token) async {
+  try {
+    final info = await api.getServerInfo(baseUrl: baseUrl, token: token);
+    return info.apiLevel;
+  } on ApiUnauthorizedException {
+    rethrow;
+  } on ApiException {
+    return kLegacyServerApiLevel;
+  }
+}
+
 class _SaveAsButton extends ConsumerStatefulWidget {
   const _SaveAsButton();
 
@@ -252,21 +266,28 @@ class _SaveAsButtonState extends ConsumerState<_SaveAsButton> {
         throw StateError('Not signed in');
       }
       final plan = ref.read(splitPlanControllerProvider);
-      await ref
-          .read(apiClientProvider)
-          .saveSplitConfig(
-            baseUrl: baseUrl,
-            token: token,
-            request: SplitConfigSaveRequestDto(
-              name: name,
-              plan: plan,
-              overwrite: overwrite,
-            ),
-          );
+      final api = ref.read(apiClientProvider);
+      final request = SplitConfigSaveRequestDto(
+        name: name,
+        plan: plan,
+        overwrite: overwrite,
+        serverApiLevel: plan.hasRepeatBlocks
+            ? await _serverApiLevel(api, baseUrl, token)
+            : kLegacyServerApiLevel,
+      );
+      await api.saveSplitConfig(
+        baseUrl: baseUrl,
+        token: token,
+        request: request,
+      );
       ref.invalidate(_savedSplitConfigsProvider);
       if (context.mounted) {
+        // An older server keeps the splits but not how they're grouped.
+        final note = plan.hasRepeatBlocks && !request.sendsLayout
+            ? ' (without its repeat groups: this server is too old to store them)'
+            : '';
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Saved "$name"')));
+            .showSnackBar(SnackBar(content: Text('Saved "$name"$note')));
       }
     } on ApiRejectedException catch (e) {
       if (e.statusCode == 409 && context.mounted) {
@@ -295,7 +316,9 @@ class _SaveAsButtonState extends ConsumerState<_SaveAsButton> {
         }
       } else if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save: ${_describeConfigsError(e)}')),
+          SnackBar(
+            content: Text('Could not save: ${_describeConfigsError(e)}'),
+          ),
         );
       }
     } on Object catch (e) {
