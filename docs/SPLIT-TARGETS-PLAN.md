@@ -320,6 +320,15 @@ A scrollable `ListView` (this screen may legitimately be long), sections top to 
      `_SplitValueField` pattern. Delete icon per row; `Add split` button at the bottom.
    - `Apply target to all` next to the first row's target — a common workout has one
      target.
+   - **Repeat blocks** (issue #225): `Add repeat` appends a boxed `Repeat [N] times` block
+     of its own split rows (`a`, `b`, …), e.g. `5 × [3:00 @ 10 km/h, 2:00 @ 7 km/h]`.
+     Blocks are editor-only: the plan is expanded into the flat `customSplits` that the
+     engine, GPX (`sat:split_plan`) and upload already use, so nothing on the wire changes.
+     The grouping is kept locally in `SplitPlan.customLayout` (persisted with the plan,
+     dropped if it doesn't expand to exactly `customSplits`). The 50-split cap applies to
+     the expanded list; once a block exists, `Number of splits` becomes a read-only
+     `N of 50 splits after repeats`. Saved configs (#126) still store the flat list, so a
+     plan loaded from one shows single rows (storing the grouping there is a follow-up).
 7. Settings keeps a `ListTile("Splits", subtitle: summary, trailing chevron)` that pushes
    the same screen, and loses `_SplitPreferenceSection` entirely.
 

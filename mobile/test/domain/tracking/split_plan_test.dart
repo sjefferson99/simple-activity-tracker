@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:simple_activity_tracker/core/units/units.dart' show DistanceUnit;
+import 'package:simple_activity_tracker/core/units/units.dart'
+    show DistanceUnit;
 import 'package:simple_activity_tracker/domain/tracking/split_plan.dart';
 import 'package:simple_activity_tracker/domain/tracking/split_preference.dart';
 
@@ -74,10 +75,13 @@ void main() {
       expect(plan.targetOf(2), isNull);
     });
 
-    test('targetOf is null once the plan is exhausted (roll-on, no target)', () {
-      expect(plan.targetOf(3), isNull);
-      expect(plan.targetOf(100), isNull);
-    });
+    test(
+      'targetOf is null once the plan is exhausted (roll-on, no target)',
+      () {
+        expect(plan.targetOf(3), isNull);
+        expect(plan.targetOf(100), isNull);
+      },
+    );
 
     test('gpxPlanValue encodes size@target, omitting target when absent', () {
       expect(plan.gpxPlanValue, '90@2.222;60@1.667;120');
@@ -172,6 +176,112 @@ void main() {
       );
       final cleared = plan.copyWith(clearRollingTarget: true);
       expect(cleared.rollingTargetSpeedMps, isNull);
+    });
+  });
+
+  group('repeat blocks (issue #225)', () {
+    const warm = PlannedSplit(size: 300, targetSpeedMps: 6 / 3.6);
+    const work = PlannedSplit(size: 180, targetSpeedMps: 10 / 3.6);
+    const rest = PlannedSplit(size: 120, targetSpeedMps: 7 / 3.6);
+    const time = SplitPreference(kind: SplitKind.timeMin, value: 1);
+    final entries = <PlanEntry>[
+      const SingleSplitEntry(warm),
+      const RepeatBlock(count: 5, splits: [work, rest]),
+      const SingleSplitEntry(warm),
+    ];
+
+    test('customEntries expand into the flat customSplits', () {
+      final plan = const SplitPlan(base: time).copyWith(customEntries: entries);
+      expect(plan.customSplits, [
+        warm,
+        for (var i = 0; i < 5; i++) ...[work, rest],
+        warm,
+      ]);
+      expect(plan.plannedCount, 12);
+      expect(plan.hasRepeatBlocks, isTrue);
+      expect(plan.customEntries, entries);
+      expect(plan.targetOf(2), rest.targetSpeedMps);
+      expect(plan.sizeOf(11), 300);
+    });
+
+    test('GPX plan value is the expanded list, unchanged in format', () {
+      final plan = const SplitPlan(base: time).copyWith(
+        customEntries: const [
+          RepeatBlock(count: 2, splits: [PlannedSplit(size: 60), work]),
+        ],
+      );
+      expect(
+        plan.gpxPlanValue,
+        '60;180@2.7777777777777777;60;180@2.7777777777777777',
+      );
+    });
+
+    test('a layout of only single splits is not kept', () {
+      final plan = const SplitPlan(base: time).copyWith(
+        customEntries: const [SingleSplitEntry(warm), SingleSplitEntry(work)],
+      );
+      expect(plan.customLayout, isEmpty);
+      expect(plan.toJson().containsKey('customLayout'), isFalse);
+      expect(plan, const SplitPlan(base: time, customSplits: [warm, work]));
+    });
+
+    test('replacing customSplits drops the grouping', () {
+      final plan = const SplitPlan(base: time).copyWith(customEntries: entries);
+      final flat = plan.copyWith(customSplits: const [warm]);
+      expect(flat.hasRepeatBlocks, isFalse);
+      expect(flat.customEntries, const [SingleSplitEntry(warm)]);
+      // Other edits keep it.
+      expect(plan.copyWith(targetsAsPace: false).customLayout, entries);
+    });
+
+    test('round-trips through JSON', () {
+      final plan = const SplitPlan(base: time).copyWith(customEntries: entries);
+      expect(SplitPlan.fromJson(plan.toJson()), plan);
+    });
+
+    test('a layout that does not match customSplits is ignored, plan kept', () {
+      final json = const SplitPlan(base: time)
+          .copyWith(customEntries: entries)
+          .toJson();
+      json['customSplits'] = [warm.toJson()];
+      final parsed = SplitPlan.fromJson(json)!;
+      expect(parsed.customSplits, [warm]);
+      expect(parsed.customLayout, isEmpty);
+    });
+
+    test('a malformed layout is ignored, plan kept', () {
+      for (final bad in <Object?>[
+        'nonsense',
+        [
+          {'repeat': 0, 'splits': <Object?>[]},
+        ],
+        [
+          {'repeat': 'x'},
+        ],
+        [
+          {
+            'repeat': 1000000000,
+            'splits': [warm.toJson()],
+          },
+        ],
+      ]) {
+        final json = const SplitPlan(base: time, customSplits: [warm]).toJson()
+          ..['customLayout'] = bad;
+        final parsed = SplitPlan.fromJson(json)!;
+        expect(parsed.customSplits, [warm], reason: '$bad');
+        expect(parsed.customLayout, isEmpty, reason: '$bad');
+      }
+    });
+
+    test('the 50-split cap applies to the expanded list', () {
+      final json = const SplitPlan(base: time)
+          .copyWith(
+            customEntries: const [
+              RepeatBlock(count: 26, splits: [work, rest]),
+            ],
+          )
+          .toJson();
+      expect(SplitPlan.fromJson(json), isNull);
     });
   });
 
