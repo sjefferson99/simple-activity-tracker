@@ -261,8 +261,8 @@ def _build_preview(
 ) -> _Preview:
     """Best-effort: an unparseable field just leaves its estimate blank
     rather than erroring — reporting validation errors is Save's job. One
-    row per editor row; a repeat block's rows count `repeat` times in the
-    totals."""
+    row per split as it will run: a repeat block is listed in full,
+    numbered as if every repetition had been typed out."""
     distance_unit = "mi" if split_type == "distance_mi" else "km"
     is_time = split_type == "time_min"
     preview = _Preview(
@@ -615,7 +615,11 @@ def add_custom_row(
         entries = [e for e in entries if e.rows]
     elif remove_entry is not None and 0 <= remove_entry < len(entries):
         entries.pop(remove_entry)
-    elif add_to_block is not None and 0 <= add_to_block < len(entries):
+    elif (
+        add_to_block is not None
+        and 0 <= add_to_block < len(entries)
+        and entries[add_to_block].is_repeat
+    ):
         entries[add_to_block].rows.append(_CustomRow(size="", target=""))
     elif row_action == "add":
         entries.append(_Entry(rows=[_CustomRow(size="", target="")]))

@@ -62,7 +62,11 @@ def put_live_session(
     _require_rate_limit(user.id)
     repo = SqlAlchemyLiveSessionRepository(session)
     live = repo.get_for_user(user.id, client_activity_id)
-    split_plan = body.split_plan.model_dump(mode="json") if body.split_plan else None
+    # A saved config's repeat-block layout (issue #233) means nothing to a
+    # live run, which only ever needs the flat custom_splits.
+    split_plan = (
+        body.split_plan.model_dump(mode="json", exclude={"layout"}) if body.split_plan else None
+    )
     if live is None:
         # Opportunistic retention sweep: cheap (indexed on last_update_at)
         # and runs at most once per started activity.
