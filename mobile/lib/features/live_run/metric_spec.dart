@@ -169,7 +169,7 @@ final MetricSpec _remainingSpec = MetricSpec(
         final remaining =
             Duration(milliseconds: (split.size * 1000).round()) -
             metrics.currentSplitElapsed;
-        return formatDuration(remaining.isNegative ? Duration.zero : remaining);
+        return formatCountdown(remaining);
       case SplitSizeKind.distanceMeters:
         final remainingMeters = split.size - metrics.currentSplitDistanceMeters;
         if (remainingMeters <= 0) {
@@ -184,7 +184,7 @@ final MetricSpec _remainingSpec = MetricSpec(
           return '$distanceText\n--:--';
         }
         final etaSeconds = remainingMeters / avgSpeed;
-        return '$distanceText\n${formatDuration(Duration(milliseconds: (etaSeconds * 1000).round()))}';
+        return '$distanceText\n${formatCountdown(Duration(milliseconds: (etaSeconds * 1000).round()))}';
     }
   },
 );

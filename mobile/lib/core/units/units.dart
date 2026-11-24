@@ -50,6 +50,20 @@ String formatDuration(Duration duration) {
   return hours > 0 ? '$hours:$mm:$ss' : '$mm:$ss';
 }
 
+/// Formats time left on a countdown like [formatDuration], but rounds any
+/// fraction of a second **up** (issue #192): 4:59.7 left reads 5:00, so a
+/// 5:00 split starts at 5:00 and reads 0:00 only at the boundary. Negative
+/// durations read 0:00. Clocks counting up (the Time tile, split times)
+/// keep [formatDuration]'s cut-down so splits still add up to Time (#161).
+String formatCountdown(Duration remaining) {
+  if (remaining <= Duration.zero) return formatDuration(Duration.zero);
+  final micros = remaining.inMicroseconds;
+  final wholeSeconds =
+      (micros + Duration.microsecondsPerSecond - 1) ~/
+      Duration.microsecondsPerSecond;
+  return formatDuration(Duration(seconds: wholeSeconds));
+}
+
 /// Whole-second times for a list of consecutive splits, chosen so they add
 /// up exactly to the whole-second running total (issue #161). Each split
 /// shown on its own would lose its fraction of a second, so a list of them
