@@ -96,6 +96,10 @@ class LiveRunController extends Notifier<LiveRunState> {
   // or verdict-change transition. Reset to null at the start of every run so
   // a cue can never fire comparing across two different runs.
   LiveMetrics? _previousMetricsForAudio;
+  // The split time at which the current split's last verdict cue fired, so
+  // an off-target verdict can repeat every minute (issue #201). Cleared on
+  // every split change and run start/stop.
+  Duration? _lastVerdictCueElapsed;
   SplitAudioSettings? _audioSettings;
 
   // The split in progress's live verdict, with hysteresis (issue #154) —
@@ -183,6 +187,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     await ref.read(splitAudioSettingsControllerProvider.notifier).ensureLoaded();
     _audioSettings = ref.read(splitAudioSettingsControllerProvider);
     _previousMetricsForAudio = null;
+    _lastVerdictCueElapsed = null;
     _splitVerdictTracker.reset();
     // Shares _runClock, so splits are timed on exactly the clock the Time
     // tile shows and pause() stops (issue #161).
@@ -319,6 +324,7 @@ class LiveRunController extends Notifier<LiveRunState> {
     _splitPlan = null;
     _audioSettings = null;
     _previousMetricsForAudio = null;
+    _lastVerdictCueElapsed = null;
     _splitVerdictTracker.reset();
 
     state = LiveRunFinished(
@@ -536,8 +542,12 @@ class LiveRunController extends Notifier<LiveRunState> {
     final cue = detectSplitAudioCue(
       previous: _previousMetricsForAudio,
       current: metrics,
+      lastVerdictCueElapsed: _lastVerdictCueElapsed,
     );
     if (cue == null) return;
+    _lastVerdictCueElapsed = cue.kind == SplitAudioCueKind.verdict
+        ? metrics.currentSplitElapsed
+        : null;
 
     final audio = ref.read(splitAudioServiceProvider);
     switch (cue.kind) {

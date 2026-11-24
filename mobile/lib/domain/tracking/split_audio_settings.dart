@@ -14,7 +14,8 @@ class SplitAudioSettings {
   final bool beepOnSplitChange;
 
   /// Beep pattern (2/3/1-long) on a target-verdict transition — too fast,
-  /// too slow, or back on target. Meaningless with no target configured, but
+  /// too slow, or back on target. Too fast/too slow repeat every minute while
+  /// they last (issue #201). Meaningless with no target configured, but
   /// harmless to leave on; the cue simply never fires without a target since
   /// [splitVerdict] itself returns null with no target.
   final bool beepOnVerdictChange;
@@ -31,7 +32,8 @@ class SplitAudioSettings {
   /// Speak the too-fast/too-slow verdict, by how much, and the target being
   /// judged against (e.g. "Pace is 2 minutes per kilometre too slow, target
   /// pace is 5 minutes per kilometre."), or "Back on target." with no target
-  /// restated.
+  /// restated. Too fast/too slow repeat every minute while they last, like
+  /// the beeps (issue #201).
   final bool announceVerdictCorrection;
 
   const SplitAudioSettings({

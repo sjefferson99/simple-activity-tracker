@@ -384,4 +384,64 @@ void main() {
       },
     );
   });
+
+  group('detectSplitAudioCue repeats (issue #201)', () {
+    LiveMetrics at(Duration elapsed, double factor) => _metrics(
+      currentSplit: _split(index: 1, targetSpeedMps: target),
+      currentSplitElapsed: elapsed,
+      currentSplitDistanceMeters: elapsed.inSeconds * target * factor,
+    );
+
+    const lastCue = pastGrace;
+    final due = lastCue + splitVerdictRepeatInterval;
+    final justBefore = due - const Duration(seconds: 1);
+
+    for (final (factor, verdict) in [
+      (1.2, SplitVerdict.tooFast),
+      (0.8, SplitVerdict.tooSlow),
+    ]) {
+      test('$verdict repeats once the interval has passed since the last cue', () {
+        final cue = detectSplitAudioCue(
+          previous: at(justBefore, factor),
+          current: at(due, factor),
+          lastVerdictCueElapsed: lastCue,
+        );
+        expect(cue!.kind, SplitAudioCueKind.verdict);
+        expect(cue.verdict, verdict);
+        expect(cue.avgSpeedMps, closeTo(target * factor, 1e-9));
+      });
+
+      test('$verdict does not repeat before the interval', () {
+        expect(
+          detectSplitAudioCue(
+            previous: at(justBefore - const Duration(seconds: 1), factor),
+            current: at(justBefore, factor),
+            lastVerdictCueElapsed: lastCue,
+          ),
+          isNull,
+        );
+      });
+    }
+
+    test('back on target is never repeated', () {
+      expect(
+        detectSplitAudioCue(
+          previous: at(justBefore, 1.0),
+          current: at(due, 1.0),
+          lastVerdictCueElapsed: lastCue,
+        ),
+        isNull,
+      );
+    });
+
+    test('no repeat without a previous verdict cue in this split', () {
+      expect(
+        detectSplitAudioCue(
+          previous: at(justBefore, 1.2),
+          current: at(due, 1.2),
+        ),
+        isNull,
+      );
+    });
+  });
 }
