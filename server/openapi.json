@@ -1025,6 +1025,18 @@
       },
       "SplitConfigCreateRequest": {
         "properties": {
+          "folder": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder"
+          },
           "name": {
             "maxLength": 200,
             "minLength": 1,
@@ -1045,6 +1057,41 @@
           "plan"
         ],
         "title": "SplitConfigCreateRequest",
+        "type": "object"
+      },
+      "SplitConfigImportResponse": {
+        "description": "Result of importing a split config file (issue #143).",
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "renamed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Renamed",
+            "type": "array"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "renamed",
+          "errors"
+        ],
+        "title": "SplitConfigImportResponse",
         "type": "object"
       },
       "SplitConfigListResponse": {
@@ -1071,6 +1118,28 @@
             "title": "Created At",
             "type": "string"
           },
+          "folder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder"
+          },
+          "folder_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Name"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -1081,6 +1150,32 @@
           },
           "plan": {
             "$ref": "#/components/schemas/SplitPlanIn"
+          },
+          "read_only": {
+            "default": false,
+            "title": "Read Only",
+            "type": "boolean"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SplitConfigSourceRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uid"
           },
           "updated_at": {
             "format": "date-time",
@@ -1100,6 +1195,18 @@
       },
       "SplitConfigPatchRequest": {
         "properties": {
+          "folder": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder"
+          },
           "name": {
             "anyOf": [
               {
@@ -1125,6 +1232,24 @@
           }
         },
         "title": "SplitConfigPatchRequest",
+        "type": "object"
+      },
+      "SplitConfigSourceRef": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "SplitConfigSourceRef",
         "type": "object"
       },
       "SplitLayoutRepeat": {
@@ -1347,6 +1472,378 @@
           "targets_as"
         ],
         "title": "SplitPlanOut",
+        "type": "object"
+      },
+      "SplitSourceCreateRequest": {
+        "properties": {
+          "host_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "github",
+                  "gitlab",
+                  "gitea"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Kind"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "path": {
+            "default": "splits",
+            "maxLength": 500,
+            "title": "Path",
+            "type": "string"
+          },
+          "ref": {
+            "default": "main",
+            "maxLength": 200,
+            "title": "Ref",
+            "type": "string"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token"
+          },
+          "url": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "SplitSourceCreateRequest",
+        "type": "object"
+      },
+      "SplitSourceFolderOut": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "folder": {
+            "title": "Folder",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "template_count": {
+            "title": "Template Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "folder",
+          "name",
+          "description",
+          "enabled",
+          "template_count"
+        ],
+        "title": "SplitSourceFolderOut",
+        "type": "object"
+      },
+      "SplitSourceFolderPatchRequest": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "SplitSourceFolderPatchRequest",
+        "type": "object"
+      },
+      "SplitSourceListResponse": {
+        "properties": {
+          "can_add": {
+            "title": "Can Add",
+            "type": "boolean"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SplitSourceOut"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sources",
+          "can_add"
+        ],
+        "title": "SplitSourceListResponse",
+        "type": "object"
+      },
+      "SplitSourceOut": {
+        "description": "A split template repo the user subscribes to (issue #143). The access\ntoken is never returned, only whether one is set.",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "folders": {
+            "items": {
+              "$ref": "#/components/schemas/SplitSourceFolderOut"
+            },
+            "title": "Folders",
+            "type": "array"
+          },
+          "has_token": {
+            "title": "Has Token",
+            "type": "boolean"
+          },
+          "host_kind": {
+            "enum": [
+              "github",
+              "gitlab",
+              "gitea"
+            ],
+            "title": "Host Kind",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "last_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Commit"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_synced_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Synced At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "host_kind",
+          "ref",
+          "path",
+          "enabled",
+          "is_default",
+          "has_token",
+          "last_synced_at",
+          "last_commit",
+          "last_error",
+          "warnings",
+          "folders"
+        ],
+        "title": "SplitSourceOut",
+        "type": "object"
+      },
+      "SplitSourcePatchRequest": {
+        "properties": {
+          "clear_token": {
+            "default": false,
+            "title": "Clear Token",
+            "type": "boolean"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token"
+          }
+        },
+        "title": "SplitSourcePatchRequest",
+        "type": "object"
+      },
+      "SplitSourceSyncResponse": {
+        "properties": {
+          "added": {
+            "title": "Added",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "removed": {
+            "title": "Removed",
+            "type": "integer"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SplitSourceOut"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ok",
+          "added",
+          "updated",
+          "removed",
+          "error",
+          "source"
+        ],
+        "title": "SplitSourceSyncResponse",
         "type": "object"
       },
       "SplitSummary": {
@@ -1647,7 +2144,7 @@
   },
   "info": {
     "title": "Simple Activity Tracker Server",
-    "version": "3"
+    "version": "4"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -2912,6 +3409,7 @@
     },
     "/api/v1/split-configs": {
       "get": {
+        "description": "Own configs plus templates from enabled folders of enabled sources,\nsorted by name. Older apps see templates as ordinary configs they can\nload, which is what hiding a folder controls (docs/SPLIT-LIBRARY-PLAN.md L7).",
         "operationId": "list_split_configs_api_v1_split_configs_get",
         "responses": {
           "200": {
@@ -2931,7 +3429,7 @@
         ]
       },
       "post": {
-        "description": "Creates a new config, or \u2014 with overwrite=true \u2014 replaces an existing\nsame-named one in place (same id, bumped updated_at). Without\noverwrite=true, a name collision is a 409 so the caller can ask the user\nto confirm and retry (see docs/SPLIT-CONFIGS-PLAN.md \u00a73/\u00a75.4).",
+        "description": "Creates a new config, or \u2014 with overwrite=true \u2014 replaces an existing\nsame-named one in place (same id, bumped updated_at). Without\noverwrite=true, a name collision is a 409 so the caller can ask the user\nto confirm and retry (see docs/SPLIT-CONFIGS-PLAN.md \u00a73/\u00a75.4). Only own\nconfigs are ever matched: a template's name is free to reuse.",
         "operationId": "create_split_config_api_v1_split_configs_post",
         "requestBody": {
           "content": {
@@ -2966,6 +3464,119 @@
           }
         },
         "summary": "Create Split Config",
+        "tags": [
+          "split-configs"
+        ]
+      }
+    },
+    "/api/v1/split-configs/export": {
+      "get": {
+        "description": "Issue #143: a file to back up, move to another server or share. With\none `id`, a single-config file (templates included); with several, a\nbundle of those; otherwise every own config, or those in `folder`.",
+        "operationId": "export_split_configs_api_v1_split_configs_export_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "folder",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Folder"
+            }
+          },
+          {
+            "in": "query",
+            "name": "id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 500,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Split config file"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Split Configs",
+        "tags": [
+          "split-configs"
+        ]
+      }
+    },
+    "/api/v1/split-configs/import": {
+      "post": {
+        "description": "Issue #143: imports an exported file (a bundle or a single config)\ninto the caller's own configs. A config whose uid is already there is\nreplaced; a new one whose name is taken is renamed \"Name (2)\".",
+        "operationId": "import_split_configs_api_v1_split_configs_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Document",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SplitConfigImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Split Configs",
         "tags": [
           "split-configs"
         ]
@@ -3093,6 +3704,258 @@
         "summary": "Patch Split Config",
         "tags": [
           "split-configs"
+        ]
+      }
+    },
+    "/api/v1/split-sources": {
+      "get": {
+        "operationId": "list_split_sources_api_v1_split_sources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SplitSourceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Split Sources",
+        "tags": [
+          "split-sources"
+        ]
+      },
+      "post": {
+        "description": "Subscribes to a repo and syncs it straight away. A failed first sync\nstill keeps the subscription, with the error on it, so the user can\nfix the URL, branch or token and sync again.",
+        "operationId": "create_split_source_api_v1_split_sources_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SplitSourceCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SplitSourceSyncResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Split Source",
+        "tags": [
+          "split-sources"
+        ]
+      }
+    },
+    "/api/v1/split-sources/{source_id}": {
+      "delete": {
+        "operationId": "delete_split_source_api_v1_split_sources__source_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Split Source",
+        "tags": [
+          "split-sources"
+        ]
+      },
+      "patch": {
+        "description": "The default repo's URL, branch and folder come from the server's\nsettings, so only its on/off switch can change.",
+        "operationId": "patch_split_source_api_v1_split_sources__source_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SplitSourcePatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SplitSourceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Split Source",
+        "tags": [
+          "split-sources"
+        ]
+      }
+    },
+    "/api/v1/split-sources/{source_id}/folders/{folder_id}": {
+      "patch": {
+        "description": "Shows or hides one folder's templates, on the web and every phone.",
+        "operationId": "patch_split_source_folder_api_v1_split_sources__source_id__folders__folder_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "folder_id",
+            "required": true,
+            "schema": {
+              "title": "Folder Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SplitSourceFolderPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SplitSourceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Split Source Folder",
+        "tags": [
+          "split-sources"
+        ]
+      }
+    },
+    "/api/v1/split-sources/{source_id}/sync": {
+      "post": {
+        "description": "Fetches the repo now. A failure (host down, bad token) is reported in\nthe body with ok=false, not as an HTTP error: the request itself worked.",
+        "operationId": "sync_split_source_api_v1_split_sources__source_id__sync_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SplitSourceSyncResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sync Split Source",
+        "tags": [
+          "split-sources"
         ]
       }
     },

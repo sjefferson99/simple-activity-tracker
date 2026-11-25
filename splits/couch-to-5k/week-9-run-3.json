@@ -1,0 +1,26 @@
+{
+  "format": "sat-split-config",
+  "version": 1,
+  "uid": "00d3b0a8-ee48-5b43-8853-13d2109812ab",
+  "name": "C25K week 9 run 3",
+  "plan": {
+    "split_type": "time_min",
+    "split_value": 1,
+    "rolling_target_mps": null,
+    "custom_splits": [
+      [
+        300,
+        1.6666666666666667
+      ],
+      [
+        1800,
+        2.2222222222222223
+      ],
+      [
+        300,
+        1.6666666666666667
+      ]
+    ],
+    "targets_as": "pace"
+  }
+}

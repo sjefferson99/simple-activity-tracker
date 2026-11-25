@@ -15,6 +15,7 @@ from app.api.v1 import live as live_api
 from app.api.v1 import server_info as server_info_api
 from app.api.v1 import sharing as sharing_api
 from app.api.v1 import split_configs as split_configs_api
+from app.api.v1 import split_sources as split_sources_api
 from app.api_compat import API_LEVEL
 from app.config import get_settings
 from app.db import check_db_connection
@@ -31,6 +32,7 @@ from app.web import settings as settings_web
 from app.web import shared_activities as shared_activities_web
 from app.web import sharing as sharing_web
 from app.web import split_configs as split_configs_web
+from app.web import split_library as split_library_web
 from app.web.paths import STATIC_DIR
 from app.web.templating import templates
 
@@ -71,6 +73,7 @@ def create_app() -> FastAPI:
     app.include_router(activities_api.router)
     app.include_router(admin_api.router)
     app.include_router(split_configs_api.router)
+    app.include_router(split_sources_api.router)
     app.include_router(live_api.router)
     app.include_router(sharing_api.users_router)
     app.include_router(sharing_api.me_router)
@@ -81,6 +84,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_web.router)
     app.include_router(register_web.router)
     app.include_router(admin_web.router)
+    app.include_router(split_library_web.router)
     app.include_router(split_configs_web.router)
     app.include_router(sharing_web.router)
     app.include_router(shared_activities_web.router)

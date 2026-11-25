@@ -1,6 +1,7 @@
 import '../../../domain/tracking/split_plan.dart';
 import '../../../domain/tracking/split_preference.dart';
 import '../../version/api_compat.dart';
+import '../tolerant_json.dart';
 
 /// A saved, named split plan (issue #126) — mirrors the server's
 /// SplitConfigOut schema. Unlike [SplitPlanDto] (which mirrors the
@@ -19,12 +20,28 @@ class SplitConfigDto {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  // Split library (issue #143, API level 4). Older servers send none of
+  // these, so each is read tolerantly with a default.
+
+  /// The folder the config is grouped under, as shown (a template's folder
+  /// display name), or null when it isn't in one.
+  final String? folderName;
+
+  /// A template synced from a split repo: load-only, never saved over.
+  final bool readOnly;
+
+  /// The split repo a template came from.
+  final String? sourceName;
+
   const SplitConfigDto({
     required this.id,
     required this.name,
     required this.plan,
     required this.createdAt,
     required this.updatedAt,
+    this.folderName,
+    this.readOnly = false,
+    this.sourceName,
   });
 
   factory SplitConfigDto.fromJson(Map<String, dynamic> json) => SplitConfigDto(
@@ -33,7 +50,13 @@ class SplitConfigDto {
     plan: _planFromJson(json['plan'] as Map<String, dynamic>),
     createdAt: DateTime.parse(json['created_at'] as String),
     updatedAt: DateTime.parse(json['updated_at'] as String),
+    folderName: _nonBlank(readString(json, 'folder_name') ?? readString(json, 'folder')),
+    readOnly: json['read_only'] == true,
+    sourceName: readString(readMap(json, 'source'), 'name'),
   );
+
+  static String? _nonBlank(String? value) =>
+      value == null || value.trim().isEmpty ? null : value.trim();
 
   static SplitPlan _planFromJson(Map<String, dynamic> json) {
     final base =
@@ -114,21 +137,31 @@ class SplitConfigSaveRequestDto {
   final bool overwrite;
   final int serverApiLevel;
 
+  /// The folder to file the config in (issue #143), sent only to a server
+  /// at [ApiLevels.splitLibrary] or later. Null leaves it unset (a new
+  /// config) or unchanged (an overwrite); blank clears it.
+  final String? folder;
+
   const SplitConfigSaveRequestDto({
     required this.name,
     required this.plan,
     this.overwrite = false,
     this.serverApiLevel = kLegacyServerApiLevel,
+    this.folder,
   });
 
   /// Whether this save keeps [plan]'s repeat blocks on the server.
   bool get sendsLayout =>
       plan.hasRepeatBlocks && serverApiLevel >= ApiLevels.splitConfigLayout;
 
+  /// Whether this save sends [folder].
+  bool get sendsFolder => folder != null && serverApiLevel >= ApiLevels.splitLibrary;
+
   Map<String, dynamic> toJson() => {
     'name': name,
     'plan': splitPlanWireJson(plan, includeLayout: sendsLayout),
     if (overwrite) 'overwrite': true,
+    if (sendsFolder) 'folder': folder!.trim(),
   };
 }
 

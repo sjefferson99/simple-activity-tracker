@@ -18,10 +18,15 @@ import 'dto/login_response_dto.dart';
 import 'dto/run_dto.dart';
 import 'dto/server_info_dto.dart';
 import 'dto/split_config_dto.dart';
+import 'dto/split_source_dto.dart';
 import 'dto/user_dto.dart';
 import 'upload_payload.dart';
 
 const _requestTimeout = Duration(seconds: 30);
+
+// Adding or syncing a split repo makes the server download it first (up to
+// 20 s on its side), so allow more than an ordinary request.
+const _syncTimeout = Duration(seconds: 60);
 
 /// Stamps every request with the app's API level and release version
 /// (docs/VERSIONING.md §1). Nothing server-side reads them yet — they exist
@@ -358,6 +363,146 @@ class HttpApiClient implements ApiClient {
           )
           .timeout(_requestTimeout),
     );
+  }
+
+  Map<String, String> _jsonHeaders(String token) => {
+    ..._authHeaders(token),
+    'Content-Type': 'application/json',
+  };
+
+  @override
+  Future<SplitSourceListDto> listSplitSources({
+    required String baseUrl,
+    required String token,
+  }) async {
+    final response = await _send(
+      () => _client
+          .get(_uri(baseUrl, '/api/v1/split-sources'), headers: _authHeaders(token))
+          .timeout(_requestTimeout),
+    );
+    return SplitSourceListDto.fromJson(_decodeJson(response));
+  }
+
+  @override
+  Future<SplitSourceSyncDto> addSplitSource({
+    required String baseUrl,
+    required String token,
+    required SplitSourceCreateDto request,
+  }) async {
+    final response = await _send(
+      () => _client
+          .post(
+            _uri(baseUrl, '/api/v1/split-sources'),
+            headers: _jsonHeaders(token),
+            body: jsonEncode(request.toJson()),
+          )
+          .timeout(_syncTimeout),
+    );
+    return SplitSourceSyncDto.fromJson(_decodeJson(response));
+  }
+
+  @override
+  Future<SplitSourceDto?> updateSplitSource({
+    required String baseUrl,
+    required String token,
+    required String sourceId,
+    required SplitSourceUpdateDto update,
+  }) async {
+    final response = await _send(
+      () => _client
+          .patch(
+            _uri(baseUrl, '/api/v1/split-sources/${Uri.encodeComponent(sourceId)}'),
+            headers: _jsonHeaders(token),
+            body: jsonEncode(update.toJson()),
+          )
+          .timeout(_requestTimeout),
+    );
+    return SplitSourceDto.fromJson(_decodeJson(response));
+  }
+
+  @override
+  Future<void> deleteSplitSource({
+    required String baseUrl,
+    required String token,
+    required String sourceId,
+  }) async {
+    await _send(
+      () => _client
+          .delete(
+            _uri(baseUrl, '/api/v1/split-sources/${Uri.encodeComponent(sourceId)}'),
+            headers: _authHeaders(token),
+          )
+          .timeout(_requestTimeout),
+    );
+  }
+
+  @override
+  Future<SplitSourceSyncDto> syncSplitSource({
+    required String baseUrl,
+    required String token,
+    required String sourceId,
+  }) async {
+    final response = await _send(
+      () => _client
+          .post(
+            _uri(baseUrl, '/api/v1/split-sources/${Uri.encodeComponent(sourceId)}/sync'),
+            headers: _authHeaders(token),
+          )
+          .timeout(_syncTimeout),
+    );
+    return SplitSourceSyncDto.fromJson(_decodeJson(response));
+  }
+
+  @override
+  Future<SplitSourceDto?> setSplitFolderEnabled({
+    required String baseUrl,
+    required String token,
+    required String sourceId,
+    required String folderId,
+    required bool enabled,
+  }) async {
+    final response = await _send(
+      () => _client
+          .patch(
+            _uri(
+              baseUrl,
+              '/api/v1/split-sources/${Uri.encodeComponent(sourceId)}'
+              '/folders/${Uri.encodeComponent(folderId)}',
+            ),
+            headers: _jsonHeaders(token),
+            body: jsonEncode({'enabled': enabled}),
+          )
+          .timeout(_requestTimeout),
+    );
+    return SplitSourceDto.fromJson(_decodeJson(response));
+  }
+
+  @override
+  Future<String> exportSplitConfigs({required String baseUrl, required String token}) async {
+    final response = await _send(
+      () => _client
+          .get(_uri(baseUrl, '/api/v1/split-configs/export'), headers: _authHeaders(token))
+          .timeout(_requestTimeout),
+    );
+    return utf8.decode(response.bodyBytes);
+  }
+
+  @override
+  Future<SplitImportResultDto> importSplitConfigs({
+    required String baseUrl,
+    required String token,
+    required Map<String, dynamic> document,
+  }) async {
+    final response = await _send(
+      () => _client
+          .post(
+            _uri(baseUrl, '/api/v1/split-configs/import'),
+            headers: _jsonHeaders(token),
+            body: jsonEncode(document),
+          )
+          .timeout(_requestTimeout),
+    );
+    return SplitImportResultDto.fromJson(_decodeJson(response));
   }
 
   @override

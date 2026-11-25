@@ -10,6 +10,7 @@ import 'package:simple_activity_tracker/core/api/dto/login_response_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/run_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/server_info_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/split_config_dto.dart';
+import 'package:simple_activity_tracker/core/api/dto/split_source_dto.dart';
 import 'package:simple_activity_tracker/core/api/dto/user_dto.dart';
 import 'package:simple_activity_tracker/core/version/api_compat.dart';
 import 'package:simple_activity_tracker/domain/models/run_summary.dart';
@@ -286,6 +287,165 @@ class FakeApiClient implements ApiClient {
     }
     return Future.value();
   }
+
+  // --- split library (issue #143) -------------------------------------------
+  // In memory: folder switches and removals change [splitSources], so the
+  // Library screen re-reads what it just changed.
+
+  SplitSourceListDto splitSources = const SplitSourceListDto(sources: [], canAdd: true);
+  SplitSourceSyncDto syncResult = const SplitSourceSyncDto(ok: true, added: 2);
+  String exportJson = '{"format": "sat-split-configs", "version": 1, "configs": []}';
+  SplitImportResultDto importResult = const SplitImportResultDto(created: 1);
+  Object? splitLibraryFailure;
+  final List<SplitSourceCreateDto> addSplitSourceCalls = [];
+  final List<String> syncSplitSourceCalls = [];
+  final List<(String, SplitSourceUpdateDto)> updateSplitSourceCalls = [];
+  final List<String> deleteSplitSourceCalls = [];
+  final List<(String, String, bool)> splitFolderCalls = [];
+  final List<Map<String, dynamic>> importSplitConfigsCalls = [];
+  int exportSplitConfigsCallCount = 0;
+
+  Future<T> _library<T>(T Function() value) {
+    final failure = splitLibraryFailure;
+    if (failure != null) return Future.error(failure);
+    return Future.value(value());
+  }
+
+  SplitSourceDto? _replaceSource(String id, SplitSourceDto Function(SplitSourceDto) change) {
+    SplitSourceDto? changed;
+    splitSources = SplitSourceListDto(
+      canAdd: splitSources.canAdd,
+      sources: [
+        for (final source in splitSources.sources)
+          if (source.id == id) changed = change(source) else source,
+      ],
+    );
+    return changed;
+  }
+
+  @override
+  Future<SplitSourceListDto> listSplitSources({required String baseUrl, required String token}) =>
+      _library(() => splitSources);
+
+  @override
+  Future<SplitSourceSyncDto> addSplitSource({
+    required String baseUrl,
+    required String token,
+    required SplitSourceCreateDto request,
+  }) => _library(() {
+    addSplitSourceCalls.add(request);
+    return syncResult;
+  });
+
+  @override
+  Future<SplitSourceDto?> updateSplitSource({
+    required String baseUrl,
+    required String token,
+    required String sourceId,
+    required SplitSourceUpdateDto update,
+  }) => _library(() {
+    updateSplitSourceCalls.add((sourceId, update));
+    return _replaceSource(
+      sourceId,
+      (s) => SplitSourceDto(
+        id: s.id,
+        name: update.name ?? s.name,
+        url: s.url,
+        ref: update.ref ?? s.ref,
+        path: update.path ?? s.path,
+        enabled: update.enabled ?? s.enabled,
+        isDefault: s.isDefault,
+        hasToken: update.clearToken ? false : (update.token != null || s.hasToken),
+        lastSyncedAt: s.lastSyncedAt,
+        lastError: s.lastError,
+        warnings: s.warnings,
+        folders: s.folders,
+      ),
+    );
+  });
+
+  @override
+  Future<void> deleteSplitSource({
+    required String baseUrl,
+    required String token,
+    required String sourceId,
+  }) => _library(() {
+    deleteSplitSourceCalls.add(sourceId);
+    splitSources = SplitSourceListDto(
+      canAdd: splitSources.canAdd,
+      sources: [
+        for (final s in splitSources.sources)
+          if (s.id != sourceId) s,
+      ],
+    );
+  });
+
+  @override
+  Future<SplitSourceSyncDto> syncSplitSource({
+    required String baseUrl,
+    required String token,
+    required String sourceId,
+  }) => _library(() {
+    syncSplitSourceCalls.add(sourceId);
+    return syncResult;
+  });
+
+  @override
+  Future<SplitSourceDto?> setSplitFolderEnabled({
+    required String baseUrl,
+    required String token,
+    required String sourceId,
+    required String folderId,
+    required bool enabled,
+  }) => _library(() {
+    splitFolderCalls.add((sourceId, folderId, enabled));
+    return _replaceSource(
+      sourceId,
+      (s) => SplitSourceDto(
+        id: s.id,
+        name: s.name,
+        url: s.url,
+        ref: s.ref,
+        path: s.path,
+        enabled: s.enabled,
+        isDefault: s.isDefault,
+        hasToken: s.hasToken,
+        lastSyncedAt: s.lastSyncedAt,
+        lastError: s.lastError,
+        warnings: s.warnings,
+        folders: [
+          for (final f in s.folders)
+            if (f.id == folderId)
+              SplitSourceFolderDto(
+                id: f.id,
+                name: f.name,
+                description: f.description,
+                enabled: enabled,
+                templateCount: f.templateCount,
+              )
+            else
+              f,
+        ],
+      ),
+    );
+  });
+
+  @override
+  Future<String> exportSplitConfigs({required String baseUrl, required String token}) =>
+      _library(() {
+        exportSplitConfigsCallCount++;
+        return exportJson;
+      });
+
+  @override
+  Future<SplitImportResultDto> importSplitConfigs({
+    required String baseUrl,
+    required String token,
+    required Map<String, dynamic> document,
+  }) => _library(() {
+    importSplitConfigsCalls.add(document);
+    return importResult;
+  });
 
   // --- live tracking (issue #130) ------------------------------------------
   // A tiny in-memory server: it stores points per client activity id and

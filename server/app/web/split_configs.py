@@ -6,19 +6,23 @@ validation so a config saved from the web gets exactly the same checks as
 one saved from the phone. See docs/SPLIT-CONFIGS-PLAN.md §4.
 """
 
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Request, Response
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.v1.split_configs import build_export, export_response, schedule_due_syncs
 from app.auth.rate_limit import account_action_rate_limiter
 from app.deps import db_session
 from app.models.split_config import SplitConfig
 from app.repositories.split_configs import SqlAlchemySplitConfigRepository
+from app.split_library import files as split_files
+from app.split_library import library
 from app.validation import (
     SPLIT_CONFIG_MAX_CUSTOM_SPLITS,
     SPLIT_CONFIG_NAME_MAX_LENGTH,
@@ -465,6 +469,7 @@ def _default_form_context(user: object) -> dict[str, object]:
         "custom_entries": [_Entry(rows=[_CustomRow(size="", target="")])],
         "error": None,
         "name_conflict": None,
+        "folder": "",
     }
 
 
@@ -489,25 +494,113 @@ def _form_context_from_config(config: SplitConfig) -> dict[str, object]:
         "custom_entries": entries,
         "error": None,
         "name_conflict": None,
+        "folder": config.folder or "",
     }
+
+
+@dataclass
+class _ListGroup:
+    """One card on the splits page: an own folder, or one folder of a split
+    repo's templates (issue #143)."""
+
+    title: str
+    configs: list[library.VisibleConfig]
+    source_name: str | None = None
+    description: str | None = None
+    # For the group's Export link (own folders only; "" = unfiled).
+    export_folder: str | None = None
+
+    @property
+    def is_template(self) -> bool:
+        return self.source_name is not None
+
+
+def _natural_key(text: str) -> list[object]:
+    """Sorts "Week 2" before "Week 10"."""
+    return [int(part) if part.isdigit() else part.casefold() for part in re.split(r"(\d+)", text)]
+
+
+def _list_context(session: Session, user: object, user_id: str) -> dict[str, object]:
+    visible = library.list_visible(session, user_id)
+    own: dict[str | None, list[library.VisibleConfig]] = {}
+    templates_by_folder: dict[tuple[str, str], list[library.VisibleConfig]] = {}
+    sources = {}
+    for v in visible:
+        if v.source is None:
+            own.setdefault(v.config.folder, []).append(v)
+        else:
+            sources[v.source.id] = v.source
+            templates_by_folder.setdefault((v.source.id, v.config.folder or ""), []).append(v)
+    groups: list[_ListGroup] = []
+    if None in own:
+        groups.append(_ListGroup(title="My splits", configs=own.pop(None), export_folder=""))
+    for folder in sorted(own, key=lambda f: _natural_key(f or "")):
+        groups.append(_ListGroup(title=str(folder), configs=own[folder], export_folder=folder))
+    folder_rows = library.folders_for(session, sources)
+    source_order = sorted(sources.values(), key=lambda s: (not s.is_default, s.name.casefold()))
+    for source in source_order:
+        for folder_row in folder_rows[source.id]:
+            configs = templates_by_folder.get((source.id, folder_row.folder))
+            if configs:
+                groups.append(
+                    _ListGroup(
+                        title=folder_row.display_name,
+                        configs=configs,
+                        source_name=source.name,
+                        description=folder_row.description,
+                    )
+                )
+    for group in groups:
+        group.configs.sort(key=lambda v: _natural_key(v.config.name))
+    return {"user": user, "groups": groups}
+
+
+def _folder_options(session: Session, user_id: str) -> list[str]:
+    return library.own_folders(session, user_id)
+
+
+_NEW_FOLDER = "__new__"
+
+
+def _folder_from_form(folder_choice: str | None, folder_new: str, folder: str) -> tuple[str, bool]:
+    """(folder, typing a new one) from the editor's Folder dropdown: an
+    existing folder, "" for none, or "New folder…" with its name typed in
+    folder_new. A plain `folder` field (no dropdown posted) is taken as is."""
+    if folder_choice is None:
+        return folder, False
+    if folder_choice == _NEW_FOLDER:
+        return folder_new, True
+    return folder_choice, False
 
 
 @router.get("/split-configs")
 def split_configs_page(
-    request: Request, user: WebUser, session: Annotated[Session, Depends(db_session)]
+    request: Request,
+    user: WebUser,
+    session: Annotated[Session, Depends(db_session)],
+    background_tasks: BackgroundTasks,
 ) -> Response:
-    configs = SqlAlchemySplitConfigRepository(session).list_for_user(user.id)
-    context = {"user": user, "configs": configs}
+    """Own configs and subscribed templates, grouped by folder (issue
+    #143). The very first visit syncs the default repo inline, so a new
+    user sees its templates straight away; after that, stale repos re-sync
+    in the background."""
+    default = library.ensure_default_source(session, user.id)
+    if default is not None and default.enabled and default.last_attempt_at is None:
+        library.sync_source(session, default)
+    schedule_due_syncs(session, user.id, background_tasks)
+    context = _list_context(session, user, user.id)
     if request.headers.get("hx-request") == "true":
         return templates.TemplateResponse(request, "partials/split_config_list.html", context)
     return templates.TemplateResponse(request, "split_configs.html", context)
 
 
 @router.get("/split-configs/new")
-def new_split_config_page(request: Request, user: WebUser) -> Response:
-    return templates.TemplateResponse(
-        request, "split_config_form.html", _attach_preview(_default_form_context(user))
-    )
+def new_split_config_page(
+    request: Request, user: WebUser, session: Annotated[Session, Depends(db_session)]
+) -> Response:
+    context = _default_form_context(user)
+    context["folder_options"] = _folder_options(session, user.id)
+    return templates.TemplateResponse(request, "split_config_form.html", _attach_preview(context))
 
 
 @router.get("/split-configs/{config_id}/edit")
@@ -517,10 +610,23 @@ def edit_split_config_page(
     user: WebUser,
     session: Annotated[Session, Depends(db_session)],
 ) -> Response:
-    config = SqlAlchemySplitConfigRepository(session).get_for_user(user.id, config_id)
-    if config is None:
+    visible = library.visible_config(session, user.id, config_id)
+    if visible is None:
         return Response(status_code=404)
-    context = {"user": user, **_form_context_from_config(config)}
+    config = visible.config
+    context = {
+        "user": user,
+        **_form_context_from_config(config),
+        "folder_options": _folder_options(session, user.id),
+    }
+    if config.read_only:
+        # A template (issue #143) shows in the same editor, but disabled,
+        # with Copy as the way to change it.
+        context.update(
+            read_only=True,
+            folder=visible.folder_name or "",
+            source_name=visible.source.name if visible.source else "",
+        )
     return templates.TemplateResponse(request, "split_config_form.html", _attach_preview(context))
 
 
@@ -548,15 +654,26 @@ def duplicate_split_config_page(
     create path (validation, name-collision handling), so abandoning the
     page leaves no stray copy behind."""
     repo = SqlAlchemySplitConfigRepository(session)
-    config = repo.get_for_user(user.id, config_id)
-    if config is None:
+    visible = library.visible_config(session, user.id, config_id)
+    if visible is None:
         return Response(status_code=404)
+    config = visible.config
     taken = {c.name for c in repo.list_for_user(user.id)}
+    # A template's copy (issue #143) keeps its name when that's free, and
+    # files under the template's folder name, so a copied Couch to 5K run
+    # lands in the user's own "Couch to 5K" folder.
+    name = (
+        config.name
+        if config.read_only and config.name not in taken
+        else _copy_name(config.name, taken)
+    )
     context = {
         "user": user,
         **_form_context_from_config(config),
         "config_id": None,
-        "name": _copy_name(config.name, taken),
+        "name": name,
+        "folder": (visible.folder_name or "") if config.read_only else (config.folder or ""),
+        "folder_options": _folder_options(session, user.id),
     }
     return templates.TemplateResponse(request, "split_config_form.html", _attach_preview(context))
 
@@ -565,8 +682,12 @@ def duplicate_split_config_page(
 def add_custom_row(
     request: Request,
     user: WebUser,
+    session: Annotated[Session, Depends(db_session)],
     config_id: Annotated[str, Form()] = "",
     name: Annotated[str, Form()] = "",
+    folder: Annotated[str, Form()] = "",
+    folder_choice: Annotated[str | None, Form()] = None,
+    folder_new: Annotated[str, Form()] = "",
     split_type: Annotated[str, Form()] = "distance_km",
     split_value: Annotated[str, Form()] = "1",
     targets_as: Annotated[str, Form()] = "pace",
@@ -601,6 +722,7 @@ def add_custom_row(
     row is removed goes with it. The 50-split cap applies to the expanded
     plan, so the add buttons are disabled at the cap and Save rejects a
     plan over it."""
+    chosen_folder, new_folder_mode = _folder_from_form(folder_choice, folder_new, folder)
     entries = _entries_from_form(
         split_size or [], split_target or [], entry_kind, entry_repeat, entry_rows
     )
@@ -673,6 +795,9 @@ def add_custom_row(
         "custom_entries": entries,
         "error": None,
         "name_conflict": None,
+        "folder": chosen_folder,
+        "folder_new_mode": new_folder_mode,
+        "folder_options": _folder_options(session, user.id),
     }
     return templates.TemplateResponse(
         request, "partials/split_config_form_fields.html", _attach_preview(context)
@@ -818,6 +943,9 @@ def create_or_update_split_config(
     session: Annotated[Session, Depends(db_session)],
     config_id: Annotated[str, Form()] = "",
     name: Annotated[str, Form()] = "",
+    folder: Annotated[str, Form()] = "",
+    folder_choice: Annotated[str | None, Form()] = None,
+    folder_new: Annotated[str, Form()] = "",
     split_type: Annotated[str, Form()] = "distance_km",
     split_value: Annotated[str, Form()] = "1",
     targets_as: Annotated[str, Form()] = "pace",
@@ -830,6 +958,8 @@ def create_or_update_split_config(
     entry_rows: Annotated[list[str] | None, Form()] = None,
     overwrite: Annotated[bool, Form()] = False,
 ) -> Response:
+    chosen_folder, new_folder_mode = _folder_from_form(folder_choice, folder_new, folder)
+
     def form_entries() -> list[_Entry]:
         return _entries_from_form(
             split_size or [], split_target or [], entry_kind, entry_repeat, entry_rows
@@ -851,6 +981,9 @@ def create_or_update_split_config(
             "custom_entries": entries,
             "error": error,
             "name_conflict": name_conflict,
+            "folder": chosen_folder,
+            "folder_new_mode": new_folder_mode,
+            "folder_options": _folder_options(session, user.id),
         }
         return templates.TemplateResponse(
             request, "split_config_form.html", _attach_preview(context), status_code=status_code
@@ -866,8 +999,11 @@ def create_or_update_split_config(
             raise ValidationFailedError(
                 f"Name must be at most {SPLIT_CONFIG_NAME_MAX_LENGTH} characters"
             )
+        clean_folder = split_files.clean_folder(chosen_folder)
     except ValidationFailedError as exc:
         return _rerender(str(exc))
+    except ValueError as exc:
+        return _rerender(f"Folder: {exc}")
 
     try:
         plan_input = _build_plan_json(
@@ -898,6 +1034,8 @@ def create_or_update_split_config(
         existing = repo.get_for_user(user.id, config_id)
         if existing is None:
             return Response(status_code=404)
+        if existing.read_only:
+            return Response(status_code=403)
         if clean_name != existing.name:
             collision = repo.get_by_name_for_user(user.id, clean_name)
             if collision is not None and collision.id != existing.id:
@@ -908,6 +1046,7 @@ def create_or_update_split_config(
                 )
         existing.name = clean_name
         existing.plan = plan_json
+        existing.folder = clean_folder
         existing.updated_at = datetime.now(UTC)
         return Response(status_code=200, headers={"HX-Redirect": "/split-configs"})
 
@@ -920,12 +1059,18 @@ def create_or_update_split_config(
         )
     if collision is not None and overwrite:
         collision.plan = plan_json
+        collision.folder = clean_folder
         collision.updated_at = datetime.now(UTC)
         return Response(status_code=200, headers={"HX-Redirect": "/split-configs"})
 
     now = datetime.now(UTC)
     new_config = SplitConfig(
-        user_id=user.id, name=clean_name, plan=plan_json, created_at=now, updated_at=now
+        user_id=user.id,
+        name=clean_name,
+        plan=plan_json,
+        folder=clean_folder,
+        created_at=now,
+        updated_at=now,
     )
     repo.add(new_config)
     try:
@@ -956,6 +1101,8 @@ def delete_split_config(
 
     repo = SqlAlchemySplitConfigRepository(session)
     config = repo.get_for_user(user.id, config_id)
+    if config is not None and config.read_only:
+        return Response(status_code=403)
     if config is not None:
         repo.delete(config)
         # get_session_factory() disables autoflush (app/db.py) — without an
@@ -964,7 +1111,21 @@ def delete_split_config(
         # test_delete_removes_config_from_list, which re-lists in the same
         # request rather than redirecting like activity_delete does).
         session.flush()
-    configs = repo.list_for_user(user.id)
     return templates.TemplateResponse(
-        request, "partials/split_config_list.html", {"user": user, "configs": configs}
+        request, "partials/split_config_list.html", _list_context(session, user, user.id)
     )
+
+
+@router.get("/split-configs/export")
+def export_split_configs_file(
+    user: WebUser,
+    session: Annotated[Session, Depends(db_session)],
+    folder: Annotated[str | None, Query(max_length=200)] = None,
+    config_id: Annotated[list[str] | None, Query(alias="id", max_length=500)] = None,
+) -> Response:
+    """Downloads a split config file (issue #143): one config (own or
+    template) by id, or every own config, or one own folder's."""
+    built = build_export(session, user.id, folder=folder, ids=config_id or [])
+    if built is None:
+        return Response(status_code=404)
+    return export_response(*built)

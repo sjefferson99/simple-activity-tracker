@@ -39,9 +39,12 @@ def app_client(tmp_path, monkeypatch) -> Generator:
         account_action_rate_limiter,
         live_upload_rate_limiter,
         login_rate_limiter,
+        split_fetch_rate_limiter,
     )
     from app.config import get_settings
     from app.db import get_engine
+    from app.split_library.fetch import reset_fetcher
+    from app.split_library.library import reset_sync_locks
     from app.terrain import get_tile_cache
 
     db_path = tmp_path / "test.db"
@@ -56,6 +59,9 @@ def app_client(tmp_path, monkeypatch) -> Generator:
     # test. Mirrors the real "plain-http LAN testing" setting from
     # docs/WEB-PLAN.md §5.5.
     monkeypatch.setenv("SR_SECURE_COOKIES", "false")
+    # No default split repo unless a test asks for one (with a stub
+    # fetcher, tests/split_library_helpers.py): tests never touch the network.
+    monkeypatch.setenv("SR_SPLIT_LIBRARY_DEFAULT_REPO", "")
     get_settings.cache_clear()
     get_engine.cache_clear()
     get_tile_cache.cache_clear()
@@ -65,6 +71,11 @@ def app_client(tmp_path, monkeypatch) -> Generator:
     login_rate_limiter.reset()
     account_action_rate_limiter.reset()
     live_upload_rate_limiter.reset()
+    split_fetch_rate_limiter.reset()
+    # Module-level singletons too: the archive fetcher (and its cache) and
+    # the per-source sync locks.
+    reset_fetcher()
+    reset_sync_locks()
 
     from fastapi.testclient import TestClient
 

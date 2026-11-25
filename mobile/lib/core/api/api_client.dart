@@ -13,6 +13,7 @@ import 'dto/login_response_dto.dart';
 import 'dto/run_dto.dart';
 import 'dto/server_info_dto.dart';
 import 'dto/split_config_dto.dart';
+import 'dto/split_source_dto.dart';
 import 'dto/user_dto.dart';
 import 'http_api_client.dart';
 
@@ -111,6 +112,60 @@ abstract class ApiClient {
     required String baseUrl,
     required String token,
     required String configId,
+  });
+
+  // --- split library (issue #143, API level 4) -----------------------------
+  // Only call these when the server's API level is at least
+  // ApiLevels.splitLibrary (docs/VERSIONING.md §3.2).
+
+  /// The user's split template repos with their folders.
+  Future<SplitSourceListDto> listSplitSources({required String baseUrl, required String token});
+
+  /// Subscribes to a repo and syncs it. A failed first sync still keeps the
+  /// subscription: the result is `ok: false` with the error.
+  Future<SplitSourceSyncDto> addSplitSource({
+    required String baseUrl,
+    required String token,
+    required SplitSourceCreateDto request,
+  });
+
+  Future<SplitSourceDto?> updateSplitSource({
+    required String baseUrl,
+    required String token,
+    required String sourceId,
+    required SplitSourceUpdateDto update,
+  });
+
+  Future<void> deleteSplitSource({
+    required String baseUrl,
+    required String token,
+    required String sourceId,
+  });
+
+  Future<SplitSourceSyncDto> syncSplitSource({
+    required String baseUrl,
+    required String token,
+    required String sourceId,
+  });
+
+  /// Shows or hides one folder's templates everywhere the user signs in.
+  Future<SplitSourceDto?> setSplitFolderEnabled({
+    required String baseUrl,
+    required String token,
+    required String sourceId,
+    required String folderId,
+    required bool enabled,
+  });
+
+  /// Every own split config as an export file (JSON text).
+  Future<String> exportSplitConfigs({required String baseUrl, required String token});
+
+  /// Imports an export file's decoded JSON into the user's own configs.
+  /// Throws [ApiRejectedException] (422) for a file that isn't one.
+  Future<SplitImportResultDto> importSplitConfigs({
+    required String baseUrl,
+    required String token,
+    required Map<String, dynamic> document,
   });
 
   // --- live tracking and sharing (issue #130, API level 2) -----------------

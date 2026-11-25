@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:simple_activity_tracker/core/api/dto/server_info_dto.dart';
+import 'package:simple_activity_tracker/core/version/api_compat.dart';
 import 'package:simple_activity_tracker/core/version/app_version.dart';
 import 'package:simple_activity_tracker/features/settings/about_section.dart';
 
@@ -39,7 +40,7 @@ void main() {
     });
 
     test('app too old is a warning to update the app', () {
-      final note = compatibilityNote(_app, _server('2.0.0', apiLevel: 5, minAppApiLevel: 4));
+      final note = compatibilityNote(_app, _server('2.0.0', apiLevel: kAppApiLevel + 2, minAppApiLevel: kAppApiLevel + 1));
       expect(note?.isWarning, isTrue);
       expect(note?.message, contains('Update the app'));
     });

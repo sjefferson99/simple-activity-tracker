@@ -20,6 +20,27 @@
   <label for="name">Name</label>
   <input type="text" id="name" name="name" value="{{ name }}" maxlength="200" required>
 
+  {# Folder (issue #143): an existing folder, none, or "New folder…", which
+     re-renders the form with a name box. A folder that isn't one of the
+     user's yet (a copied template's) starts out as a new one. #}
+  {% set options = folder_options or [] %}
+  {% set new_mode = folder_new_mode or (folder and folder not in options) %}
+  <label for="folder_choice">Folder <span class="muted">(optional)</span></label>
+  <select id="folder_choice" name="folder_choice"
+          hx-post="/split-configs/custom-rows" hx-target="#split-config-form-area"
+          hx-include="#split-config-form" hx-trigger="change">
+    <option value="" {% if not new_mode and not folder %}selected{% endif %}>No folder</option>
+    {% for option in options %}
+    <option value="{{ option }}" {% if not new_mode and folder == option %}selected{% endif %}>{{ option }}</option>
+    {% endfor %}
+    <option value="__new__" {% if new_mode %}selected{% endif %}>New folder…</option>
+  </select>
+  {% if new_mode %}
+  <label for="folder_new">New folder name</label>
+  <input type="text" id="folder_new" name="folder_new" value="{{ folder or '' }}" maxlength="200"
+         placeholder="e.g. Intervals">
+  {% endif %}
+
   {% if name_conflict %}
   <div class="error-banner">
     A split config named "{{ name_conflict }}" already exists.
@@ -175,7 +196,7 @@
   {% include "partials/split_config_preview.html" %}
 
   <div class="toolbar">
-    <button type="submit">Save</button>
-    <a href="/split-configs">Cancel</a>
+    {% if not read_only %}<button type="submit">Save</button>{% endif %}
+    <a href="/split-configs">{{ "Back" if read_only else "Cancel" }}</a>
   </div>
 </form>
