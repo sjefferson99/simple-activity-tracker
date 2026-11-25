@@ -19,10 +19,16 @@ class SqlAlchemySplitConfigRepository:
         self._session = session
 
     def list_for_user(self, user_id: str) -> list[SplitConfig]:
-        stmt = select(SplitConfig).where(SplitConfig.user_id == user_id).order_by(SplitConfig.name)
+        """The user's own configs, not templates (issue #143)."""
+        stmt = (
+            select(SplitConfig)
+            .where(SplitConfig.user_id == user_id, SplitConfig.source_id.is_(None))
+            .order_by(SplitConfig.name)
+        )
         return list(self._session.execute(stmt).scalars())
 
     def get_for_user(self, user_id: str, config_id: str) -> SplitConfig | None:
+        """Own config or template; check read_only before changing it."""
         stmt = select(SplitConfig).where(
             SplitConfig.id == config_id, SplitConfig.user_id == user_id
         )
@@ -33,7 +39,13 @@ class SqlAlchemySplitConfigRepository:
         # unlike Tag.name's case-insensitive get-or-create, a split config's
         # name is a user-chosen label the owner types and re-types verbatim
         # when saving/overwriting, not a shared free-text vocabulary.
-        stmt = select(SplitConfig).where(SplitConfig.user_id == user_id, SplitConfig.name == name)
+        # Own configs only: templates don't take part in name uniqueness
+        # (docs/SPLIT-LIBRARY-PLAN.md L8), so an overwrite never hits one.
+        stmt = select(SplitConfig).where(
+            SplitConfig.user_id == user_id,
+            SplitConfig.name == name,
+            SplitConfig.source_id.is_(None),
+        )
         return self._session.execute(stmt).scalar_one_or_none()
 
     def add(self, config: SplitConfig) -> None:

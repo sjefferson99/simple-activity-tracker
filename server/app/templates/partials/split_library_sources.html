@@ -1,0 +1,128 @@
+{#
+  The user's split repos (issue #143). Every control re-renders this whole
+  fragment, so a sync's result or an error lands in the banners at the top.
+#}
+{% if message %}<div class="warning-banner">{{ message }}</div>{% endif %}
+{% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
+
+{% for source in sources %}
+<div class="card library-source">
+  <div class="toolbar">
+    <h2>{{ source.name }}</h2>
+    {% if source.is_default %}<span class="badge">Default</span>{% endif %}
+    <label class="radio-label">
+      <input type="checkbox" {% if source.enabled %}checked{% endif %}
+             hx-patch="/split-configs/library/sources/{{ source.id }}"
+             hx-vals='{"enabled": "{{ "false" if source.enabled else "true" }}"}'
+             hx-target="#split-library-sources" hx-trigger="change">
+      On
+    </label>
+    <button class="secondary" hx-post="/split-configs/library/sources/{{ source.id }}/sync"
+            hx-target="#split-library-sources" hx-disabled-elt="this">Sync now</button>
+    {% if not source.is_default %}
+    <button class="danger" hx-delete="/split-configs/library/sources/{{ source.id }}"
+            hx-target="#split-library-sources"
+            hx-confirm="Remove &quot;{{ source.name }}&quot; and its templates? Configs you copied from it stay.">
+      Remove
+    </button>
+    {% endif %}
+  </div>
+  <p class="muted">
+    <a href="{{ source.url }}" rel="noopener noreferrer" target="_blank">{{ source.url }}</a>
+    · {{ source.ref }}{% if source.path %} · {{ source.path }}/{% endif %}
+    {% if source.token %} · private (token set){% endif %}
+    <br>
+    {% if source.last_synced_at %}Last synced
+    <time datetime="{{ source.last_synced_at.isoformat() }}" class="local-time" data-format="date-time">{{ source.last_synced_at.isoformat() }}</time>{% if source.last_commit %} ({{ source.last_commit[:7] }}){% endif %}{% else %}Not synced yet{% endif %}
+  </p>
+  {% if source.last_error %}<div class="error-banner">Last sync failed: {{ source.last_error }}</div>{% endif %}
+
+  {% set source_folders = folders[source.id] %}
+  {% if source_folders %}
+  <ul class="library-folders">
+    {% for folder in source_folders %}
+    <li>
+      <label class="radio-label">
+        <input type="checkbox" {% if folder.enabled %}checked{% endif %}
+               {% if not source.enabled %}disabled{% endif %}
+               hx-patch="/split-configs/library/folders/{{ folder.id }}"
+               hx-vals='{"enabled": "{{ "false" if folder.enabled else "true" }}"}'
+               hx-target="#split-library-sources" hx-trigger="change">
+        {{ folder.display_name }}
+        <span class="muted">· {{ counts.get((source.id, folder.folder), 0) }} splits</span>
+      </label>
+      {% if folder.description %}<div class="muted">{{ folder.description }}</div>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% elif source.last_synced_at %}
+  <p class="muted">No split files found under {{ source.path or "the repo's top folder" }}.</p>
+  {% endif %}
+
+  {% if source.warnings %}
+  <details>
+    <summary class="muted">{{ source.warnings | length }} file(s) skipped on the last sync</summary>
+    <ul class="library-warnings">
+      {% for warning in source.warnings %}<li>{{ warning }}</li>{% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
+  {% if not source.is_default %}
+  <details>
+    <summary class="muted">Edit</summary>
+    <form hx-patch="/split-configs/library/sources/{{ source.id }}" hx-target="#split-library-sources">
+      <div class="form-row">
+        <div><label>Name <input type="text" name="name" value="{{ source.name }}" maxlength="200"></label></div>
+        <div><label>Branch or tag <input type="text" name="ref" value="{{ source.ref }}" maxlength="200"></label></div>
+        <div><label>Folder in repo <input type="text" name="path" value="{{ source.path }}" maxlength="500"></label></div>
+      </div>
+      <label>New access token <span class="muted">(leave blank to keep {{ "the current one" if source.token else "none" }})</span>
+        <input type="password" name="token" autocomplete="off" maxlength="1000"></label>
+      {% if source.token %}
+      <label class="checkbox-label"><input type="checkbox" name="clear_token" value="true"> Remove the access token</label>
+      {% endif %}
+      <button type="submit">Save</button>
+    </form>
+  </details>
+  {% endif %}
+</div>
+{% else %}
+<div class="card"><p class="muted">No split repos yet.</p></div>
+{% endfor %}
+
+{% if can_add %}
+<div class="card">
+  <h2>Add a split repo</h2>
+  <p class="muted">A GitHub, GitLab, Gitea or Forgejo repo with split config files (.json) in a
+  folder, one subfolder per group. For a private repo, give a read-only access token; it's stored
+  on this server and never shown again.</p>
+  <form hx-post="/split-configs/library/sources" hx-target="#split-library-sources">
+    <label for="source-url">Repo URL</label>
+    <input type="url" id="source-url" name="url" value="{{ form.url }}" required maxlength="500"
+           placeholder="https://github.com/owner/repo">
+    <div class="form-row">
+      <div>
+        <label for="source-kind">Host</label>
+        <select id="source-kind" name="host_kind">
+          <option value="" {% if not form.host_kind %}selected{% endif %}>Work it out from the URL</option>
+          <option value="github" {% if form.host_kind == "github" %}selected{% endif %}>GitHub</option>
+          <option value="gitlab" {% if form.host_kind == "gitlab" %}selected{% endif %}>GitLab</option>
+          <option value="gitea" {% if form.host_kind == "gitea" %}selected{% endif %}>Gitea / Forgejo</option>
+        </select>
+      </div>
+      <div><label for="source-ref">Branch or tag</label>
+        <input type="text" id="source-ref" name="ref" value="{{ form.ref }}" maxlength="200"></div>
+      <div><label for="source-path">Folder in repo</label>
+        <input type="text" id="source-path" name="path" value="{{ form.path }}" maxlength="500"></div>
+    </div>
+    <div class="form-row">
+      <div><label for="source-name">Name <span class="muted">(optional)</span></label>
+        <input type="text" id="source-name" name="name" value="{{ form.name }}" maxlength="200"></div>
+      <div><label for="source-token">Access token <span class="muted">(private repos)</span></label>
+        <input type="password" id="source-token" name="token" autocomplete="off" maxlength="1000"></div>
+    </div>
+    <button type="submit" hx-disabled-elt="this">Add and sync</button>
+  </form>
+</div>
+{% endif %}

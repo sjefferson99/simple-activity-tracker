@@ -1,0 +1,26 @@
+{
+  "format": "sat-split-config",
+  "version": 1,
+  "uid": "e79b071d-e698-5ac1-9cb4-0d874236d70d",
+  "name": "C25K week 7 run 1",
+  "plan": {
+    "split_type": "time_min",
+    "split_value": 1,
+    "rolling_target_mps": null,
+    "custom_splits": [
+      [
+        300,
+        1.6666666666666667
+      ],
+      [
+        1500,
+        2.2222222222222223
+      ],
+      [
+        300,
+        1.6666666666666667
+      ]
+    ],
+    "targets_as": "pace"
+  }
+}

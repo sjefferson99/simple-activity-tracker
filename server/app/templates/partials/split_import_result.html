@@ -1,0 +1,18 @@
+{% if error %}
+<div class="error-banner">{{ error }}</div>
+{% else %}
+<div class="warning-banner">
+  Imported: {{ outcome.created }} new, {{ outcome.updated }} replaced.
+  <a href="/split-configs">See your splits</a>
+  {% if outcome.renamed %}
+  <ul class="library-warnings">
+    {% for line in outcome.renamed %}<li>Renamed because the name was taken: {{ line }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% if errors %}
+  <ul class="library-warnings">
+    {% for line in errors %}<li>Skipped {{ line }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</div>
+{% endif %}

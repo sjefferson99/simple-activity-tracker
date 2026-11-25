@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.models.best_effort import ActivityBestEffort
 from app.models.live import LivePoint, LiveSession
 from app.repositories.shares import SqlAlchemyShareRepository
+from app.split_library.library import delete_user_library
 
 
 def _delete_live_sessions(session: Session, condition: ColumnElement[bool]) -> None:
@@ -29,7 +30,9 @@ def delete_activity_dependents(session: Session, activity_id: str) -> None:
 
 
 def delete_user_dependents(session: Session, user_id: str) -> None:
-    """Grants the user made or received, and their remaining live sessions.
-    Call after their activities (and so delete_activity_dependents) are gone."""
+    """Grants the user made or received, their remaining live sessions, and
+    their split configs, repos and templates (issue #143). Call after their
+    activities (and so delete_activity_dependents) are gone."""
     SqlAlchemyShareRepository(session).delete_for_user(user_id)
     _delete_live_sessions(session, LiveSession.user_id == user_id)
+    delete_user_library(session, user_id)

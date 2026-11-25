@@ -86,6 +86,23 @@ class Settings(BaseSettings):
         "https://s3.amazonaws.com/elevation-tiles-prod/skadi/{lat_dir}/{name}.hgt.gz"
     )
 
+    # Split library (issue #143, docs/SPLIT-LIBRARY-PLAN.md). Every user is
+    # subscribed to this repo's split templates by default; empty turns the
+    # default subscription off. Fetched as an HTTPS archive (outbound HTTPS).
+    split_library_default_repo: str = "https://github.com/sjefferson99/simple-activity-tracker"
+    split_library_default_ref: str = "main"
+    split_library_default_path: str = "splits"
+    # Whether users may add their own split repos. The server fetches the
+    # URLs they give, so an admin may prefer only the default repo.
+    split_sources_allow_user_repos: bool = True
+    # Repos on private/loopback addresses (a LAN Gitea, say) are refused
+    # unless this is on: otherwise a user could make the server fetch from
+    # inside its own network.
+    split_sources_allow_private_hosts: bool = False
+    # A source older than this is re-synced in the background when its
+    # owner lists their configs.
+    split_sources_sync_hours: int = Field(default=24, ge=1)
+
     @field_validator("secret_key")
     @classmethod
     def _validate_secret_key(cls, value: str) -> str:

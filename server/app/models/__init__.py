@@ -6,6 +6,7 @@ from app.models.device_token import DeviceToken
 from app.models.live import LivePoint, LiveSession
 from app.models.share import ActivityShare, UserShare
 from app.models.split_config import SplitConfig
+from app.models.split_source import SplitSource, SplitSourceFolder
 from app.models.tag import Tag, activity_tags
 from app.models.user import User
 from app.models.web_session import WebSession
@@ -21,6 +22,8 @@ __all__ = [
     "LivePoint",
     "LiveSession",
     "SplitConfig",
+    "SplitSource",
+    "SplitSourceFolder",
     "Tag",
     "User",
     "UserShare",

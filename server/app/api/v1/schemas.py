@@ -339,6 +339,11 @@ def expand_layout(
     return expanded
 
 
+class SplitConfigSourceRef(BaseModel):
+    id: str
+    name: str
+
+
 class SplitConfigOut(BaseModel):
     """A saved, named split plan (issue #126).
 
@@ -355,10 +360,26 @@ class SplitConfigOut(BaseModel):
     plan: SplitPlanIn
     created_at: datetime
     updated_at: datetime
+    # Split library (issue #143, API level 4). Absent from older servers, so
+    # apps read them as optional.
+    uid: str | None = None
+    # Own configs: the folder as typed. Templates: the folder's path in the
+    # repo ("" for the repo's top folder); show folder_name instead.
+    folder: str | None = None
+    folder_name: str | None = None
+    read_only: bool = False
+    source: SplitConfigSourceRef | None = None
 
 
 class SplitConfigListResponse(BaseModel):
     configs: list[SplitConfigOut]
+
+
+def _clean_folder_field(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = " ".join(value.split())
+    return stripped or None
 
 
 class SplitConfigCreateRequest(BaseModel):
@@ -370,6 +391,9 @@ class SplitConfigCreateRequest(BaseModel):
     # overwrite it in place (same id, bumped updated_at) instead of
     # rejecting with 409 — see docs/SPLIT-CONFIGS-PLAN.md §3.
     overwrite: bool = False
+    # Issue #143 (API level 4): the folder to file it in; blank = none. When
+    # overwriting, an omitted folder keeps the existing one.
+    folder: str | None = Field(default=None, max_length=SPLIT_CONFIG_NAME_MAX_LENGTH)
 
     @field_validator("name")
     @classmethod
@@ -379,12 +403,19 @@ class SplitConfigCreateRequest(BaseModel):
             raise ValueError("name must not be blank")
         return stripped
 
+    @field_validator("folder")
+    @classmethod
+    def _folder(cls, value: str | None) -> str | None:
+        return _clean_folder_field(value)
+
 
 class SplitConfigPatchRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     name: str | None = Field(default=None, min_length=1, max_length=SPLIT_CONFIG_NAME_MAX_LENGTH)
     plan: SplitPlanIn | None = None
+    # Issue #143 (API level 4): omitted = unchanged, "" = no folder.
+    folder: str | None = Field(default=None, max_length=SPLIT_CONFIG_NAME_MAX_LENGTH)
 
     @field_validator("name")
     @classmethod
@@ -395,6 +426,91 @@ class SplitConfigPatchRequest(BaseModel):
         if not stripped:
             raise ValueError("name must not be blank")
         return stripped
+
+
+class SplitConfigImportResponse(BaseModel):
+    """Result of importing a split config file (issue #143)."""
+
+    created: int
+    updated: int
+    # "Old name → new name" for each config renamed because its name was taken.
+    renamed: list[str]
+    # One message per entry that couldn't be imported.
+    errors: list[str]
+
+
+class SplitSourceFolderOut(BaseModel):
+    id: str
+    folder: str
+    name: str
+    description: str | None
+    enabled: bool
+    template_count: int
+
+
+class SplitSourceOut(BaseModel):
+    """A split template repo the user subscribes to (issue #143). The access
+    token is never returned, only whether one is set."""
+
+    id: str
+    name: str
+    url: str
+    host_kind: Literal["github", "gitlab", "gitea"]
+    ref: str
+    path: str
+    enabled: bool
+    is_default: bool
+    has_token: bool
+    last_synced_at: datetime | None
+    last_commit: str | None
+    last_error: str | None
+    warnings: list[str]
+    folders: list[SplitSourceFolderOut]
+
+
+class SplitSourceListResponse(BaseModel):
+    sources: list[SplitSourceOut]
+    # Whether this server lets users add their own repos.
+    can_add: bool
+
+
+class SplitSourceCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    url: str = Field(min_length=1, max_length=500)
+    # Omitted: github.com/gitlab.com by name, anything else Gitea/Forgejo.
+    host_kind: Literal["github", "gitlab", "gitea"] | None = None
+    ref: str = Field(default="main", max_length=200)
+    path: str = Field(default="splits", max_length=500)
+    name: str | None = Field(default=None, max_length=SPLIT_CONFIG_NAME_MAX_LENGTH)
+    token: str | None = Field(default=None, max_length=1000)
+
+
+class SplitSourcePatchRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    name: str | None = Field(default=None, max_length=SPLIT_CONFIG_NAME_MAX_LENGTH)
+    ref: str | None = Field(default=None, max_length=200)
+    path: str | None = Field(default=None, max_length=500)
+    # A new token replaces the stored one; clear_token removes it.
+    token: str | None = Field(default=None, max_length=1000)
+    clear_token: bool = False
+    enabled: bool | None = None
+
+
+class SplitSourceFolderPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool
+
+
+class SplitSourceSyncResponse(BaseModel):
+    ok: bool
+    added: int
+    updated: int
+    removed: int
+    error: str | None
+    source: SplitSourceOut
 
 
 class ActivityOut(BaseModel):

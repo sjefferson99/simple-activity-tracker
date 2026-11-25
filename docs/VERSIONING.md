@@ -58,6 +58,7 @@ in, but it always knows whether it changed the API.
 | 1 | from #141 | Everything v1.2.4 accepts, plus `/server-info`. **Unknown request fields are ignored, not rejected** |
 | 2 | from #130 | Live tracking and sharing: `PUT/DELETE /live/{client_activity_id}`, `POST /live/{client_activity_id}/points`, `GET /users`, `GET /me/shares`, `PUT /me/live-sharing`. Upload payload unchanged ([LIVE-TRACKING-PLAN.md](LIVE-TRACKING-PLAN.md) §2.3) |
 | 3 | from #233 | Split config plans take and return an optional `layout` (repeat blocks, e.g. `[{"split": [400, 4.2]}, {"repeat": 5, "splits": [[180, 2.78], [120, 1.94]]}]`). It must expand to exactly `custom_splits`, which stays the list that runs. Upload payload unchanged |
+| 4 | from #143 | Split library ([SPLIT-LIBRARY-PLAN.md](SPLIT-LIBRARY-PLAN.md)): split configs gain optional `uid`, `folder`, `folder_name`, `read_only` and `source`, and create/patch take an optional `folder`. `GET /split-configs` also lists read-only templates from the user's split repos (enabled folders only), which PATCH/DELETE refuse with 403. New: `GET /split-configs/export`, `POST /split-configs/import`, and `/split-sources` (list, add, edit, remove, sync, folder on/off). Upload payload unchanged |
 
 Add a row here whenever `API_LEVEL` goes up.
 

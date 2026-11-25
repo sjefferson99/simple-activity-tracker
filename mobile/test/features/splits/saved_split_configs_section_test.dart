@@ -239,7 +239,7 @@ void main() {
       await tester.enterText(
         find.descendant(
           of: find.byType(AlertDialog),
-          matching: find.byType(TextField),
+          matching: find.widgetWithText(TextField, 'Name'),
         ),
         'Copy',
       );
@@ -331,7 +331,7 @@ void main() {
     await tester.enterText(
       find.descendant(
         of: find.byType(AlertDialog),
-        matching: find.byType(TextField),
+        matching: find.widgetWithText(TextField, 'Name'),
       ),
       'My plan',
     );
@@ -378,7 +378,7 @@ void main() {
       await tester.enterText(
         find.descendant(
           of: find.byType(AlertDialog),
-          matching: find.byType(TextField),
+          matching: find.widgetWithText(TextField, 'Name'),
         ),
         'My plan',
       );
@@ -415,7 +415,7 @@ void main() {
     await tester.enterText(
       find.descendant(
         of: find.byType(AlertDialog),
-        matching: find.byType(TextField),
+        matching: find.widgetWithText(TextField, 'Name'),
       ),
       'My plan',
     );

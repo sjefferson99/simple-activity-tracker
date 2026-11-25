@@ -65,3 +65,8 @@ account_action_rate_limiter = InMemoryRateLimiter(max_events=5, window_seconds=6
 # mid-run takes up to LIVE_POINTS_MAX_PER_SESSION / LIVE_POINTS_MAX_PER_REQUEST
 # (100) requests, so this is roomy for that and still stops a runaway client.
 live_upload_rate_limiter = InMemoryRateLimiter(max_events=120, window_seconds=60)
+
+# Split library fetches (issue #143): adding a repo or "Sync now" makes the
+# server download an archive from another host, so keep a runaway client from
+# turning it into a download loop. Keyed by user.
+split_fetch_rate_limiter = InMemoryRateLimiter(max_events=10, window_seconds=60)
