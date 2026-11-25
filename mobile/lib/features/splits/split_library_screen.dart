@@ -82,74 +82,78 @@ class _SplitLibraryScreenState extends ConsumerState<SplitLibraryScreen> {
     final sources = ref.watch(_splitSourcesProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('Split library')),
-      body: RefreshIndicator(
-        onRefresh: () {
-          ref.invalidate(_splitSourcesProvider);
-          return ref.read(_splitSourcesProvider.future);
-        },
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            if (_busy) const LinearProgressIndicator(),
-            Text(
-              'Templates come from git repos. Switch a folder on to see its splits when '
-              'you load a saved config, or off to hide it. Templates update from their '
-              "repo about once a day and can't be edited.",
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 12),
-            ...sources.when(
-              loading: () => const [
-                Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Center(child: CircularProgressIndicator()),
-                ),
-              ],
-              error: (error, _) => [
-                Text('Could not load split repos: ${_describe(error)}'),
-                TextButton(
-                  onPressed: () => ref.invalidate(_splitSourcesProvider),
-                  child: const Text('Retry'),
-                ),
-              ],
-              data: (list) => [
-                if (list.sources.isEmpty) const Text('No split repos yet.'),
-                for (final source in list.sources) _sourceCard(context, source),
-                if (list.canAdd)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: OutlinedButton.icon(
-                      onPressed: _busy ? null : () => _addRepo(context),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add a split repo'),
-                    ),
+      // SafeArea like the other screens, so the last buttons (import and
+      // export) aren't hidden behind the system navigation bar.
+      body: SafeArea(
+        child: RefreshIndicator(
+          onRefresh: () {
+            ref.invalidate(_splitSourcesProvider);
+            return ref.read(_splitSourcesProvider.future);
+          },
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              if (_busy) const LinearProgressIndicator(),
+              Text(
+                'Templates come from git repos. Switch a folder on to see its splits when '
+                'you load a saved config, or off to hide it. Templates update from their '
+                "repo about once a day and can't be edited.",
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 12),
+              ...sources.when(
+                loading: () => const [
+                  Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Center(child: CircularProgressIndicator()),
                   ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            Text('Import and export', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 4),
-            const Text(
-              'Export your own split configs to back them up, move them to another server or '
-              'share them. Importing a file adds its configs to yours.',
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _export(context),
-                  icon: const Icon(Icons.upload_file),
-                  label: const Text('Export my configs'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _import(context),
-                  icon: const Icon(Icons.file_open_outlined),
-                  label: const Text('Import a file'),
-                ),
-              ],
-            ),
-          ],
+                ],
+                error: (error, _) => [
+                  Text('Could not load split repos: ${_describe(error)}'),
+                  TextButton(
+                    onPressed: () => ref.invalidate(_splitSourcesProvider),
+                    child: const Text('Retry'),
+                  ),
+                ],
+                data: (list) => [
+                  if (list.sources.isEmpty) const Text('No split repos yet.'),
+                  for (final source in list.sources) _sourceCard(context, source),
+                  if (list.canAdd)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: _busy ? null : () => _addRepo(context),
+                        icon: const Icon(Icons.add),
+                        label: const Text('Add a split repo'),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Text('Import and export', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 4),
+              const Text(
+                'Export your own split configs to back them up, move them to another server or '
+                'share them. Importing a file adds its configs to yours.',
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : () => _export(context),
+                    icon: const Icon(Icons.upload_file),
+                    label: const Text('Export my configs'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : () => _import(context),
+                    icon: const Icon(Icons.file_open_outlined),
+                    label: const Text('Import a file'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
